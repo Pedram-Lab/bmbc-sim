@@ -1,0 +1,14 @@
+name: ngsolve
+channels:
+  - conda-forge
+dependencies:
+  - python ==3.10
+  - numpy
+  - scipy
+  - matplotlib
+  - tqdm
+  - jupyter
+  - pip
+  - pip:
+    - ngsolve
+    - webgui_jupyter_widgets
