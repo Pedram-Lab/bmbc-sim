@@ -2,6 +2,7 @@
 results/
 notebooks/
 *.ipynb
+*.vol
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
