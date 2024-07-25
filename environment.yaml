@@ -8,6 +8,7 @@ dependencies:
   - matplotlib
   - tqdm
   - jupyter
+  - jupytext
   - pip
   - pip:
     - ngsolve
