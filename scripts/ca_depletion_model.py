@@ -17,7 +17,7 @@ from ngsolve import *
 from ngsolve.webgui import Draw
 from netgen.csg import *
 
-from ecsim.geometry import create_axis_aligned_plane
+from ecsim.geometry import create_axis_aligned_plane, create_axis_aligned_cylinder
 
 
 # %%
@@ -29,15 +29,24 @@ def create_geometry(*, side_length, cytosol_height, ecs_height):
     front = create_axis_aligned_plane(1, -side_length / 2, -1)
     back = create_axis_aligned_plane(1, side_length / 2, 1)
 
-    cytosol_bot = create_axis_aligned_plane(2, 0, -1)
-    cytosol_top = create_axis_aligned_plane(2, cytosol_height, 1)
-    cytosol = left * right * front * back * cytosol_bot * cytosol_top
+    cutout = create_axis_aligned_cylinder(2, 0, 0, 0.1) \
+             * create_axis_aligned_plane(2, cytosol_height + ecs_height / 2, 1) \
+             * create_axis_aligned_plane(2, cytosol_height - ecs_height / 2, -1)
+    cutout.maxh(0.1)
 
-    ecs_bot = create_axis_aligned_plane(2, cytosol_height, -1)
-    ecs_top = create_axis_aligned_plane(2, cytosol_height + ecs_height, 1, "fixed")
+    cytosol_bot = create_axis_aligned_plane(2, 0, -1)
+    cytosol_top = create_axis_aligned_plane(2, cytosol_height, 1, "membrane")
+    cytosol = left * right * front * back * cytosol_bot * cytosol_top
+    cytosol.maxh(0.25)
+
+    ecs_bot = create_axis_aligned_plane(2, cytosol_height, -1, "membrane")
+    ecs_top = create_axis_aligned_plane(2, cytosol_height + ecs_height, 1, "ecs_top")
     ecs = left * right * front * back * ecs_bot * ecs_top
 
-    geometry.Add(cytosol + ecs)
+    geometry.Add(cytosol - cutout)
+    geometry.Add(cytosol * cutout)
+    geometry.Add(ecs - cutout)
+    geometry.Add(ecs * cutout)
     return geometry
 
 
@@ -51,4 +60,26 @@ mesh = Mesh(ngmesh)
 Draw(mesh)
 
 # %%
-print("Bnd = ", mesh.GetBoundaries())
+fes = H1(mesh, order=2, dirichlet="ecs_top")
+u = fes.TrialFunction()
+v = fes.TestFunction()
+
+f = LinearForm(fes)
+f += 0 * v * dx
+
+a = BilinearForm(fes)
+a += grad(u) * grad(v) * dx
+
+a.Assemble()
+f.Assemble()
+
+# %%
+concentration = GridFunction(fes)
+concentration.Set(15, definedon=mesh.Boundaries("ecs_top"))
+res = f.vec.CreateVector()
+res.data = f.vec - a.mat * concentration.vec
+concentration.vec.data += a.mat.Inverse(fes.FreeDofs()) * res
+Draw(concentration)
+
+
+# %%
