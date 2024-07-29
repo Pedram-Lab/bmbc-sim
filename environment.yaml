@@ -1,4 +1,4 @@
-name: ngsolve
+name: ecsim
 channels:
   - conda-forge
 dependencies:
