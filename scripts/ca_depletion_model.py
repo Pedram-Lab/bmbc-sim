@@ -19,10 +19,10 @@ from ngsolve.webgui import Draw
 from ecsim.geometry import create_ca_depletion_mesh
 
 # %%
-mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25)
+mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
 
 # %%
-Draw(mesh, clipping={"pnt": (0.5, 0.5, 0.5), "vec": (0, 1, 0)})
+Draw(mesh, clipping={"pnt": (0, 0, 1), "vec": (0, 1, 0)})
 
 # %%
 fes = H1(mesh, order=2, dirichlet="ecs_top")

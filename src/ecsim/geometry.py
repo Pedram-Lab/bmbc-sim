@@ -30,9 +30,10 @@ def _convert_to_volume_mesh(surface_mesh, bnd_to_fd):
     return new_mesh
 
 
-def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, mesh_size):
-    cytosol = Box(Pnt(0, 0, 0), Pnt(1, 1, 1))
-    ecs = Box(Pnt(0, 0, 1), Pnt(1, 1, 1.2))
+def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, channel_radius, mesh_size):
+    s = side_length / 2
+    cytosol = Box(Pnt(-s, -s, 0), Pnt(s, s, cytosol_height))
+    ecs = Box(Pnt(-s, -s, cytosol_height), Pnt(s, s, cytosol_height + ecs_height))
     left, right, front, back, bottom, top = (0, 1, 2, 3, 4, 5)
 
     # Assign boundary conditions
@@ -43,8 +44,8 @@ def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, mesh_si
     ecs.faces[top].bc("ecs_top")
 
     # Cut a hole into the ecs-cytosol interface
-    channel = Face(Wire(Circle(Pnt(0.5, 0.5, 1), Z, 0.1)))
-    channel.maxh = 0.03
+    channel = Face(Wire(Circle(Pnt(0, 0, cytosol_height), Z, channel_radius)))
+    channel.maxh = mesh_size / 2
     channel.bc("channel")
     channel.col = (1, 0, 0)
     membrane = (cytosol.faces[top] - channel).bc("membrane")
@@ -56,7 +57,7 @@ def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, mesh_si
                + [ecs.faces[f] for f in [front, back, left, right]])
 
     # Generate a mesh on the surface and convert it to a volume mesh
-    surface_mesh = OCCGeometry(geo).GenerateMesh()
+    surface_mesh = OCCGeometry(geo).GenerateMesh(maxh=mesh_size)
     bnd_to_fd = {
         "channel": FaceDescriptor(surfnr=1, domin=2, domout=1, bc=1),
         "membrane": FaceDescriptor(surfnr=2, domin=2, domout=1, bc=2),
