@@ -19,32 +19,46 @@ from ngsolve.webgui import Draw
 from ecsim.geometry import create_ca_depletion_mesh
 
 # %%
+# Create meshed geometry
 mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
+print(mesh.GetBoundaries())
 
 # %%
-Draw(mesh, clipping={"pnt": (0, 0, 1), "vec": (0, 1, 0)})
+clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -60}]}}
+Draw(mesh, clipping=clipping, settings=settings)
 
 # %%
-fes = H1(mesh, order=2, dirichlet="ecs_top")
-u = fes.TrialFunction()
-v = fes.TestFunction()
+# Define and assemble the FE-problem
+# We set the cytosol boundary to zero for visualization purposes
+ecs_fes = H1(mesh, order=2, definedon=mesh.Materials("ecs"), dirichlet="ecs_top")
+cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"), dirichlet="boundary")
+fes = FESpace([ecs_fes, cytosol_fes])
+u_ecs, u_cyt = fes.TrialFunction()
+v_ecs, v_cyt = fes.TestFunction()
 
 f = LinearForm(fes)
-f += 0 * v * dx
-f += 1 * v.Trace() * ds(definedon="channel")
 
 a = BilinearForm(fes)
-a += grad(u) * grad(v) * dx
+a += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
+a += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
+a += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
 
 a.Assemble()
 f.Assemble()
 
 # %%
+# Set concentration at top to 15 and solve the system
 concentration = GridFunction(fes)
-concentration.Set(15, definedon=mesh.Boundaries("ecs_top"))
+concentration.components[0].Set(15, definedon=mesh.Boundaries("ecs_top"))
 res = f.vec.CreateVector()
 res.data = f.vec - a.mat * concentration.vec
 concentration.vec.data += a.mat.Inverse(fes.FreeDofs()) * res
-Draw(concentration, clipping={"function": True,  "pnt": (0.5, 0.5, 0.5), "vec": (0, 1, 0)})
+
+# %%
+# Visualize (the colormap is quite extreme for dramatic effect)
+visualization = mesh.MaterialCF({"ecs": concentration.components[0], "cytosol": concentration.components[1]})
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 256, "autoscale": False, "max": 3}}
+Draw(visualization, mesh, clipping=clipping, settings=settings)
 
 # %%

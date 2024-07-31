@@ -16,7 +16,6 @@ def _convert_to_volume_mesh(surface_mesh, bnd_to_fd):
 
     # Arrange face descriptors for the new mesh
     boundaries = Mesh(surface_mesh).GetBoundaries()
-    print(boundaries)
     bnd_to_fd_index = {bnd: new_mesh.Add(fd) for bnd, fd in bnd_to_fd.items()}
     face_descriptor_indices = [bnd_to_fd_index[bnd] for bnd in boundaries]
 
@@ -47,7 +46,6 @@ def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, channel
     channel = Face(Wire(Circle(Pnt(0, 0, cytosol_height), Z, channel_radius)))
     channel.maxh = mesh_size / 2
     channel.bc("channel")
-    channel.col = (1, 0, 0)
     membrane = (cytosol.faces[top] - channel).bc("membrane")
     interface = Glue([membrane, channel])  # if fused, channel vanishes
 
