@@ -22,7 +22,7 @@ from ecsim.geometry import create_ca_depletion_mesh
 mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25)
 
 # %%
-Draw(mesh)
+Draw(mesh, clipping={"pnt": (0.5, 0.5, 0.5), "vec": (0, 1, 0)})
 
 # %%
 fes = H1(mesh, order=2, dirichlet="ecs_top")
@@ -45,6 +45,6 @@ concentration.Set(15, definedon=mesh.Boundaries("ecs_top"))
 res = f.vec.CreateVector()
 res.data = f.vec - a.mat * concentration.vec
 concentration.vec.data += a.mat.Inverse(fes.FreeDofs()) * res
-Draw(concentration)
+Draw(concentration, clipping={"function": True,  "pnt": (0.5, 0.5, 0.5), "vec": (0, 1, 0)})
 
 # %%
