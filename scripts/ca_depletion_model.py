@@ -12,80 +12,57 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# This script takes the `geometry from scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top:
+# * Ca can diffuse from the ECS to the cytosol through the channel.
+
 # %%
 from ngsolve import *
 from ngsolve.webgui import Draw
-from netgen.csg import *
 
-from ecsim.geometry import create_axis_aligned_plane, create_axis_aligned_cylinder
-
+from ecsim.geometry import create_ca_depletion_mesh
 
 # %%
-def create_geometry(*, side_length, cytosol_height, ecs_height, mesh_size):
-    geometry = CSGeometry()
-
-    left = create_axis_aligned_plane(0, -side_length / 2, -1)
-    right = create_axis_aligned_plane(0, side_length / 2, 1)
-    front = create_axis_aligned_plane(1, -side_length / 2, -1)
-    back = create_axis_aligned_plane(1, side_length / 2, 1)
-
-    cytosol_cutout = create_axis_aligned_cylinder(2, 0, 0, 0.1) \
-             * create_axis_aligned_plane(2, cytosol_height, 1, "channel") \
-             * create_axis_aligned_plane(2, cytosol_height - ecs_height / 2, -1)
-    cytosol_cutout.maxh(mesh_size / 2)
-
-    cytosol_bot = create_axis_aligned_plane(2, 0, -1)
-    cytosol_top = create_axis_aligned_plane(2, cytosol_height, 1, "membrane")
-    cytosol = left * right * front * back * cytosol_bot * cytosol_top
-    cytosol.maxh(mesh_size)
-
-    ecs_cutout = create_axis_aligned_cylinder(2, 0, 0, 0.1) \
-             * create_axis_aligned_plane(2, cytosol_height + ecs_height / 2, 1) \
-             * create_axis_aligned_plane(2, cytosol_height, -1, "channel")
-    ecs_cutout.maxh(mesh_size / 2)
-    
-    ecs_bot = create_axis_aligned_plane(2, cytosol_height, -1, "membrane")
-    ecs_top = create_axis_aligned_plane(2, cytosol_height + ecs_height, 1, "ecs_top")
-    ecs = left * right * front * back * ecs_bot * ecs_top
-    ecs.maxh(mesh_size)
-
-    geometry.Add(cytosol - cytosol_cutout)
-    geometry.Add(cytosol * cytosol_cutout)
-    geometry.Add(ecs - ecs_cutout)
-    geometry.Add(ecs * ecs_cutout)
-    return geometry
-
+# Create meshed geometry
+mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
+print(mesh.GetBoundaries())
 
 # %%
-ngmesh = create_geometry(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25).GenerateMesh()
+clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -60}]}}
+Draw(mesh, clipping=clipping, settings=settings)
 
 # %%
-mesh = Mesh(ngmesh)
-
-# %%
-Draw(mesh)
-
-# %%
-fes = H1(mesh, order=2, dirichlet="ecs_top")
-u = fes.TrialFunction()
-v = fes.TestFunction()
+# Define and assemble the FE-problem
+# We set the cytosol boundary to zero for visualization purposes
+ecs_fes = H1(mesh, order=2, definedon=mesh.Materials("ecs"), dirichlet="ecs_top")
+cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"), dirichlet="boundary")
+fes = FESpace([ecs_fes, cytosol_fes])
+u_ecs, u_cyt = fes.TrialFunction()
+v_ecs, v_cyt = fes.TestFunction()
 
 f = LinearForm(fes)
-f += 0 * v * dx
-f += 1 * v.Trace() * ds(definedon="membrane")
 
 a = BilinearForm(fes)
-a += grad(u) * grad(v) * dx
+a += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
+a += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
+a += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
 
 a.Assemble()
 f.Assemble()
 
 # %%
+# Set concentration at top to 15 and solve the system
 concentration = GridFunction(fes)
-concentration.Set(15, definedon=mesh.Boundaries("ecs_top"))
+concentration.components[0].Set(15, definedon=mesh.Boundaries("ecs_top"))
 res = f.vec.CreateVector()
 res.data = f.vec - a.mat * concentration.vec
 concentration.vec.data += a.mat.Inverse(fes.FreeDofs()) * res
-Draw(concentration)
+
+# %%
+# Visualize (the colormap is quite extreme for dramatic effect)
+visualization = mesh.MaterialCF({"ecs": concentration.components[0], "cytosol": concentration.components[1]})
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 256, "autoscale": False, "max": 3}}
+Draw(visualization, mesh, clipping=clipping, settings=settings)
 
 # %%
