@@ -1,6 +1,7 @@
 # Project-specific ignores
 results/
 notebooks/
+scratch/
 *.ipynb
 *.vol
 
