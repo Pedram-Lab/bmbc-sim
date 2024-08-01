@@ -12,6 +12,10 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# This script takes the `geometry from scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top:
+# * Ca can diffuse from the ECS to the cytosol through the channel.
+
 # %%
 from ngsolve import *
 from ngsolve.webgui import Draw

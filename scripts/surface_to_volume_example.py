@@ -12,6 +12,11 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# This is a short example showcasing how to obtain a volume mesh from a surface mesh. It is easy to manipulate surface meshes with NGSolve's OCC module, but converting them to volume meshes is not straightforward: The surfaces don't know that they are supposed to border any solid material.
+#
+# This information has to be given to the surfaces by `FaceDescriptor`s (which are part of `Element2D`, so that has to happen after meshing the surfaces. For information about how to convert surface meshes to volume meshes using `FaceDescriptor`s, see [this](https://docu.ngsolve.org/latest/i-tutorials/unit-4.3-manualmesh/manualmeshing.html#Merge-three-dimensional-meshes) and [this](https://docu.ngsolve.org/latest/i-tutorials/unit-4.3-manualmesh/manualmeshing.html#Merge-three-dimensional-meshes) part of NGSolve's documentation.
+
 # %%
 from ngsolve import *
 from netgen.occ import *

@@ -12,6 +12,14 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# This example shows how to use the knowledge obtained in [`surface_to_volume_example.py`](/scripts/surface_to_volume_example.py) to make a prototypical channel geometry, which consists of:
+# * A cytosolic part on the bottom,
+# * A small extracellular space on the top,
+# * An interface separating those two and containing a region that models an ion channel.
+#
+# The interesting part is that the channel region is not a volume but only a region on the surface that represents the interface.
+
 # %%
 from ngsolve import *
 from netgen.occ import *
