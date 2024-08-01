@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.3
+#       jupytext_version: 1.16.4
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -21,6 +21,27 @@ from ngsolve import *
 from ngsolve.webgui import Draw
 
 from ecsim.geometry import create_ca_depletion_mesh
+from astropy import units as u
+
+# %%
+ca_ext = 15 * u.millimole
+ca_cyt = 0.0001 * u.millimole
+egta_1 = 4.5 * u.millimole
+egta_2 = 40 * u.millimole
+bapta = 1 * u.millimole
+diff_ca_ext = 600 * u.um**2 / u.s
+diff_ca_cyt = 220 * u.um**2 / u.s
+diff_free_egta = 113 * u.um**2 / u.s
+diff_bound_egta = 113 * u.um**2 / u.s
+diff_free_bapta = 95 * u.um**2 / u.s
+diff_bound_bapta = 113 * u.um**2 / u.s
+k_f_egta = 2.7 * u.micromole / u.s
+k_r_egta = 0.5 / u.s
+k_f_bapta = 450 * u.micromole / u.s
+k_r_bapta = 80 / u.s
+diameter_ch = 10 * u.nm
+density_channel = 10000 / u.um**2
+i_max = 0.1 * u.picoampere
 
 # %%
 # Create meshed geometry
