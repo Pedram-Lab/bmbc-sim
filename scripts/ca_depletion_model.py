@@ -18,6 +18,7 @@
 # %%
 from ngsolve import *
 from ngsolve.webgui import Draw
+from tqdm import trange
 
 from ecsim.geometry import create_ca_depletion_mesh
 from astropy import units as u
@@ -85,3 +86,46 @@ concentration.vec.data += a.mat.Inverse(fes.FreeDofs()) * res
 visualization = mesh.MaterialCF({"ecs": concentration.components[0], "cytosol": concentration.components[1]})
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 256, "autoscale": False, "max": 3}}
 Draw(visualization, mesh, clipping=clipping, settings=settings)
+
+# %%
+# Time stepping - set up system matrix
+m = BilinearForm(fes)
+m += u_ecs * v_ecs * dx("ecs")
+m += u_cyt * v_cyt * dx("cytosol")
+m.Assemble()
+
+dt = 0.001
+mstar = m.mat.CreateMatrix()
+mstar.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
+mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
+
+
+# %%
+# Time stepping - define a function that pre-computes all timesteps
+def time_stepping(u, t_end, n_samples):
+    n_steps = int(ceil(t_end / dt))
+    sample_int = int(ceil(n_steps / n_samples))
+    u_t = GridFunction(u.space, multidim=0)
+    u_t.AddMultiDimComponent(u.vec)
+    
+    for i in trange(n_steps):
+        res = dt * (f.vec - a.mat * u.vec)
+        u.vec.data += mstar_inv * res
+        if i % sample_int == 0:
+            u_t.AddMultiDimComponent(u.vec)
+    return u_t
+
+
+# %%
+# Time stepping - set initial conditions and do time stepping
+concentration = GridFunction(fes)
+concentration.components[0].Set(15, definedon=mesh.Boundaries("ecs_top"))
+c_t = time_stepping(concentration, t_end=1, n_samples=100)
+
+# %%
+# Visualize (because of the product structure of the FESpace, the usual visualization of time-dependent functions via multidim
+visualization = mesh.MaterialCF({"ecs": c_t.components[0], "cytosol": c_t.components[1]})
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
+Draw(c_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+
+# %%
