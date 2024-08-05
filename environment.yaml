@@ -9,6 +9,7 @@ dependencies:
   - tqdm
   - jupyter
   - jupytext
+  - astropy
   - pip
   - pip:
     - ngsolve
