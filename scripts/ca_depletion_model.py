@@ -17,7 +17,7 @@
 #
 # # Astropy
 #
-# Astropy is a Python library specifically designed for astronomy and astrophysics. It provides a wide range of tools and features to facilitate the processing and analysis of astronomical data. Astropy has a robust system for handling **physical units and quatities**, allowing for easy unit conversions and ensuring that calculation involving physical dimension are consistent and correct. Given its capabilities, we have incorporated Astropy into our project focused on the modeling of the extracellular matrix. Consequently, Astropy has been included in the environment.yaml file.
+# Astropy is a Python library specifically designed for astronomy and astrophysics. It provides a wide range of tools and features to facilitate the processing and analysis of astronomical data. Astropy has a robust system for handling **physical units and quatities**, allowing for easy unit conversions and ensuring that calculation involving physical dimension are consistent and correct. Thus, the `astropy.units` module brings great value to our project focused on the modeling of the extracellular matrix.
 #
 #
 # ## Constants 
