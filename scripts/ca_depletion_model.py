@@ -62,7 +62,7 @@
 # F_millimol = F_femtomol.to(u.C / u.millimole)
 # ```
 #
-# This will automatically handle the ($10^{-15}$) conversion factor inherent in the "femto-" prefix.
+# This will automatically handle the conversion factor inherent in the "femto-" prefix ($10^{-15}$).
 #
 #
 # ## Calculations 
