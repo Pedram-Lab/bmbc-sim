@@ -58,7 +58,7 @@ cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"))
 fes = FESpace([ecs_fes, cytosol_fes])
 u_ecs, u_cyt = fes.TrialFunction()
 v_ecs, v_cyt = fes.TestFunction()
-u1_cyt, v1_cyt = fes.TnT()
+u1_cyt, v1_cyt = cytosol_fes.TnT()
 
 calcium = GridFunction(fes)
 buffer = GridFunction(cytosol_fes)
@@ -73,11 +73,15 @@ a_buffer = BilinearForm(cytosol_fes)
 a_buffer += grad(u1_cyt) * grad(v1_cyt) * dx
 
 f_ca = LinearForm(fes)
-f_ca += -buffer * calcium * v_cyt * dx("cytosol")
+f_ca += -buffer * calcium.components[1] * v_cyt * dx("cytosol")
 f_ca += complex * v_cyt * dx("cytosol")
 
+f_buf = LinearForm(cytosol_fes)
+f_buf += -buffer * calcium.components[1] * v1_cyt * dx
+f_buf += complex * v1_cyt * dx
+
 f_com = LinearForm(cytosol_fes)
-f_com += buffer * calcium * v1_cyt * dx
+f_com += buffer * calcium.components[1] * v1_cyt * dx
 f_com += -complex * v1_cyt * dx
 
 a_ca.Assemble()
@@ -96,7 +100,7 @@ mstar_ca.AsVector().data = m_ca.mat.AsVector() + dt * a_ca.mat.AsVector()
 mstar_ca_inv = mstar_ca.Inverse(freedofs=fes.FreeDofs())
 
 m_buffer = BilinearForm(cytosol_fes)
-m_buffer += u_cyt * v_cyt * dx("cytosol")
+m_buffer += u1_cyt * v1_cyt * dx
 m_buffer.Assemble()
 
 mstar_buffer = m_buffer.mat.CreateMatrix()
@@ -119,9 +123,10 @@ def time_stepping(u_ca, u_buf, t_end, n_samples):
     
     for i in trange(n_steps):
         f_ca.Assemble()
+        f_buf.Assemble()
         f_com.Assemble()
         res_ca = dt * (f_ca.vec - a_ca.mat * u_ca.vec)
-        res_buf = dt * (f_ca.vec - a_buffer.mat * u_buf.vec)
+        res_buf = dt * (f_buf.vec - a_buffer.mat * u_buf.vec)
         res_com = dt * (f_com.vec - a_buffer.mat * u_com.vec)
         u_ca.vec.data += mstar_ca_inv * res_ca
         u_buf.vec.data += mstar_buffer_inv * res_buf
@@ -135,14 +140,19 @@ def time_stepping(u_ca, u_buf, t_end, n_samples):
 
 # %%
 # Time stepping - set initial conditions and do time stepping
-calcium.components[0].Set(15)
-ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, t_end=1, n_samples=100)
+with TaskManager():
+    calcium.components[0].Set(15)
+    buffer.Set(1)
+    ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, t_end=1, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
 # visualization of time-dependent functions via multidim is not possible)
 visualization = mesh.MaterialCF({"ecs": ca_t.components[0], "cytosol": ca_t.components[1]})
+clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
-Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+# Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+# Draw(buffer_t, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+Draw(complex_t, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
