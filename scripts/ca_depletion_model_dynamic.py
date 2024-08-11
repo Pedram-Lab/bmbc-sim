@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-# This script takes the `geometry from scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top (units are handled by astropy):
+# This script takes the geometry from `scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top (units are handled by astropy):
 # * Ca can diffuse from the ECS to the cytosol through the channel.
 #
 # The dynamics of the system are resolved in time.
@@ -58,57 +58,91 @@ cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"))
 fes = FESpace([ecs_fes, cytosol_fes])
 u_ecs, u_cyt = fes.TrialFunction()
 v_ecs, v_cyt = fes.TestFunction()
+u1_cyt, v1_cyt = fes.TnT()
 
-f = LinearForm(fes)
+calcium = GridFunction(fes)
+buffer = GridFunction(cytosol_fes)
+complex = GridFunction(cytosol_fes)
 
-a = BilinearForm(fes)
-a += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
-a += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
-a += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
+a_ca = BilinearForm(fes)
+a_ca += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
+a_ca += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
+a_ca += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
 
-a.Assemble()
-f.Assemble()
+a_buffer = BilinearForm(cytosol_fes)
+a_buffer += grad(u1_cyt) * grad(v1_cyt) * dx
+
+f_ca = LinearForm(fes)
+f_ca += -buffer * calcium * v_cyt * dx("cytosol")
+f_ca += complex * v_cyt * dx("cytosol")
+
+f_com = LinearForm(cytosol_fes)
+f_com += buffer * calcium * v1_cyt * dx
+f_com += -complex * v1_cyt * dx
+
+a_ca.Assemble()
+a_buffer.Assemble()
 
 # %%
 # Time stepping - set up system matrix
-m = BilinearForm(fes)
-m += u_ecs * v_ecs * dx("ecs")
-m += u_cyt * v_cyt * dx("cytosol")
-m.Assemble()
+m_ca = BilinearForm(fes)
+m_ca += u_ecs * v_ecs * dx("ecs")
+m_ca += u_cyt * v_cyt * dx("cytosol")
+m_ca.Assemble()
 
 dt = 0.001
-mstar = m.mat.CreateMatrix()
-mstar.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
-mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
+mstar_ca = m_ca.mat.CreateMatrix()
+mstar_ca.AsVector().data = m_ca.mat.AsVector() + dt * a_ca.mat.AsVector()
+mstar_ca_inv = mstar_ca.Inverse(freedofs=fes.FreeDofs())
 
+m_buffer = BilinearForm(cytosol_fes)
+m_buffer += u_cyt * v_cyt * dx("cytosol")
+m_buffer.Assemble()
+
+mstar_buffer = m_buffer.mat.CreateMatrix()
+mstar_buffer.AsVector().data = m_buffer.mat.AsVector() + dt * a_buffer.mat.AsVector()
+mstar_buffer_inv = mstar_buffer.Inverse(freedofs=cytosol_fes.FreeDofs())
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(u, t_end, n_samples):
+def time_stepping(u_ca, u_buf, t_end, n_samples):
     n_steps = int(ceil(t_end / dt))
     sample_int = int(ceil(n_steps / n_samples))
-    u_t = GridFunction(u.space, multidim=0)
-    u_t.AddMultiDimComponent(u.vec)
+    u_com = GridFunction(u_buf.space)
+    u_com.vec.data = 0 * u_buf.vec
+    u_ca_t = GridFunction(u_ca.space, multidim=0)
+    u_buf_t = GridFunction(u_buf.space, multidim=0)
+    u_com_t = GridFunction(u_com.space, multidim=0)
+    u_ca_t.AddMultiDimComponent(u_ca.vec)
+    u_buf_t.AddMultiDimComponent(u_buf.vec)
+    u_com_t.AddMultiDimComponent(u_com.vec)
     
     for i in trange(n_steps):
-        res = dt * (f.vec - a.mat * u.vec)
-        u.vec.data += mstar_inv * res
+        f_ca.Assemble()
+        f_com.Assemble()
+        res_ca = dt * (f_ca.vec - a_ca.mat * u_ca.vec)
+        res_buf = dt * (f_ca.vec - a_buffer.mat * u_buf.vec)
+        res_com = dt * (f_com.vec - a_buffer.mat * u_com.vec)
+        u_ca.vec.data += mstar_ca_inv * res_ca
+        u_buf.vec.data += mstar_buffer_inv * res_buf
+        u_com.vec.data += mstar_buffer_inv * res_com
         if i % sample_int == 0:
-            u_t.AddMultiDimComponent(u.vec)
-    return u_t
+            u_ca_t.AddMultiDimComponent(u_ca.vec)
+            u_buf_t.AddMultiDimComponent(u_buf.vec)
+            u_com_t.AddMultiDimComponent(u_com.vec)
+    return u_ca_t, u_buf_t, u_com_t
 
 
 # %%
 # Time stepping - set initial conditions and do time stepping
-concentration = GridFunction(fes)
-concentration.components[0].Set(15)
-c_t = time_stepping(concentration, t_end=1, n_samples=100)
+calcium.components[0].Set(15)
+ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, t_end=1, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
 # visualization of time-dependent functions via multidim is not possible)
-visualization = mesh.MaterialCF({"ecs": c_t.components[0], "cytosol": c_t.components[1]})
+visualization = mesh.MaterialCF({"ecs": ca_t.components[0], "cytosol": ca_t.components[1]})
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
-Draw(c_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
