@@ -72,8 +72,9 @@ u_ecs, v_ecs = ecs_fes.TnT()
 f_ecs = LinearForm(ecs_fes)
 f_ecs += v_ecs * dx
 
+D = mesh.MaterialCF({"ecs": 1, "ecs_high_density": 2, "membrane": 0})
 a_ecs = BilinearForm(ecs_fes)
-a_ecs += grad(u_ecs) * grad(v_ecs) * dx
+a_ecs += D * grad(u_ecs) * grad(v_ecs) * dx
 
 a_ecs.Assemble()
 f_ecs.Assemble()
