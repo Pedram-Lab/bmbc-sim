@@ -113,7 +113,7 @@ def time_stepping(u_ca, u_buf, t_end, n_samples):
     n_steps = int(ceil(t_end / dt))
     sample_int = int(ceil(n_steps / n_samples))
     u_com = GridFunction(u_buf.space)
-    u_com.vec.data = 0 * u_buf.vec
+    u_com.Set(0)
     u_ca_t = GridFunction(u_ca.space, multidim=0)
     u_buf_t = GridFunction(u_buf.space, multidim=0)
     u_com_t = GridFunction(u_com.space, multidim=0)
