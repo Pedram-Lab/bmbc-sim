@@ -62,7 +62,7 @@ u1_cyt, v1_cyt = cytosol_fes.TnT()
 
 calcium = GridFunction(fes)
 buffer = GridFunction(cytosol_fes)
-complex = GridFunction(cytosol_fes)
+complexes = GridFunction(cytosol_fes)
 
 a_ca = BilinearForm(fes)
 a_ca += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
@@ -74,15 +74,15 @@ a_buffer += grad(u1_cyt) * grad(v1_cyt) * dx
 
 f_ca = LinearForm(fes)
 f_ca += -buffer * calcium.components[1] * v_cyt * dx("cytosol")
-f_ca += complex * v_cyt * dx("cytosol")
+f_ca += complexes * v_cyt * dx("cytosol")
 
 f_buf = LinearForm(cytosol_fes)
 f_buf += -buffer * calcium.components[1] * v1_cyt * dx
-f_buf += complex * v1_cyt * dx
+f_buf += complexes * v1_cyt * dx
 
 f_com = LinearForm(cytosol_fes)
 f_com += buffer * calcium.components[1] * v1_cyt * dx
-f_com += -complex * v1_cyt * dx
+f_com += -complexes * v1_cyt * dx
 
 a_ca.Assemble()
 a_buffer.Assemble()
@@ -109,11 +109,9 @@ mstar_buffer_inv = mstar_buffer.Inverse(freedofs=cytosol_fes.FreeDofs())
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(u_ca, u_buf, t_end, n_samples):
-    n_steps = int(ceil(t_end / dt))
+def time_stepping(u_ca, u_buf, u_com, t_end, n_samples):
+    n_steps = int(ceil(t_end.value / dt))
     sample_int = int(ceil(n_steps / n_samples))
-    u_com = GridFunction(u_buf.space)
-    u_com.Set(0)
     u_ca_t = GridFunction(u_ca.space, multidim=0)
     u_buf_t = GridFunction(u_buf.space, multidim=0)
     u_com_t = GridFunction(u_com.space, multidim=0)
@@ -143,7 +141,8 @@ def time_stepping(u_ca, u_buf, t_end, n_samples):
 with TaskManager():
     calcium.components[0].Set(15)
     buffer.Set(1)
-    ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, t_end=1, n_samples=100)
+    complexes.Set(0)
+    ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, complexes, t_end=1 * u.s, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
