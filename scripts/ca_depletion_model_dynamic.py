@@ -21,7 +21,7 @@
 # %%
 from ngsolve import *
 from ngsolve.webgui import Draw
-from tqdm import trange
+from tqdm.notebook import trange
 
 from ecsim.geometry import create_ca_depletion_mesh
 from astropy import units as u
@@ -140,6 +140,7 @@ def time_stepping(u_ca, u_buf, u_com, t_end, n_samples):
 # Time stepping - set initial conditions and do time stepping
 with TaskManager():
     calcium.components[0].Set(15)
+    calcium.components[1].Set(0)
     buffer.Set(1)
     complexes.Set(0)
     ca_t, buffer_t, complex_t = time_stepping(calcium, buffer, complexes, t_end=1 * u.s, n_samples=100)
