@@ -49,7 +49,7 @@ i_max = 0.1 * u.picoampere
 
 # %%
 # Create meshed geometry
-mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
+mesh = create_ca_depletion_mesh(side_length=3 * u.um, cytosol_height=3 * u.um, ecs_height=0.1 * u.um, mesh_size=0.25 * u.um, channel_radius=0.5 * u.um)
 
 # %%
 # Define and assemble the FE-problem
