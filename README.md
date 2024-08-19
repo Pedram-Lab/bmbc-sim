@@ -27,3 +27,5 @@ The `.py` scripts in the `scripts/` directory are text representations of notebo
 When you open them in jupyter (right-click and choose 'Open With > Jupytext notebook'), they will be automatically converted to interactive notebooks, which you can find in the `notebooks/` directory.
 Saving a notebook will also automatically update the associated `.py` file.
 
+### Examples
+Currently, all examples are located in the `scripts/` directory. Apart from simulations, there are some files that showcase how to use some aspects of NGSolve in greater detail, since the documentation is sometimes lacking for what we need. These typically have a `_example` suffix.
