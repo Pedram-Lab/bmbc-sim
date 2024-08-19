@@ -31,28 +31,25 @@ membrane_height = 0.2
 
 # %%
 # Define geometry
-s = ecs_side
-c = cutout_side / 2
-left = Plane(Pnt(-s / 2, 0, 0), Vec(-1, 0, 0)).bc("side")
-right = Plane(Pnt(s / 2, 0, 0), Vec(1, 0, 0)).bc("side")
-front = Plane(Pnt(0, s / 2, 0), Vec(0, 1, 0)).bc("side")
-back = Plane(Pnt(0, -s / 2, 0), Vec(0, -1, 0)).bc("side")
-ecs = OrthoBrick(Pnt(-s, -s, 0), Pnt(s, s, ecs_height))
-cutout = OrthoBrick(Pnt(-c, -c, 0), Pnt(c, c, ecs_height)).mat("ecs_high_density")
-ecs = (ecs - cutout).mat("ecs")
-membrane = OrthoBrick(Pnt(-s, -s, ecs_height), Pnt(s, s, ecs_height + membrane_height)).mat("membrane")
+s = ecs_side / 2
+left = OrthoBrick(Pnt(-s, -s, 0), Pnt(0, s, ecs_height)).mat("ecs_left").bc("side")
+right = OrthoBrick(Pnt(0, -s, 0), Pnt(s, s, ecs_height)).mat("ecs_right").bc("side")
+membrane = OrthoBrick(Pnt(-s, -s, ecs_height), Pnt(s, s, ecs_height + membrane_height)).mat("membrane").bc("side")
 
 geo = CSGeometry()
-geo.Add(ecs * left * right * front * back)
-geo.Add(cutout, bcmod=[(ecs, "ecs_interface")])
-geo.Add(membrane * left * right * front * back, bcmod=[(ecs, "ecs_membrane_interface"), (cutout, "ecs_membrane_interface")])
-geo.PeriodicSurfaces(left, right)
-geo.PeriodicSurfaces(front, back)
+geo.Add(membrane)
+geo.Add(left)
+geo.Add(right)
 
 mesh = Mesh(geo.GenerateMesh(maxh=0.2))
-mesh.ngmesh.SetBCName(0, "substrate")
-mesh.ngmesh.SetBCName(13, "substrate")
-mesh.ngmesh.SetBCName(2, "membrane_top")
+# Usually, interface names can be set with `bcmod = [(other, "name")]`, but in this case too many interfaces are renamed
+# Therefore, it's easier to rename them by hand
+mesh.ngmesh.SetBCName(5, "substrate")
+mesh.ngmesh.SetBCName(9, "substrate")
+mesh.ngmesh.SetBCName(14, "membrane_top")
+mesh.ngmesh.SetBCName(0, "ecs_membrane_interface")
+mesh.ngmesh.SetBCName(11, "ecs_membrane_interface")
+mesh.ngmesh.SetBCName(8, "ecs_interface")
 
 # %%
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
@@ -61,8 +58,8 @@ Draw(mesh, clipping=clipping, settings=settings)
 
 # %%
 # Define FE spaces
-ecs_fes = Compress(Periodic(H1(mesh, order=2, dirichlet="substrate", definedon=mesh.Materials("ecs|ecs_high_density"))))
-elastic_fes = Compress(Periodic(VectorH1(mesh, order=2, dirichlet="substrate")))
+ecs_fes = Compress(H1(mesh, order=2, dirichlet="substrate", definedon=mesh.Materials("ecs_left|ecs_right")))
+elastic_fes = VectorH1(mesh, order=2, dirichlet="substrate")
 fes = FESpace([ecs_fes, elastic_fes])
 
 # %%
@@ -72,7 +69,7 @@ u_ecs, v_ecs = ecs_fes.TnT()
 f_ecs = LinearForm(ecs_fes)
 f_ecs += v_ecs * dx
 
-D = mesh.MaterialCF({"ecs": 1, "ecs_high_density": 2, "membrane": 0})
+D = mesh.MaterialCF({"ecs_left": 1, "ecs_right": 5})
 a_ecs = BilinearForm(ecs_fes)
 a_ecs += D * grad(u_ecs) * grad(v_ecs) * dx
 
@@ -84,14 +81,14 @@ concentration.vec.data = a_ecs.mat.Inverse(ecs_fes.FreeDofs()) * f_ecs.vec
 
 # %%
 # Visualize (diffusion only)
-visualization = mesh.MaterialCF({"ecs": concentration, "ecs_high_density": concentration, "membrane": 0})
+visualization = mesh.MaterialCF({"ecs_left": concentration, "ecs_right": concentration, "membrane": 0})
 Draw(visualization, mesh, clipping=clipping, settings=settings)
 
 # %%
 # Define and solve linear elasticity problem
 u_el, v_el = elastic_fes.TnT()
 
-E = mesh.MaterialCF({"ecs": 50, "ecs_high_density": 1000, "membrane": 100})
+E = mesh.MaterialCF({"ecs_left": 50, "ecs_right": 1000, "membrane": 100})
 nu = 0.2
 mu  = E / (2 * (1 + nu))
 lam = E * (nu * ((1 + nu) * (1 - 2 * nu)))
@@ -106,7 +103,7 @@ with TaskManager():
     a_el += InnerProduct(stress(Sym(Grad(u_el))), Sym(Grad(v_el))).Compile() * dx
     a_el.Assemble()
 
-    force = CoefficientFunction((10, 0, 0))
+    force = CoefficientFunction((0, 0, -30))
     f_el = LinearForm(elastic_fes)
     f_el += force * v_el * ds("membrane_top")
     f_el.Assemble()
@@ -116,6 +113,6 @@ deformation.vec.data = a_el.mat.Inverse(elastic_fes.FreeDofs()) * f_el.vec
 
 # %%
 # Visualize (elastic deformation only)
-Draw(deformation, deformation=deformation, settings=settings, clipping=clipping)
+Draw(deformation, settings=settings)
 
 # %%
