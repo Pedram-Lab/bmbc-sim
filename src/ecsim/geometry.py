@@ -1,3 +1,4 @@
+import numpy as np
 from netgen.occ import *
 from ngsolve import Mesh
 from netgen.meshing import FaceDescriptor, Element2D
@@ -77,3 +78,46 @@ def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, channel
     mesh.SetMaterial(2, "cytosol")
 
     return Mesh(mesh)
+
+class LineEvaluator:
+    def __init__(self, mesh, start, end, n):
+        """
+        Initializes the LineEvaluator with the mesh, start, and end points of the line, and the number of points to evaluate.
+
+        Parameters:
+        - mesh: The NGSolve mesh object.
+        - start: The starting point of the line segment (x, y, z).
+        - end: The ending point of the line segment (x, y, z).
+        - n: Number of evaluation points along the line segment.
+        """
+        # Generate the coordinates for the line segment
+        x_coords = np.linspace(start[0], end[0], n)
+        y_coords = np.linspace(start[1], end[1], n)
+        z_coords = np.linspace(start[2], end[2], n)
+
+        # Store the raw points for later use
+        self._raw_points = np.column_stack((x_coords, y_coords, z_coords))
+
+        # Generate the corresponding mesh evaluation points
+        self._eval_points = [mesh(x, y, z) for x, y, z in zip(x_coords, y_coords, z_coords)]
+
+    def evaluate(self, coefficient_function):
+        """
+        Evaluates the given coefficient function at the points defined by the evaluator.
+
+        Parameters:
+        - coefficient_function: The NGSolve coefficient function to evaluate (e.g., concentration.components[0]).
+
+        Returns:
+        - A numpy array of evaluated values.
+        """
+        return np.array([coefficient_function(point) for point in self._eval_points])
+
+    def get_points(self):
+        """
+        Returns the raw points (x, y, z coordinates) used for evaluation.
+
+        Returns:
+        - A numpy array of shape (n, 3) representing the points along the line segment.
+        """
+        return self._raw_points
