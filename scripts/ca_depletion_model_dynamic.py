@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-# This script takes the `geometry from scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top (units are handled by astropy):
+# This script takes the geometry from `scripts/channel_geometry_with_occ.py` and adds reaction-diffusion of chemical species on top (units are handled by astropy):
 # * Ca can diffuse from the ECS to the cytosol through the channel.
 #
 # The dynamics of the system are resolved in time.
@@ -21,94 +21,105 @@
 # %%
 from ngsolve import *
 from ngsolve.webgui import Draw
-from tqdm import trange
+from tqdm.notebook import trange
+from astropy import units as u
 
 from ecsim.geometry import create_ca_depletion_mesh
-from astropy import units as u
-import matplotlib.pyplot as plt
+from ecsim.simulation import Simulation
 
 # %%
-ca_ext = 15 * u.millimole
-ca_cyt = 0.0001 * u.millimole
-egta_1 = 4.5 * u.millimole
-egta_2 = 40 * u.millimole
-bapta = 1 * u.millimole
-diff_ca_ext = 600 * u.um**2 / u.s
-diff_ca_cyt = 220 * u.um**2 / u.s
-diff_free_egta = 113 * u.um**2 / u.s
-diff_bound_egta = 113 * u.um**2 / u.s
-diff_free_bapta = 95 * u.um**2 / u.s
-diff_bound_bapta = 113 * u.um**2 / u.s
-k_f_egta = 2.7 * u.micromole / u.s
-k_r_egta = 0.5 / u.s
-k_f_bapta = 450 * u.micromole / u.s
-k_r_bapta = 80 / u.s
 diameter_ch = 10 * u.nm
 density_channel = 10000 / u.um**2
 i_max = 0.1 * u.picoampere
 
 # %%
 # Create meshed geometry
-mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
+mesh = create_ca_depletion_mesh(
+    side_length=3 * u.um,
+    cytosol_height=3 * u.um,
+    ecs_height=0.1 * u.um,
+    mesh_size=0.25 * u.um,
+    channel_radius=0.5 * u.um
+)
 
 # %%
-# Define and assemble the FE-problem
-ecs_fes = H1(mesh, order=2, definedon=mesh.Materials("ecs"), dirichlet="ecs_top")
-cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"))
-fes = FESpace([ecs_fes, cytosol_fes])
-u_ecs, u_cyt = fes.TrialFunction()
-v_ecs, v_cyt = fes.TestFunction()
-
-f = LinearForm(fes)
-
-a = BilinearForm(fes)
-a += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
-a += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
-a += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
-
-a.Assemble()
-f.Assemble()
+# Set up a simulation on the mesh with BAPTA as a buffer
+simulation = Simulation(mesh, time_step=1 * u.ms)
+calcium = simulation.add_species(
+    "calcium",
+    diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
+    clamp={"ecs_top": 15 * u.millimole}
+)
+free_buffer = simulation.add_species(
+    "free_buffer",
+    diffusivity={"cytosol": 95 * u.um**2 / u.s}
+)
+bound_buffer = simulation.add_species(
+    "bound_buffer",
+    diffusivity={"cytosol": 113 * u.um**2 / u.s}
+)
+simulation.add_reaction(
+    reactants=(calcium, free_buffer),
+    products=bound_buffer,
+    kf={"cytosol": 450 * u.micromole / u.s},
+    kr={"cytosol": 80 / u.s}
+)
+simulation.add_channel_flux(
+    left="ecs",
+    right="cytosol",
+    boundary="channel",
+    rate=1 * u.millimole / u.s
+)
+    
+# Alternative: EGTA as buffer
+# free_buffer = simulation.add_species("free_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
+# bound_buffer = simulation.add_species("bound_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
+# simulation.add_reaction(reactants=(calcium, free_buffer), products=bound_buffer, kf={"cytosol": 2.7 * u.micromole / u.s}, kr={"cytosol": 0.5 / u.s})
 
 # %%
-# Time stepping - set up system matrix
-m = BilinearForm(fes)
-m += u_ecs * v_ecs * dx("ecs")
-m += u_cyt * v_cyt * dx("cytosol")
-m.Assemble()
-
-dt = 0.001
-mstar = m.mat.CreateMatrix()
-mstar.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
-mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
+# Internally set up all finite element infrastructure
+simulation.setup_problem()
 
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(u, t_end, n_samples):
-    n_steps = int(ceil(t_end / dt))
+def time_stepping(simulation, t_end, n_samples):
+    n_steps = int(ceil(t_end.value / simulation._time_step_size.to(u.s).value))
     sample_int = int(ceil(n_steps / n_samples))
-    u_t = GridFunction(u.space, multidim=0)
-    u_t.AddMultiDimComponent(u.vec)
+    u_ca_t = GridFunction(simulation._fes, multidim=0)
+    u_buf_t = GridFunction(simulation._fes, multidim=0)
+    u_com_t = GridFunction(simulation._fes, multidim=0)
+    u_ca_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
+    u_buf_t.AddMultiDimComponent(simulation.concentrations["free_buffer"].vec)
+    u_com_t.AddMultiDimComponent(simulation.concentrations["bound_buffer"].vec)
     
     for i in trange(n_steps):
-        res = dt * (f.vec - a.mat * u.vec)
-        u.vec.data += mstar_inv * res
+        simulation.time_step()
         if i % sample_int == 0:
-            u_t.AddMultiDimComponent(u.vec)
-    return u_t
+            u_ca_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
+            u_buf_t.AddMultiDimComponent(simulation.concentrations["free_buffer"].vec)
+            u_com_t.AddMultiDimComponent(simulation.concentrations["bound_buffer"].vec)
+    return u_ca_t, u_buf_t, u_com_t
 
 
 # %%
 # Time stepping - set initial conditions and do time stepping
-concentration = GridFunction(fes)
-concentration.components[0].Set(15)
-c_t = time_stepping(concentration, t_end=1, n_samples=100)
+with TaskManager():
+    simulation.init_concentrations(
+        calcium={"ecs": 15 * u.millimole, "cytosol": 0.1 * u.micromole},
+        free_buffer={"cytosol": 1 * u.millimole}, # bapta
+        # free_buffer={"cytosol": 4.5 * u.millimole}, # low egta
+        # free_buffer={"cytosol": 40 * u.millimole}, # high egta
+        bound_buffer={"cytosol": 0 * u.millimole}
+    )
+    ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=0.1 * u.s, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
 # visualization of time-dependent functions via multidim is not possible)
-visualization = mesh.MaterialCF({"ecs": c_t.components[0], "cytosol": c_t.components[1]})
+visualization = mesh.MaterialCF({"ecs": ca_t.components[0], "cytosol": ca_t.components[1]})
+clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
-Draw(c_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
