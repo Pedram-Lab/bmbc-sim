@@ -10,7 +10,7 @@ from pyngcore import BitArray
 class ChemicalSpecies:
     name: str
     diffusivity: Dict[str, au.Quantity]
-    clamp: Dict[str, au.Quantity]
+    clamp: Iterable[str]
     # TODO: charge, ...?
 
     @property
@@ -50,13 +50,13 @@ class Simulation:
             name: str,
             *,
             diffusivity: Dict[str, au.Quantity],
-            clamp:Dict[str, au.Quantity] = None
+            clamp: str | Iterable[str] = None
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
         :param name: Name of the species.
         :param diffusivity: Diffusivity in different compartments; if not given, the species is not present in the compartment.
-        :param clamp: Clamp concentration to a certain value at the boundary.
+        :param clamp: Clamp concentration to initial value on the given boundaries.
         :return:
         """
         if name in self._species:
@@ -64,7 +64,9 @@ class Simulation:
         for compartment in diffusivity:
             if compartment not in self._compartments:
                 raise ValueError(f"Compartment {compartment} not found in the mesh.")
-        clamp = clamp or {}
+        clamp = clamp or []
+        if not isinstance(clamp, Iterable):
+            clamp = [clamp]
         for boundary in clamp:
             if boundary not in self.mesh.GetBoundaries():
                 raise ValueError(f"Boundary {boundary} not found in the mesh.")
