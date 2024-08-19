@@ -13,7 +13,8 @@
 # ---
 
 # %% [markdown]
-# This Python code proposes the class LineEvaluator to plot the calcium traces to both the cytosol and the extracellular space. 
+# # Post-processing and Visualization
+# This script shows how to use the `LineEvaluator` class to plot calcium traces in both the cytosol and the extracellular space.
 
 # %%
 from ngsolve import *
@@ -27,25 +28,8 @@ import numpy as np
 import csv
 
 # %%
-#Parameters and units handle by astropy
-ca_ext = 15 * u.millimole
-ca_cyt = 0.0001 * u.millimole
-egta_1 = 4.5 * u.millimole
-egta_2 = 40 * u.millimole
-bapta = 1 * u.millimole
-diff_ca_ext = 600 * u.um**2 / u.s
-diff_ca_cyt = 220 * u.um**2 / u.s
-diff_free_egta = 113 * u.um**2 / u.s
-diff_bound_egta = 113 * u.um**2 / u.s
-diff_free_bapta = 95 * u.um**2 / u.s
-diff_bound_bapta = 113 * u.um**2 / u.s
-k_f_egta = 2.7 * u.micromole / u.s
-k_r_egta = 0.5 / u.s
-k_f_bapta = 450 * u.micromole / u.s
-k_r_bapta = 80 / u.s
-diameter_ch = 10 * u.nm
-density_channel = 10000 / u.um**2
-i_max = 0.1 * u.picoampere
+# Set to True to write out the results as CSV files
+write_as_csv = False
 
 # %%
 # Create meshed geometry
@@ -104,10 +88,14 @@ with TaskManager():
     concentration.components[0].Set(15)
     c_t = time_stepping(concentration, t_end=1, n_samples=100)
 
+# %% [markdown]
+# # Cytosolic calcium dynamics along a line segment bewteen two points
+
+
 # %%
 # Define the constant values for y and z
-y_constant_cyt = 1.5  # Constant value for y
-z_constant_cyt = 2.8  # Constant value for z
+y_cyt = 1.5  # Constant value for y
+z_cyt = 2.8  # Constant value for z
 
 # Define the range and number of points for x
 x_start_cyt = 0.0  # Start of the x range
@@ -117,14 +105,18 @@ n_points_cyt = 50  # Number of points in the x range
 # Create the line evaluator using the LineEvaluator class
 line_evaluator_cyt = LineEvaluator(
     mesh, 
-    (x_start_cyt, y_constant_cyt, z_constant_cyt),  # Start point (x, y, z)
-    (x_end_cyt, y_constant_cyt, z_constant_cyt),    # End point (x, y, z)
+    (x_start_cyt, y_cyt, z_cyt),  # Start point (x, y, z)
+    (x_end_cyt, y_cyt, z_cyt),    # End point (x, y, z)
     n_points_cyt  # Number of points to evaluate
 )
 
+# Evaluate the concentration in the cytosol
 concentrations_cyt = line_evaluator_cyt.evaluate(concentration.components[1])
+
+# Get the x-coordinates for the plot
 x_coords = line_evaluator_cyt.raw_points[:, 0]  # Extract the x-coordinates
 
+# Plot the results
 plt.figure(figsize=(10, 6))
 plt.plot(x_coords, concentrations_cyt, marker='o', linestyle='-', color='blue')
 plt.title(r"$[\mathrm{Ca}^{2+}]_{\mathrm{cyt}}$ vs Distance from the channel")
@@ -135,12 +127,22 @@ plt.show()
 
 
 # %%
-#Evaluation of the class for calcium at the ecs
+if write_as_csv:
+    x_coords = line_evaluator_cyt.raw_points[:, 0]
+    with open('concentration_cyt_data.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Distance from channel cluster (um)', 'Cytosolic calcium (nM)'])  # Column heads 
+        for x_coord, val in zip(x_coords, concentrations_cyt):
+            writer.writerow([x_coord, val])
+
+
+# %% [markdown]
+# # Extracellular calcium dynamic along a line segment bewteen two points
 
 # %%
 # Define the constant values for y and z
-y_constant_ecs = 1.5  # Constant value for y
-z_constant_ecs = 3.005  # Constant value for z
+y_ecs = 1.5  # Constant value for y
+z_ecs = 3.005  # Constant value for z
 
 # Define the range and number of points for x
 x_start_ecs = 0.0  # Start of the x range
@@ -150,22 +152,20 @@ n_points_ecs = 50  # Number of points in the x range
 # Create the line evaluator using the LineEvaluator class
 line_evaluator_ecs = LineEvaluator(
     mesh, 
-    (x_start_ecs, y_constant_ecs, z_constant_ecs),  # Start point (x, y, z)
-    (x_end_ecs, y_constant_ecs, z_constant_ecs),    # End point (x, y, z)
+    (x_start_ecs, y_ecs, z_ecs),  # Start point (x, y, z)
+    (x_end_ecs, y_ecs, z_ecs),    # End point (x, y, z)
     n_points_ecs  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the extracellular space (ECS)
-concentrations_ext = line_evaluator_ecs.evaluate(concentration.components[0])
+concentrations_ecs = line_evaluator_ecs.evaluate(concentration.components[0])
 
 # Get the x-coordinates for the plot
-x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]  # Extract the x-coordinates
+x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
 
 # Plot the results
-import matplotlib.pyplot as plt
-
 plt.figure(figsize=(10, 6))
-plt.plot(x_coords_ecs, concentrations_ext, marker='o', linestyle='-', color='red')
+plt.plot(x_coords_ecs, concentrations_ecs, marker='o', linestyle='-', color='red')
 plt.ylim([14.5, 15.1])
 plt.title(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ vs Distance from the channel")
 plt.xlabel(r"Distance from the channel ($\mathrm{\mu m}$)")
@@ -173,5 +173,13 @@ plt.ylabel(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ (mM)")
 plt.grid(True)
 plt.show()
 
+
+# %%
+if write_as_csv:
+    with open('concentration_ecs_data.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Distance from channel cluster (um)', 'Extracellular calcium (mM)'])  # Column heads 
+        for x_coord, val in zip(x_coords_ecs, concentrations_ecs):
+            writer.writerow([x_coord, val])
 
 # %%
