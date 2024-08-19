@@ -17,15 +17,15 @@
 # This script shows how to use the `LineEvaluator` class to plot calcium traces in both the cytosol and the extracellular space.
 
 # %%
+import csv
+
+import matplotlib.pyplot as plt
+from astropy import units as au
 from ngsolve import *
-from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 
 from ecsim.geometry import create_ca_depletion_mesh, LineEvaluator
-from astropy import units as u
-import matplotlib.pyplot as plt
-import numpy as np
-import csv
+from ecsim.simulation import Simulation
 
 # %%
 # Set to True to write out the results as CSV files
@@ -33,60 +33,52 @@ write_as_csv = False
 
 # %%
 # Create meshed geometry
-mesh = create_ca_depletion_mesh(side_length=3, cytosol_height=3, ecs_height=0.1, mesh_size=0.25, channel_radius=0.5)
+mesh = create_ca_depletion_mesh(
+    side_length=3 * au.um,
+    cytosol_height=3 * au.um,
+    ecs_height=0.1 * au.um,
+    mesh_size=0.25 * au.um,
+    channel_radius=0.5 * au.um
+)
 
 # %%
 # Define and assemble the FE-problem
-ecs_fes = H1(mesh, order=2, definedon=mesh.Materials("ecs"), dirichlet="ecs_top")
-cytosol_fes = H1(mesh, order=2, definedon=mesh.Materials("cytosol"))
-fes = FESpace([ecs_fes, cytosol_fes])
-u_ecs, u_cyt = fes.TrialFunction()
-v_ecs, v_cyt = fes.TestFunction()
-
-f = LinearForm(fes)
-
-a = BilinearForm(fes)
-a += grad(u_ecs) * grad(v_ecs) * dx("ecs")              # diffusion in ecs
-a += grad(u_cyt) * grad(v_cyt) * dx("cytosol")          # diffusion in cytosol
-a += (u_ecs - u_cyt) * (v_ecs - v_cyt) * ds("channel")  # interface flux
-
-a.Assemble()
-f.Assemble()
-
-# %%
-# Time stepping - set up system matrix
-m = BilinearForm(fes)
-m += u_ecs * v_ecs * dx("ecs")
-m += u_cyt * v_cyt * dx("cytosol")
-m.Assemble()
-
-dt = 0.001
-mstar = m.mat.CreateMatrix()
-mstar.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
-mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
-
+simulation = Simulation(mesh, time_step=1 * au.ms)
+calcium = simulation.add_species(
+    "calcium",
+    diffusivity={"ecs": 1 * au.um**2 / au.s, "cytosol": 1 * au.um**2 / au.s},
+    clamp={"ecs_top": 15 * au.millimole}
+)
+simulation.add_channel_flux(
+    left="ecs",
+    right="cytosol",
+    boundary="channel",
+    rate=1 * au.millimole / au.s
+)
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(u, t_end, n_samples):
-    n_steps = int(ceil(t_end / dt))
+def time_stepping(simulation, t_end, n_samples):
+    n_steps = int(ceil(t_end / simulation._time_step_size.to(au.s).value))
     sample_int = int(ceil(n_steps / n_samples))
-    u_t = GridFunction(u.space, multidim=0)
-    u_t.AddMultiDimComponent(u.vec)
+    u_t = GridFunction(simulation._fes, multidim=0)
+    u_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
     
     for i in trange(n_steps):
-        res = dt * (f.vec - a.mat * u.vec)
-        u.vec.data += mstar_inv * res
+        simulation.time_step()
         if i % sample_int == 0:
-            u_t.AddMultiDimComponent(u.vec)
+            u_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
     return u_t
 
 
+# %%
 # Time stepping - set initial conditions and do time stepping
 with TaskManager():
-    concentration = GridFunction(fes)
-    concentration.components[0].Set(15)
-    c_t = time_stepping(concentration, t_end=1, n_samples=100)
+    simulation.setup_problem()
+    simulation.init_concentrations(
+        calcium={"ecs": 15 * au.millimole, "cytosol": 0.1 * au.micromole},
+    )
+    c_t = time_stepping(simulation, t_end=1, n_samples=100)
 
 # %% [markdown]
 # # Cytosolic calcium dynamics along a line segment bewteen two points
@@ -111,7 +103,7 @@ line_evaluator_cyt = LineEvaluator(
 )
 
 # Evaluate the concentration in the cytosol
-concentrations_cyt = line_evaluator_cyt.evaluate(concentration.components[1])
+concentrations_cyt = line_evaluator_cyt.evaluate(simulation.concentrations["calcium"].components[1])
 
 # Get the x-coordinates for the plot
 x_coords = line_evaluator_cyt.raw_points[:, 0]  # Extract the x-coordinates
@@ -158,7 +150,7 @@ line_evaluator_ecs = LineEvaluator(
 )
 
 # Evaluate the concentration in the extracellular space (ECS)
-concentrations_ecs = line_evaluator_ecs.evaluate(concentration.components[0])
+concentrations_ecs = line_evaluator_ecs.evaluate(simulation.concentrations["calcium"].components[0])
 
 # Get the x-coordinates for the plot
 x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
