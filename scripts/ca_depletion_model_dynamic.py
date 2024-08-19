@@ -34,17 +34,42 @@ i_max = 0.1 * u.picoampere
 
 # %%
 # Create meshed geometry
-mesh = create_ca_depletion_mesh(side_length=3 * u.um, cytosol_height=3 * u.um, ecs_height=0.1 * u.um, mesh_size=0.25 * u.um, channel_radius=0.5 * u.um)
+mesh = create_ca_depletion_mesh(
+    side_length=3 * u.um,
+    cytosol_height=3 * u.um,
+    ecs_height=0.1 * u.um,
+    mesh_size=0.25 * u.um,
+    channel_radius=0.5 * u.um
+)
 
 # %%
 # Set up a simulation on the mesh with BAPTA as a buffer
 simulation = Simulation(mesh, time_step=1 * u.ms)
-calcium = simulation.add_species("calcium", diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s})
-free_buffer = simulation.add_species("free_buffer", diffusivity={"cytosol": 95 * u.um**2 / u.s})
-bound_buffer = simulation.add_species("bound_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
-# simulation.add_reaction(reactants=(calcium, free_buffer), products=bound_buffer, kf={"cytosol": 450 * u.micromole / u.s}, kr={"cytosol": 80 / u.s})
-simulation.add_reaction(reactants=(calcium, free_buffer), products=bound_buffer, kf={"cytosol": 1000 * u.millimole / u.s}, kr={"cytosol": 1 / u.s})
-simulation.add_channel_flux(left="ecs", right="cytosol", boundary="channel", rate=1 * u.millimole / u.s)
+calcium = simulation.add_species(
+    "calcium",
+    diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
+    clamp={"ecs_top": 15 * u.millimole}
+)
+free_buffer = simulation.add_species(
+    "free_buffer",
+    diffusivity={"cytosol": 95 * u.um**2 / u.s}
+)
+bound_buffer = simulation.add_species(
+    "bound_buffer",
+    diffusivity={"cytosol": 113 * u.um**2 / u.s}
+)
+simulation.add_reaction(
+    reactants=(calcium, free_buffer),
+    products=bound_buffer,
+    kf={"cytosol": 450 * u.micromole / u.s},
+    kr={"cytosol": 80 / u.s}
+)
+simulation.add_channel_flux(
+    left="ecs",
+    right="cytosol",
+    boundary="channel",
+    rate=1 * u.millimole / u.s
+)
     
 # Alternative: EGTA as buffer
 # free_buffer = simulation.add_species("free_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
@@ -96,7 +121,5 @@ visualization = mesh.MaterialCF({"ecs": ca_t.components[0], "cytosol": ca_t.comp
 clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
 Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
-# Draw(buffer_t, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
-# Draw(complex_t, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
