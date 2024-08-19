@@ -99,9 +99,10 @@ def time_stepping(u, t_end, n_samples):
 
 
 # Time stepping - set initial conditions and do time stepping
-concentration = GridFunction(fes)
-concentration.components[0].Set(15)
-c_t = time_stepping(concentration, t_end=1, n_samples=100)
+with TaskManager():
+    concentration = GridFunction(fes)
+    concentration.components[0].Set(15)
+    c_t = time_stepping(concentration, t_end=1, n_samples=100)
 
 # %%
 # Define the constant values for y and z
@@ -122,7 +123,7 @@ line_evaluator_cyt = LineEvaluator(
 )
 
 concentrations_cyt = line_evaluator_cyt.evaluate(concentration.components[1])
-x_coords = line_evaluator_cyt.get_points()[:, 0]  # Extract the x-coordinates
+x_coords = line_evaluator_cyt.raw_points[:, 0]  # Extract the x-coordinates
 
 plt.figure(figsize=(10, 6))
 plt.plot(x_coords, concentrations_cyt, marker='o', linestyle='-', color='blue')
@@ -158,7 +159,7 @@ line_evaluator_ecs = LineEvaluator(
 concentrations_ext = line_evaluator_ecs.evaluate(concentration.components[0])
 
 # Get the x-coordinates for the plot
-x_coords_ecs = line_evaluator_ecs.get_points()[:, 0]  # Extract the x-coordinates
+x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
 import matplotlib.pyplot as plt
