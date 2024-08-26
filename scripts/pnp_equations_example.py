@@ -1,0 +1,120 @@
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.16.4
+#   kernelspec:
+#     display_name: Python 3 (ipykernel)
+#     language: python
+#     name: python3
+# ---
+
+# %% [markdown]
+# # Poisson-Nernst-Planck equations
+# This script solves the Poisson-Nernst-Planck equations for a simple geometry to show how to couple diffusion and
+# electrostatics.
+
+# %%
+from netgen.csg import *
+from ngsolve import *
+from ngsolve.webgui import Draw
+import numpy as np
+import astropy.units as au
+from astropy import constants as const
+from tqdm.notebook import trange
+
+# %%
+# Parameters (of calcium in extracellular space)
+diffusivity = 0.71 * au.um ** 2 / au.s
+relative_permittivity = 80.0
+permittivity = relative_permittivity * const.eps0
+F = 96.4853365 * au.C / au.mmol
+valence = 2
+beta = valence * const.e.si / (const.k_B * 310 * au.K)
+ca_ecs = 2 * au.mmol
+source_point = (-0.4, 0.0, 0.1)
+tau = 100 * au.us
+
+# %%
+# Define geometry
+ecs = OrthoBrick(Pnt(-0.5, -0.5, 0), Pnt(0.5, 0.5, 1)).mat("ecs").bc("side")
+geo = CSGeometry()
+geo.Add(ecs)
+mesh = Mesh(geo.GenerateMesh(maxh=0.1))
+
+# %%
+# Define FE spaces
+ecs_fes = H1(mesh, order=2)
+constraint_fes = FESpace("number", mesh)
+potential_fes = FESpace([ecs_fes, constraint_fes])
+concentration = GridFunction(ecs_fes)
+potential = GridFunction(potential_fes)
+
+# %%
+# Define diffusion problem
+u_ecs, v_ecs = ecs_fes.TnT()
+a_ecs = BilinearForm(ecs_fes)
+a_ecs += diffusivity.value * grad(u_ecs) * grad(v_ecs) * dx
+m_ecs = BilinearForm(ecs_fes)
+m_ecs += u_ecs * v_ecs * dx
+
+f_ecs = LinearForm(ecs_fes)
+f_ecs += (ca_ecs.to(au.mmol).value * v_ecs) (*source_point)  # point source of calcium
+f_ecs += -diffusivity.value * beta.value * concentration * InnerProduct(grad(potential.components[0]), grad(v_ecs)) * dx
+
+a_ecs.Assemble()
+m_ecs.Assemble()
+m_ecs.mat.AsVector().data += tau.to(au.s).value * a_ecs.mat.AsVector()
+mstar_inv = m_ecs.mat.Inverse(ecs_fes.FreeDofs())
+
+# %%
+# Define problem for electrostatic potential
+(u_ecs, p), (v_ecs, q) = potential_fes.TnT()
+a_pot = BilinearForm(potential_fes)
+a_pot += permittivity.value * grad(u_ecs) * grad(v_ecs) * dx
+a_pot += p * v_ecs * dx
+a_pot += q * u_ecs * dx
+
+f_pot = LinearForm(potential_fes)
+f_pot += F.value * valence * concentration * v_ecs * dx
+
+a_pot.Assemble()
+a_pot_inv = a_pot.mat.Inverse(potential_fes.FreeDofs())
+
+# %%
+# Time stepping
+def time_stepping(ca, pot, t_end, tau, n_samples):
+    dt = tau.to(au.s).value
+    n_steps = int(ceil(t_end.to(au.s).value / dt))
+    sample_int = int(ceil(n_steps / n_samples))
+    ca_t = GridFunction(ecs_fes, multidim=0)
+    pot_t = GridFunction(ecs_fes, multidim=0)
+    ca_t.AddMultiDimComponent(ca.vec)
+    # pot_t.AddMultiDimComponent(pot.components[0].vec)
+
+    for i in trange(n_steps):
+        # Diffusion
+        f_ecs.Assemble()
+        res = dt * (f_ecs.vec - a_ecs.mat * ca.vec)
+        ca.vec.data += mstar_inv * res
+        if i % sample_int == 0:
+            ca_t.AddMultiDimComponent(ca.vec)
+            # pot_t.AddMultiDimComponent(pot.components.vec)
+    return ca_t, pot_t
+
+# %%
+with TaskManager():
+    concentration.Set(0)
+    potential.components[0].Set(0)
+    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100)
+
+# %%
+# Visualize (diffusion only)
+clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
+Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+
+# %%
