@@ -96,13 +96,18 @@ def time_stepping(ca, pot, t_end, tau, n_samples):
     # pot_t.AddMultiDimComponent(pot.components[0].vec)
 
     for i in trange(n_steps):
-        # Diffusion
+        # Solve the potential equation
+        f_pot.Assemble()
+        pot.vec.data = a_pot_inv * f_pot.vec
+        print(f"potential norm: {np.linalg.norm(pot.components[0].vec.FV().NumPy())}")
+        # Solve the diffusion equation
         f_ecs.Assemble()
         res = dt * (f_ecs.vec - a_ecs.mat * ca.vec)
         ca.vec.data += mstar_inv * res
+        print(f"calcium norm: {np.linalg.norm(ca.vec.FV().NumPy())}")
         if i % sample_int == 0:
             ca_t.AddMultiDimComponent(ca.vec)
-            # pot_t.AddMultiDimComponent(pot.components.vec)
+            pot_t.AddMultiDimComponent(pot.components[0].vec)
     return ca_t, pot_t
 
 # %%
@@ -112,9 +117,9 @@ with TaskManager():
     ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100)
 
 # %%
-# Visualize (diffusion only)
+# Visualize
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
 
 # %%
