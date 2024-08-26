@@ -13,7 +13,8 @@
 # ---
 
 # %% [markdown]
-# This script defines a periodic ECS that's tethered to a fixed substrate at the bottom and a membrane at the top. The
+# # Ca chelation model
+# This script defines an ECS that's tethered to a fixed substrate at the bottom and a membrane at the top. The
 # ECS is filled with diffusing Ca ions that bind to a chelator. The chelator's density is higher in the middle of the
 # ECS.
 
@@ -89,9 +90,9 @@ Draw(visualization, mesh, clipping=clipping, settings=settings)
 u_el, v_el = elastic_fes.TnT()
 
 E = mesh.MaterialCF({"ecs_left": 50, "ecs_right": 1000, "membrane": 100})
-nu = 0.2
+nu = 0.49
 mu  = E / (2 * (1 + nu))
-lam = E * (nu * ((1 + nu) * (1 - 2 * nu)))
+lam = E * nu / ((1 + nu) * (1 - 2 * nu))
 
 
 def stress(strain):
@@ -103,7 +104,7 @@ with TaskManager():
     a_el += InnerProduct(stress(Sym(Grad(u_el))), Sym(Grad(v_el))).Compile() * dx
     a_el.Assemble()
 
-    force = CoefficientFunction((0, 0, -30))
+    force = CoefficientFunction((0, 0, -10))
     f_el = LinearForm(elastic_fes)
     f_el += force * v_el * ds("membrane_top")
     f_el.Assemble()
