@@ -28,13 +28,14 @@ from tqdm.notebook import trange
 
 # %%
 # Parameters (of calcium in extracellular space)
+# Caution is needed when converting units: we want the geometry in um and concentrations in mM (= zmol/um^3)
 diffusivity = 0.71 * au.um ** 2 / au.s
 relative_permittivity = 80.0
-permittivity = relative_permittivity * const.eps0
-F = 96.4853365 * au.C / au.mmol
+permittivity = relative_permittivity * const.eps0.to(au.F / au.um)
+F = (96485.3365 * au.C / au.mol).to(au.C / au.zmol)
 valence = 2
 beta = valence * const.e.si / (const.k_B * 310 * au.K)
-ca_ecs = 2 * au.mmol
+ca_ecs = 2 * au.mmol / au.m**3
 source_point = (-0.4, 0.0, 0.1)
 tau = 100 * au.us
 
@@ -62,7 +63,7 @@ m_ecs = BilinearForm(ecs_fes)
 m_ecs += u_ecs * v_ecs * dx
 
 f_ecs = LinearForm(ecs_fes)
-f_ecs += (ca_ecs.to(au.mmol).value * v_ecs) (*source_point)  # point source of calcium
+f_ecs += (ca_ecs.to(au.mmol / au.m**3).value * v_ecs) (*source_point)  # point source of calcium
 f_ecs += -diffusivity.value * beta.value * concentration * InnerProduct(grad(potential.components[0]), grad(v_ecs)) * dx
 
 a_ecs.Assemble()
@@ -93,18 +94,16 @@ def time_stepping(ca, pot, t_end, tau, n_samples):
     ca_t = GridFunction(ecs_fes, multidim=0)
     pot_t = GridFunction(ecs_fes, multidim=0)
     ca_t.AddMultiDimComponent(ca.vec)
-    # pot_t.AddMultiDimComponent(pot.components[0].vec)
+    pot_t.AddMultiDimComponent(pot.components[0].vec)
 
     for i in trange(n_steps):
         # Solve the potential equation
         f_pot.Assemble()
         pot.vec.data = a_pot_inv * f_pot.vec
-        print(f"potential norm: {np.linalg.norm(pot.components[0].vec.FV().NumPy())}")
         # Solve the diffusion equation
         f_ecs.Assemble()
         res = dt * (f_ecs.vec - a_ecs.mat * ca.vec)
         ca.vec.data += mstar_inv * res
-        print(f"calcium norm: {np.linalg.norm(ca.vec.FV().NumPy())}")
         if i % sample_int == 0:
             ca_t.AddMultiDimComponent(ca.vec)
             pot_t.AddMultiDimComponent(pot.components[0].vec)
@@ -120,6 +119,7 @@ with TaskManager():
 # Visualize
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+# Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
 
 # %%
