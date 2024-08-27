@@ -22,6 +22,7 @@ from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
 import numpy as np
+import matplotlib.pyplot as plt
 import astropy.units as au
 from astropy import constants as const
 from tqdm.notebook import trange
@@ -111,11 +112,34 @@ def time_stepping(ca, pot, t_end, tau, n_samples, use_pot):
     return ca_t, pot_t
 
 # %%
+# Evaluation of solutions
+def evalutate_solution(sol, t_end, tau, n_samples):
+    dt = tau.to(au.s).value
+    n_steps = int(ceil(t_end.to(au.s).value / dt))
+    sample_int = int(ceil(n_steps / n_samples))
+    mip_near = mesh(*source_point)
+    mip_far = mesh(0.4, 0.0, 0.9)
+
+    time, near, far = [], [], []
+    k = 0
+    for i in range(n_steps):
+        if i % sample_int == 0:
+            time.append(i * tau.value)
+            near.append(sol.MDComponent(k)(mip_near))
+            far.append(sol.MDComponent(k)(mip_far))
+            k += 1
+    return time, near, far
+
+# %%
 # Compute time evolution with the potential
+n_samples = 100
+t_end = 0.1 * au.s
 with TaskManager():
     concentration.Set(0)
     potential.components[0].Set(0)
-    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100, use_pot=True)
+    ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=True)
+    
+time, ca_full_near, ca_full_far = evalutate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
@@ -129,7 +153,9 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 with TaskManager():
     concentration.Set(0)
     potential.components[0].Set(0)
-    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100, use_pot=False)
+    ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=False)
+
+time, ca_only_near, ca_only_far = evalutate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
@@ -137,5 +163,23 @@ clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
 # Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
+
+# %%
+plt.plot(time, ca_full_near, label="with potential")
+plt.plot(time, ca_only_near, label="without potential")
+plt.title("Evaluation at ca-source")
+plt.xlabel("Time [us]")
+plt.ylabel("Ca concentration [mM]")
+plt.legend()
+plt.show()
+
+# %%
+plt.plot(time, ca_full_far, label="with potential")
+plt.plot(time, ca_only_far, label="without potential")
+plt.title("Evaluation far away from ca-source")
+plt.xlabel("Time [us]")
+plt.ylabel("Ca concentration [mM]")
+plt.legend()
+plt.show()
 
 # %%
