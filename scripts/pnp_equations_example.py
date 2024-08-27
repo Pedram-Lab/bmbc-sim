@@ -87,7 +87,7 @@ a_pot_inv = a_pot.mat.Inverse(potential_fes.FreeDofs())
 
 # %%
 # Time stepping
-def time_stepping(ca, pot, t_end, tau, n_samples):
+def time_stepping(ca, pot, t_end, tau, n_samples, use_pot):
     dt = tau.to(au.s).value
     n_steps = int(ceil(t_end.to(au.s).value / dt))
     sample_int = int(ceil(n_steps / n_samples))
@@ -98,8 +98,9 @@ def time_stepping(ca, pot, t_end, tau, n_samples):
 
     for i in trange(n_steps):
         # Solve the potential equation
-        f_pot.Assemble()
-        pot.vec.data = a_pot_inv * f_pot.vec
+        if use_pot:
+            f_pot.Assemble()
+            pot.vec.data = a_pot_inv * f_pot.vec
         # Solve the diffusion equation
         f_ecs.Assemble()
         res = dt * (f_ecs.vec - a_ecs.mat * ca.vec)
@@ -110,16 +111,31 @@ def time_stepping(ca, pot, t_end, tau, n_samples):
     return ca_t, pot_t
 
 # %%
+# Compute time evolution with the potential
 with TaskManager():
     concentration.Set(0)
     potential.components[0].Set(0)
-    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100)
+    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100, use_pot=True)
 
 # %%
-# Visualize
+# Visualize whole solution if desired
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+# Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
+
+# %%
+# Compute time evolution without the potential
+with TaskManager():
+    concentration.Set(0)
+    potential.components[0].Set(0)
+    ca_t, potential_t = time_stepping(concentration, potential, t_end=0.1 * au.s, tau=tau, n_samples=100, use_pot=False)
+
+# %%
+# Visualize whole solution if desired
+clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
+settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
+# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
 # Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
 
 # %%
