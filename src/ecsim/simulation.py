@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable
 
 import astropy.units as au
-from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction
+from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction, Integrate
 from pyngcore import BitArray
 
 
@@ -152,7 +152,9 @@ class Simulation:
         for channel in self._channels:
             i = self._compartments[channel.left]
             j = self._compartments[channel.right]
-            rate = channel.rate.to(au.millimole / au.s).value
+            # make sure the flux is as prescribed no matter the actual area of the channel in the mesh
+            channel_area = Integrate(1, self.mesh, BND, order=1, definedon=self.mesh.Boundaries(channel.boundary))
+            rate = channel.rate.to(au.millimole / au.s).value / channel_area
             a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
 
         a.Assemble()
