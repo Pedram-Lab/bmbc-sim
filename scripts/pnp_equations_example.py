@@ -29,14 +29,14 @@ from tqdm.notebook import trange
 
 # %%
 # Parameters (of calcium in extracellular space)
-# Caution is needed when converting units: we want the geometry in um and concentrations in mM (= zmol/um^3)
+# Caution is needed when converting units: we want the geometry in um and concentrations in mM (= mmol / L = amol/um^3)
 diffusivity = 0.71 * au.um ** 2 / au.s
 relative_permittivity = 80.0
 permittivity = relative_permittivity * const.eps0.to(au.F / au.um)
-F = (96485.3365 * au.C / au.mol).to(au.C / au.zmol)
+F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
 valence = 2
 beta = valence * const.e.si / (const.k_B * 310 * au.K)
-ca_ecs = 2 * au.mmol / au.m**3
+ca_ecs = 2 * au.mmol / au.L
 source_point = (-0.4, 0.0, 0.1)
 tau = 100 * au.us
 
@@ -64,7 +64,7 @@ m_ecs = BilinearForm(ecs_fes)
 m_ecs += u_ecs * v_ecs * dx
 
 f_ecs = LinearForm(ecs_fes)
-f_ecs += (ca_ecs.to(au.mmol / au.m**3).value * v_ecs) (*source_point)  # point source of calcium
+f_ecs += (ca_ecs.to(au.mmol / au.L).value * v_ecs) (*source_point)  # point source of calcium
 f_ecs += -diffusivity.value * beta.value * concentration * InnerProduct(grad(potential.components[0]), grad(v_ecs)) * dx
 
 a_ecs.Assemble()
