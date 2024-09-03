@@ -6,6 +6,12 @@ from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearF
 from pyngcore import BitArray
 
 
+# Define common units for the simulation
+LENGTH_UNIT = au.um
+TIME_UNIT = au.s
+CONCENTRATION_UNIT = au.amol / au.um ** 3  # equivalent to mM = mmol / L
+
+
 @dataclass
 class ChemicalSpecies:
     name: str
@@ -147,20 +153,20 @@ class Simulation:
         u, v = self._fes.TnT()
         for compartment, diffusivity in species.diffusivity.items():
             i = self._compartments[compartment]
-            D = diffusivity.to(au.um**2 / au.s).value
+            D = diffusivity.to(LENGTH_UNIT ** 2 / TIME_UNIT).value
             a += D * grad(u[i]) * grad(v[i]) * dx(compartment)
             m += u[i] * v[i] * dx(compartment)
 
         for channel in self._channels:
             i = self._compartments[channel.left]
             j = self._compartments[channel.right]
-            rate = channel.rate.to(au.millimole / au.s).value
+            rate = channel.rate.to(CONCENTRATION_UNIT / TIME_UNIT).value
             a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
 
         a.Assemble()
         m.Assemble()
 
-        dt = self._time_step_size.to(au.s).value
+        dt = self._time_step_size.to(TIME_UNIT).value
         m.mat.AsVector().data += dt * a.mat.AsVector()
 
         return a, m.mat.Inverse(relevant_dofs)
@@ -174,7 +180,7 @@ class Simulation:
         _, v = self._fes.TnT()
         for compartment in reaction.kf:
             i = self._compartments[compartment]
-            kf = reaction.kf[compartment].to(au.millimole / au.s).value
+            kf = reaction.kf[compartment].to(CONCENTRATION_UNIT / TIME_UNIT).value
 
             # TODO: find a better default value (or skip if reactants / products are not present in the compartment)
             forward_reaction = CoefficientFunction(1.0)
@@ -187,7 +193,7 @@ class Simulation:
 
         for compartment in reaction.kr:
             i = self._compartments[compartment]
-            kr = reaction.kr[compartment].to(1 / au.s).value
+            kr = reaction.kr[compartment].to(1 / TIME_UNIT).value
 
             reverse_reaction = CoefficientFunction(1.0)
             for product in reaction.products:
@@ -199,7 +205,7 @@ class Simulation:
 
     def time_step(self):
         residual = {}
-        dt = self._time_step_size.to(au.s).value
+        dt = self._time_step_size.to(TIME_UNIT).value
         for name, f in self._source_terms.items():
             f.Assemble()
             a = self._diffusion_matrix[name]
@@ -212,5 +218,5 @@ class Simulation:
         for name, values in initial_concentrations.items():
             for compartment, value in values.items():
                 i = self._compartments[compartment]
-                v = value.to(au.millimole).value
+                v = value.to(CONCENTRATION_UNIT).value
                 self.concentrations[name].components[i].Set(v)
