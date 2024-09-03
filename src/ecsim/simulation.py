@@ -142,10 +142,10 @@ class Simulation:
         for compartment in self._compartments:
             if not compartment in species.compartments:
                 # If no diffusivity is given, the species is not present in this compartment (even if the concentration is zero)
-                self._exclude_dofs(relevant_dofs, self.mesh.Region(VOL, compartment))
+                self._set_dofs(relevant_dofs, self.mesh.Region(VOL, compartment), False)
         for boundary in self.mesh.GetBoundaries():
             if boundary in species.clamp:
-                self._exclude_dofs(relevant_dofs, self.mesh.Region(BND, boundary))
+                self._set_dofs(relevant_dofs, self.mesh.Region(BND, boundary), False)
 
         # Set up diffusion and mass matrix (set check_unused=False to avoid warnings about unused DOFs)
         a = BilinearForm(self._fes, check_unused=False)
@@ -171,10 +171,10 @@ class Simulation:
 
         return a, m.mat.Inverse(relevant_dofs)
 
-    def _exclude_dofs(self, dof_array, region):
+    def _set_dofs(self, dof_array, region, value):
         for el in region.Elements():
             for dof in self._fes.GetDofNrs(el):
-                dof_array[dof] = False
+                dof_array[dof] = value
 
     def _add_reaction_to_source_terms(self, reaction):
         _, v = self._fes.TnT()
