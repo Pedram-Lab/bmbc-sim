@@ -11,7 +11,7 @@ class ChemicalSpecies:
     name: str
     diffusivity: Dict[str, au.Quantity]
     clamp: Iterable[str]
-    # TODO: charge, ...?
+    valence: int
 
     @property
     def compartments(self):
@@ -50,12 +50,14 @@ class Simulation:
             name: str,
             *,
             diffusivity: Dict[str, au.Quantity],
+            valence: int = 0,
             clamp: str | Iterable[str] = None
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
         :param name: Name of the species.
         :param diffusivity: Diffusivity in different compartments; if not given, the species is not present in the compartment.
+        :param valence: Valence (electrical charge) of the species.
         :param clamp: Clamp concentration to initial value on the given boundaries.
         :return:
         """
@@ -71,7 +73,7 @@ class Simulation:
             if boundary not in self.mesh.GetBoundaries():
                 raise ValueError(f"Boundary {boundary} not found in the mesh.")
 
-        self._species[name] = ChemicalSpecies(name, diffusivity, clamp)
+        self._species[name] = ChemicalSpecies(name, diffusivity, clamp, valence)
         return self._species[name]
 
     def add_reaction(
