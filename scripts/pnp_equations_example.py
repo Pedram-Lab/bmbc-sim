@@ -18,6 +18,8 @@
 # electrostatics.
 
 # %%
+from math import ceil
+
 from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
@@ -113,7 +115,7 @@ def time_stepping(ca, pot, t_end, tau, n_samples, use_pot):
 
 # %%
 # Evaluation of solutions
-def evalutate_solution(sol, t_end, tau, n_samples):
+def evaluate_solution(sol, t_end, tau, n_samples):
     dt = tau.to(au.s).value
     n_steps = int(ceil(t_end.to(au.s).value / dt))
     sample_int = int(ceil(n_steps / n_samples))
@@ -139,7 +141,7 @@ with TaskManager():
     potential.components[0].Set(0)
     ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=True)
     
-time, ca_full_near, ca_full_far = evalutate_solution(ca_t, t_end, tau, n_samples)
+time, ca_full_near, ca_full_far = evaluate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
@@ -155,7 +157,7 @@ with TaskManager():
     potential.components[0].Set(0)
     ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=False)
 
-time, ca_only_near, ca_only_far = evalutate_solution(ca_t, t_end, tau, n_samples)
+time, ca_only_near, ca_only_far = evaluate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
