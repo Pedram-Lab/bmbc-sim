@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from typing import Dict, Iterable
 
 import astropy.units as au
-from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction
+import astropy.constants as const
+from ngsolve import (Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction,
+                     CoefficientFunction, InnerProduct)
 from pyngcore import BitArray
-
 
 # Define common units for the simulation
 LENGTH_UNIT = au.um
@@ -42,7 +43,9 @@ class Simulation:
         self.mesh = mesh
         self._time_step_size = time_step
         self._compartments = {name: i for i, name in enumerate(mesh.GetMaterials())}
-        self._fes = FESpace([Compress(H1(mesh, order=order, definedon=mesh.Materials(name))) for name in mesh.GetMaterials()])
+        compartment_fes_list = [Compress(H1(mesh, order=order, definedon=mesh.Materials(name))) for name in mesh.GetMaterials()]
+        constraint_fes = FESpace("number", mesh)
+        self._fes = FESpace(compartment_fes_list + [constraint_fes])
         self._species = {}
         self._reactions = []
         self._channels = []
@@ -50,6 +53,9 @@ class Simulation:
         self._time_stepping_matrix = {}
         self._source_terms = {}
         self.concentrations = {}
+        self._a_pot_inv = {}
+        self._f_pot = None
+        self._potential = GridFunction(self._fes)
 
     def add_species(
             self,
@@ -135,6 +141,8 @@ class Simulation:
         for reaction in self._reactions:
             self._add_reaction_to_source_terms(reaction)
 
+        self._setup_potential_equation()
+
     def _setup_matrices(self, species):
         relevant_dofs = BitArray(self._fes.ndof)
         relevant_dofs[:] = True
@@ -203,14 +211,62 @@ class Simulation:
             for product in reaction.products:
                 self._source_terms[product.name] += -kr * reverse_reaction.Compile() * v[i] * dx(compartment)
 
+    def _add_charge_to_source_terms(self):
+        v = self._fes.TestFunction()
+        for name, u in self.concentrations.items():
+            beta = self._species[name].valence * const.e.si / (const.k_B * 310 * au.K)
+            diffusivity = self._species[name].diffusivity
+            for compartment, index in self._compartments.items():
+                if compartment in diffusivity:
+                    D = diffusivity[compartment].to(LENGTH_UNIT ** 2 / TIME_UNIT).value
+                    drift = InnerProduct(grad(self._potential.components[index]), grad(v[index]))
+                    self._source_terms[name] += D * beta.value * u.components[index] * drift  * dx(compartment)
+
+    def _setup_potential_equation(self):
+        # TODO: set permittivity based on the compartments
+        permittivity = 80.0 * const.eps0.to(au.F / LENGTH_UNIT)
+        F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
+
+        u, v = self._fes.TnT()
+        a = BilinearForm(self._fes, check_unused=False)
+        for compartment, index in self._compartments.items():
+            a += permittivity.value * grad(u[index]) * grad(v[index]) * dx(compartment)
+            a += v[-1] * v[index] * dx(compartment)
+            a += u[-1] * u[index] * dx(compartment)
+        a.Assemble()
+
+        for compartment, index in self._compartments.items():
+            relevant_dofs = BitArray(self._fes.ndof)
+            relevant_dofs[:] = False
+            self._set_dofs(relevant_dofs, self.mesh.Region(VOL, compartment), True)
+            relevant_dofs[-1] = True  # The last DOF is the Lagrange multiplier for the constraint
+            self._a_pot_inv[index] = a.mat.Inverse(relevant_dofs)
+
+        self._f_pot = LinearForm(self._fes)
+        for name, species in self._species.items():
+            valence = species.valence
+            u = self.concentrations[name]
+            diffusivity = self._species[name].diffusivity
+            for compartment, index in self._compartments.items():
+                if compartment in diffusivity:
+                    self._f_pot += F.value * valence * u.components[index] * v[index]  * dx(compartment)
+
     def time_step(self):
         residual = {}
         dt = self._time_step_size.to(TIME_UNIT).value
+
+        # Solve the potential equation
+        self._f_pot.Assemble()
+        for index, a_inv in self._a_pot_inv.items():
+            self._potential.components[index].Set(0)
+            self._potential.vec.data += a_inv * self._f_pot.vec
+
         for name, f in self._source_terms.items():
             f.Assemble()
             a = self._diffusion_matrix[name]
             u = self.concentrations[name]
             residual[name] = dt * (f.vec - a.mat * u.vec)
+
         for name, u in self.concentrations.items():
             u.vec.data += self._time_stepping_matrix[name] * residual[name]
 
