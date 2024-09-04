@@ -38,7 +38,7 @@ permittivity = relative_permittivity * const.eps0.to(au.F / au.um)
 F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
 valence = 2
 beta = (valence * const.e.si / (const.k_B * 310 * au.K)).to(au.C * au.s ** 2 / (au.kg * au.um ** 2))
-ca_ecs = 2 * au.mmol / au.L
+ca_ecs = 2 * au.mol / au.L
 source_point = (-0.4, 0.0, 0.1)
 tau = 1 * au.us
 
