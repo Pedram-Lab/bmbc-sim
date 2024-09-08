@@ -47,7 +47,7 @@ mass = u.kg
 time = u.ms
 length = u.um
 current = u.uA
-substance = u.fmol
+substance = u.pmol
 temp = u.K
 luminous_intensity = u.cd
 
