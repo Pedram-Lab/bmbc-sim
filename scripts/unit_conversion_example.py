@@ -43,11 +43,11 @@ for name, q in quantities.items():
 # %%
 # Determine prefixes of SI base units
 # Keep in mind that changing time and length units also change temporal and spatial derivatives!
-mass = u.kg
+mass = u.ng
 time = u.ms
 length = u.um
-current = u.uA
-substance = u.pmol
+current = u.pA
+substance = u.amol
 temp = u.K
 luminous_intensity = u.cd
 
@@ -67,6 +67,6 @@ rho_unit = current * time / length**3
 # This determines the prefixes for dependent units
 for name, q in quantities.items():
     unit = locals()[name + '_unit']
-    print(f"{name} = {q.to(unit):.0e} {unit} [{q}]")
+    print(f"{name}:  {unit} = {unit.to(q):.0e} {q}")
 
 # %%
