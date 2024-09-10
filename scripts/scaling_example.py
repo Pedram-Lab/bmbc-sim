@@ -17,6 +17,10 @@
 # This script solves the diffusion equation on a 1m^3 cube with a point source of calcium ions during 1s. The diffusion
 # constant and all other parameters are converted to different (but equivalent) units to assess the scaling behavior of
 # the method with respect to physical units.
+#
+# It seems that the system is:
+# * invariant under scaling of the time unit;
+# * invariant under scaling of the substance unit.
 
 # %%
 from netgen.csg import *
@@ -114,11 +118,10 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=1.0)
 
 # %%
-plt.plot(t, ca_near, label="at ca-source")
-plt.plot(t, ca_far, label="far from ca-source")
-plt.plot(t, ca_mass, label="total amount")
+plt.plot(t, (ca_near * substance / au.m**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
+plt.plot(t, (ca_far * substance / au.m**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
+plt.plot(t, (ca_mass * substance).to(au.mol), label="Total amount [mol]")
 plt.xlabel("Time [s]")
-plt.ylabel("Ca concentration [mol / m^3]")
 plt.legend()
 plt.show()
 
