@@ -20,7 +20,8 @@
 #
 # It seems that the system is:
 # * invariant under scaling of the time unit;
-# * invariant under scaling of the substance unit.
+# * invariant under scaling of the substance unit;
+# * scaling non-linearly in the length unit.
 
 # %%
 from netgen.csg import *
@@ -42,11 +43,11 @@ substance = au.mol
 D = (1 * au.m ** 2 / au.s).to(length**2 / time).value
 ca_source = (1 * au.mol / au.s).to(substance / time).value
 t_end = (1 * au.s).to(time).value
-dt = (1 * au.ms).to(time).value
 side_length = (1 * au.m).to(length).value
 mesh_size = (0.1 * au.m).to(length).value
-n_steps = 1000
+n_steps = 10000
 sample_interval = 10
+dt = (1 * au.s / n_steps).to(time).value
 
 # %%
 # Define geometry
@@ -113,13 +114,13 @@ with TaskManager():
 
 # %%
 # Visualize whole solution if desired
-clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
+clipping = {"function": True,  "pnt": (5, 5, 5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=1.0)
 
 # %%
-plt.plot(t, (ca_near * substance / au.m**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
-plt.plot(t, (ca_far * substance / au.m**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
+plt.plot(t, (ca_near * substance / length**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
+plt.plot(t, (ca_far * substance / length**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
 plt.plot(t, (ca_mass * substance).to(au.mol), label="Total amount [mol]")
 plt.xlabel("Time [s]")
 plt.legend()
