@@ -21,7 +21,7 @@
 # It seems that the system is:
 # * invariant under scaling of the time unit;
 # * invariant under scaling of the substance unit;
-# * scaling non-linearly in the length unit.
+# * scaling non-linearly in the length unit because point sources are very sensitive to local mesh size.
 
 # %%
 from netgen.csg import *
@@ -111,6 +111,7 @@ SetNumThreads(12)
 with TaskManager():
     concentration.Set(0)
     t, ca_near, ca_far, ca_mass, ca_t = time_stepping(concentration)
+t = (t * time).to(au.s)
 
 # %%
 # Visualize whole solution if desired
@@ -119,9 +120,8 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=1.0)
 
 # %%
-t = (t * time).to(au.s)
-# plt.plot(t, (ca_near * substance / length**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
-# plt.plot(t, (ca_far * substance / length**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
+plt.plot(t, (ca_near * substance / length**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
+plt.plot(t, (ca_far * substance / length**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
 plt.plot(t, (ca_mass * substance).to(au.mol), label="Total amount [mol]")
 plt.xlabel("Time [s]")
 plt.legend()
