@@ -45,7 +45,7 @@ ca_source = (1 * au.mol / au.s).to(substance / time).value
 t_end = (1 * au.s).to(time).value
 side_length = (1 * au.m).to(length).value
 mesh_size = (0.1 * au.m).to(length).value
-n_steps = 10000
+n_steps = 1000
 sample_interval = 10
 dt = (1 * au.s / n_steps).to(time).value
 
@@ -119,8 +119,9 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=1.0)
 
 # %%
-plt.plot(t, (ca_near * substance / length**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
-plt.plot(t, (ca_far * substance / length**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
+t = (t * time).to(au.s)
+# plt.plot(t, (ca_near * substance / length**3).to(au.mol / au.m**3), label="At ca-source [mol / m^3]")
+# plt.plot(t, (ca_far * substance / length**3).to(au.mol / au.m**3), label="Far from ca-source [mol / m^3]")
 plt.plot(t, (ca_mass * substance).to(au.mol), label="Total amount [mol]")
 plt.xlabel("Time [s]")
 plt.legend()
