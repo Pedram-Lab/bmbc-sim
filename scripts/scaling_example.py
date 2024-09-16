@@ -15,25 +15,22 @@
 # %% [markdown]
 # # Scaling a diffusion problem
 # This script solves the diffusion equation on a 1m^3 cube with a point source of calcium ions during 1s. The diffusion
-# constant and all other parameters are converted to different (but equivalent) units to assess the scaling behavior of
+# constant and all other parameters are converted to different systems of base units to assess the scaling behavior of
 # the method with respect to physical units.
 #
-# It seems that the system is:
-# * invariant under scaling of the time unit;
-# * invariant under scaling of the substance unit;
-# * scaling non-linearly in the length unit because point sources are very sensitive to local mesh size.
+# The result shows that no matter the SI-base units that are used for time, length, and substance, the system shows the same behavior, verifying that the system is invariant under scaling.
 
 # %%
-from netgen.csg import *
-from ngsolve import *
-from ngsolve.webgui import Draw
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.units as au
 from tqdm.notebook import trange
+from netgen.csg import *
+from ngsolve import *
+from ngsolve.webgui import Draw
 
 # %%
-# Fix base units; all other units are derived from these (change to see the effect of scaling)
+# Fix base units; all other units are derived from these (change prefixes to see the effect of scaling, e.g., au.m to au.dm)
 time = au.s
 length = au.m
 substance = au.mol
@@ -44,7 +41,7 @@ D = (1 * au.m ** 2 / au.s).to(length**2 / time).value
 ca_source = (1 * au.mol / au.s).to(substance / time).value
 t_end = (1 * au.s).to(time).value
 side_length = (1 * au.m).to(length).value
-mesh_size = (0.1 * au.m).to(length).value
+mesh_size = (0.05 * au.m).to(length).value
 n_steps = 1000
 sample_interval = 10
 dt = (1 * au.s / n_steps).to(time).value
@@ -52,17 +49,26 @@ dt = (1 * au.s / n_steps).to(time).value
 # %%
 # Define geometry
 s = side_length
+c = 0.1 * s
+d = c / 2
 cube = OrthoBrick(Pnt(0, 0, 0), Pnt(s, s, s))
+source = OrthoBrick(Pnt(c - d, c - d, c - d), Pnt(c + d, c + d, c + d))
+source_point = (c, c, c)
+far_point = (s - c, s - c, s - c)
 geo = CSGeometry()
-geo.Add(cube)
+geo.Add((cube - source).mat("volume"))
+geo.Add(source.mat("source"))
 mesh = Mesh(geo.GenerateMesh(maxh=mesh_size))
-source_point = (0, 0.1 * s, 0.1 * s)
-far_point = (0, 0.9 * s, 0.9 * s)
 
 # %%
 # Define FE space
-fes = H1(mesh, order=2)
+fes = H1(mesh, order=1)
 concentration = GridFunction(fes)
+
+# %%
+# normalize the source inflow wrt volume of the compartment
+source_volume = Integrate(1, mesh, definedon=mesh.Materials("source"))
+source = mesh.MaterialCF({"source": ca_source / source_volume, "volume": 0})
 
 # %%
 # Define diffusion problem
@@ -73,7 +79,7 @@ m = BilinearForm(fes)
 m += u * v * dx
 
 f = LinearForm(fes)
-f += (ca_source * v) (*source_point)  # point source of calcium
+f += source * v * dx  # approximated point source of calcium
 f.Assemble()
 
 a.Assemble()
