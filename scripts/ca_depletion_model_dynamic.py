@@ -48,7 +48,7 @@ simulation = Simulation(mesh, time_step=1 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
-    clamp={"ecs_top": 15 * u.millimole}
+    clamp={"ecs_top": 15 * u.mmol / u.L}
 )
 free_buffer = simulation.add_species(
     "free_buffer",
@@ -61,14 +61,14 @@ bound_buffer = simulation.add_species(
 simulation.add_reaction(
     reactants=(calcium, free_buffer),
     products=bound_buffer,
-    kf={"cytosol": 450 * u.micromole / u.s},
+    kf={"cytosol": 450  / (u.s * u.umol / u.L)},
     kr={"cytosol": 80 / u.s}
 )
 simulation.add_channel_flux(
     left="ecs",
     right="cytosol",
     boundary="channel",
-    rate=1 * u.millimole / u.s
+    rate=1 * u.mmol / (u.L * u.s)
 )
     
 # Alternative: EGTA as buffer
@@ -106,11 +106,11 @@ def time_stepping(simulation, t_end, n_samples):
 # Time stepping - set initial conditions and do time stepping
 with TaskManager():
     simulation.init_concentrations(
-        calcium={"ecs": 15 * u.millimole, "cytosol": 0.1 * u.micromole},
-        free_buffer={"cytosol": 1 * u.millimole}, # bapta
-        # free_buffer={"cytosol": 4.5 * u.millimole}, # low egta
-        # free_buffer={"cytosol": 40 * u.millimole}, # high egta
-        bound_buffer={"cytosol": 0 * u.millimole}
+        calcium={"ecs": 15 * u.mmol / u.L, "cytosol": 0.1 * u.umol / u.L},
+        free_buffer={"cytosol": 1 * u.mmol / u.L}, # bapta
+        # free_buffer={"cytosol": 4.5 * u.mmol / u.L}, # low egta
+        # free_buffer={"cytosol": 40 * u.mmol / u.L}, # high egta
+        bound_buffer={"cytosol": 0 * u.mmol / u.L}
     )
     ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=0.1 * u.s, n_samples=100)
 
