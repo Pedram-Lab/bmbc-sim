@@ -1,7 +1,7 @@
 # %% [markdown]
-# # Simulate a simple diffusion model including multiple species 
+# # Simulate a simple reaction-diffusion model
 # We start with 0mM calcium in a 1um x 1um x 1um box, which is clamped to 1mM on one side. We then simulate the
-# diffusion of calcium in the box with a buffer (BAPTA) being present, but not reacting with the calcium.
+# diffusion of calcium in the box with a buffer (BAPTA) being present.
 
 # %%
 from math import ceil
@@ -30,7 +30,7 @@ Draw(mesh)
 
 # %%
 # Set up a simulation on the mesh with BAPTA as a buffer
-simulation = Simulation(mesh, time_step=10 * u.us, t_end=1 * u.ms)
+simulation = Simulation(mesh, time_step=1 * u.us, t_end=1.5 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"solution": 0.6 * u.um**2 / u.ms},
@@ -43,6 +43,12 @@ free_buffer = simulation.add_species(
 bound_buffer = simulation.add_species(
     "bound_buffer",
     diffusivity={"solution": 95 * u.um**2 / u.s} #BAPTA
+)
+simulation.add_reaction(
+    reactants=(calcium, free_buffer),
+    products=bound_buffer,
+    kf={"solution": 450 / (u.s * u.umol / u.L)}, #BAPTA
+    kr={"solution": 80 / u.s} #BAPTA
 )
 
 
@@ -72,14 +78,14 @@ simulation.setup_problem()
 with TaskManager():
     simulation.init_concentrations(
         calcium={"solution": 0 * u.mmol / u.L},
-        free_buffer={"solution": 1 * u.mmol / u.L},
+        free_buffer={"solution": 2 * u.mmol / u.L},
         bound_buffer={"solution": 0 * u.mmol / u.L})
-    ca_t = time_stepping(simulation, n_samples=100)
+    ca_t, buf_t, comp_t = time_stepping(simulation, n_samples=100)
 
 # %%
 # Visualize
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
-# Draw(ca_t.components[0], settings=settings, interpolate_multidim=True, animate=True)
+# Draw(comp_t.components[0], settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
 # Create a line evaluator that evaluates a line from the left to right right side in the middle of the cube
@@ -90,10 +96,11 @@ line_evaluator = LineEvaluator(
     50  # Number of points to evaluate
 )
 
+# %%
 # Evaluate the concentration in the cytosol
-ca = line_evaluator.evaluate(simulation.concentrations["calcium"].components[0])
-buf = line_evaluator.evaluate(simulation.concentrations["free_buffer"].components[0])
-comp = line_evaluator.evaluate(simulation.concentrations["bound_buffer"].components[0])
+ca = line_evaluator.evaluate(ca_t.components[0].MDComponent(33))
+buf = line_evaluator.evaluate(buf_t.components[0].MDComponent(33))
+comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(33))
 
 # Get the x-coordinates for the plot
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
@@ -103,7 +110,49 @@ plt.figure(figsize=(10, 6))
 plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
 plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
 plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
-plt.title(r"Concentrations through the middle line at the end of simulation")
+plt.title(r"Concentrations through the middle line after 0.5ms")
+plt.xlabel(r"x-position ($\mathrm{\mu m}$)")
+plt.ylabel(r"concentration (nM)")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# %%
+# Evaluate the concentration in the cytosol
+ca = line_evaluator.evaluate(ca_t.components[0].MDComponent(66))
+buf = line_evaluator.evaluate(buf_t.components[0].MDComponent(66))
+comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(66))
+
+# Get the x-coordinates for the plot
+x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
+
+# Plot the results
+plt.figure(figsize=(10, 6))
+plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
+plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
+plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
+plt.title(r"Concentrations through the middle line after 1.0ms")
+plt.xlabel(r"x-position ($\mathrm{\mu m}$)")
+plt.ylabel(r"concentration (nM)")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# %%
+# Evaluate the concentration in the cytosol
+ca = line_evaluator.evaluate(ca_t.components[0].MDComponent(100))
+buf = line_evaluator.evaluate(buf_t.components[0].MDComponent(100))
+comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(100))
+
+# Get the x-coordinates for the plot
+x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
+
+# Plot the results
+plt.figure(figsize=(10, 6))
+plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
+plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
+plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
+plt.title(r"Concentrations through the middle line after 1.5ms")
 plt.xlabel(r"x-position ($\mathrm{\mu m}$)")
 plt.ylabel(r"concentration (nM)")
 plt.legend()
