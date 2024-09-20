@@ -166,7 +166,7 @@ with TaskManager():
         bound_buffer={"cytosol": 0 * u.millimole}
     )
     #ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=0.1 * u.s, n_samples=100)
-    ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=20 * u.ms, n_samples=100)
+    ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=0.02 * u.s, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
