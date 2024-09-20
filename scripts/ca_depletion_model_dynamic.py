@@ -67,20 +67,17 @@
 # * The dynamics of the system are resolved in time.
 
 # %%
-import matplotlib.pyplot as plt
+from math import ceil
 import csv
-from ngsolve import *
+
+import matplotlib.pyplot as plt
+from ngsolve import GridFunction, TaskManager
 from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 from astropy import units as u
 
 from ecsim.geometry import create_ca_depletion_mesh, LineEvaluator
 from ecsim.simulation import Simulation
-
-# %%
-# diameter_ch = 10 * u.nm
-# density_channel = 10000 / u.um**2
-# i_max = 0.1 * u.picoampere
 
 # %%
 # Create meshed geometry
@@ -180,21 +177,12 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, 
 Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
-# Define the constant values for y and z
-y_cyt = 1.5  # Constant value for y
-z_cyt = 2.8  # Constant value for z
-
-# Define the range and number of points for x
-x_start_cyt = 0.0  # Start of the x range
-x_end_cyt = 1.5    # End of the x range
-n_points_cyt = 50  # Number of points in the x range
-
-# Create the line evaluator using the LineEvaluator class
+# Create a line evaluator that evaluates a line away from the channel in the cytosol
 line_evaluator_cyt = LineEvaluator(
-    mesh, 
-    (x_start_cyt, y_cyt, z_cyt),  # Start point (x, y, z)
-    (x_end_cyt, y_cyt, z_cyt),    # End point (x, y, z)
-    n_points_cyt  # Number of points to evaluate
+    mesh,
+    (0.0, 1.5, 2.8),  # Start point (x, y, z)
+    (1.5, 1.5, 2.8),  # End point (x, y, z)
+    50  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the cytosol
@@ -213,7 +201,7 @@ plt.grid(True)
 plt.show()
 
 # %%
-# Guarda los valores en un archivo CSV
+# Save the values in a CSV file
 with open('calcium_concentrations_cyt_egta_high_vol2.csv', 'w', newline='') as csvfile:
     csvwriter = csv.writer(csvfile)
     csvwriter.writerow(['x_coords', 'concentrations_cyt'])  # Escribir la cabecera
@@ -221,21 +209,12 @@ with open('calcium_concentrations_cyt_egta_high_vol2.csv', 'w', newline='') as c
         csvwriter.writerow([x, conc])
 
 # %%
-# Define the constant values for y and z
-y_ecs = 1.5  # Constant value for y
-z_ecs = 3.005  # Constant value for z
-
-# Define the range and number of points for x
-x_start_ecs = 0.0  # Start of the x range
-x_end_ecs = 1.5    # End of the x range
-n_points_ecs = 50  # Number of points in the x range
-
-# Create the line evaluator using the LineEvaluator class
+# Create a line evaluator that evaluates a line in the extracellular space (ECS)
 line_evaluator_ecs = LineEvaluator(
-    mesh, 
-    (x_start_ecs, y_ecs, z_ecs),  # Start point (x, y, z)
-    (x_end_ecs, y_ecs, z_ecs),    # End point (x, y, z)
-    n_points_ecs  # Number of points to evaluate
+    mesh,
+    (0.0, 1.5, 3.005),  # Start point (x, y, z)
+    (1.5, 1.5, 3.005),  # End point (x, y, z)
+    50  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the extracellular space (ECS)
