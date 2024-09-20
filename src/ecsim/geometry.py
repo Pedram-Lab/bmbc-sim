@@ -1,3 +1,5 @@
+from typing import Sequence
+
 import numpy as np
 from netgen.occ import *
 from ngsolve import Mesh, CoefficientFunction
@@ -126,7 +128,7 @@ class LineEvaluator(PointEvaluator):
     Evaluates a coefficient function along a straight line segment.
     """
 
-    def __init__(self, mesh: Mesh, start: np.ndarray, end: np.ndarray, n: int):
+    def __init__(self, mesh: Mesh, start: Sequence, end: Sequence, n: int):
         """
         Initializes the LineEvaluator with the mesh, start, and end points of the line, and the number of points to evaluate.
         :param mesh: The NGSolve mesh object.
