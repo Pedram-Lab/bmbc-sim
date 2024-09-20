@@ -123,11 +123,6 @@ simulation.add_channel_flux(
     #rate= 7.04e+03 * u.millimole / u.s  # VOLUME 1
     rate= 1.86e+09 * u.millimole / u.s #VOLUME 2
 )
-    
-# Alternative: EGTA as buffer
-# free_buffer = simulation.add_species("free_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
-# bound_buffer = simulation.add_species("bound_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s})
-# simulation.add_reaction(reactants=(calcium, free_buffer), products=bound_buffer, kf={"cytosol": 2.7 * u.micromole / u.s}, kr={"cytosol": 0.5 / u.s})
 
 # %%
 # Internally set up all finite element infrastructure
@@ -232,43 +227,5 @@ plt.xlabel(r"Distance from the channel ($\mathrm{\mu m}$)")
 plt.ylabel(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ (mM)")
 plt.grid(True)
 plt.show()
-
-# %%
-# Assuming simulation is already set up and contains the concentrations dictionary
-# Retrieve the total DOFs from the FESpace
-total_dofs = simulation._fes.ndof
-print(f"Total degress of freedom: {total_dofs}")
-
-# Number of species involved in the simulation
-num_species = len(simulation.concentrations)
-print(f"number of species: {num_species}")
-
-# Estimate the total number of nodes in the mesh
-# This assumes DOFs are uniformly distributed across nodes
-nodes = total_dofs // num_species
-
-print(f"nodes: {nodes}")
-
-# DOFs per node should equal the number of species
-dofs_per_node = num_species
-
-print(f"Degrees of freedom per node: {dofs_per_node}")
-
-
-# %%
-# Example code to print DOFs per node for each species
-for name, gfu in simulation.concentrations.items():
-    print(f"Degrees of freedom for {name}: {gfu.vec.size}")
-
-# If the mesh has 'n' nodes, and there are 'm' species, then:
-total_dofs = sum(gfu.vec.size for gfu in simulation.concentrations.values())
-print(f"total degree of freedom: {total_dofs}")
-nodes = simulation._fes.ndof // total_dofs
-print(f"nodes: {nodes}")
-#print(f"Nodes: {nodes}")
-dofs_per_node = total_dofs / nodes
-
-print(f"Degrees of freedom per node: {dofs_per_node}")
-
 
 # %%
