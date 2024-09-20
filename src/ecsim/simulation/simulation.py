@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from math import ceil
 from typing import Dict, Iterable
 
 import astropy.units as au
@@ -6,37 +6,21 @@ from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearF
 from pyngcore import BitArray
 
 from ecsim.units import *
+from .simulation_agents import ChemicalSpecies, Reaction, ChannelFlux
 
-
-@dataclass
-class ChemicalSpecies:
-    name: str
-    diffusivity: Dict[str, au.Quantity]
-    clamp: Iterable[str]
-    # TODO: charge, ...?
-
-    @property
-    def compartments(self):
-        return self.diffusivity.keys()
-
-@dataclass
-class Reaction:
-    reactants: Iterable[ChemicalSpecies]
-    products: Iterable[ChemicalSpecies]
-    kf: Dict[str, au.Quantity]
-    kr: Dict[str, au.Quantity]
-
-@dataclass
-class ChannelFlux:
-    left: str
-    right: str
-    boundary: str
-    rate: au.Quantity
 
 class Simulation:
-    def __init__(self, mesh: Mesh, time_step: au.Quantity, order: int = 2):
+    def __init__(
+            self,
+            mesh: Mesh,
+            *,
+            time_step: au.Quantity,
+            t_end: au.Quantity,
+            order: int = 2
+    ):
         self.mesh = mesh
-        self._time_step_size = time_step
+        self._time_step_size = convert(time_step, TIME)
+        self._t_end = convert(t_end, TIME)
         self._compartments = {name: i for i, name in enumerate(mesh.GetMaterials())}
         self._fes = FESpace([Compress(H1(mesh, order=order, definedon=mesh.Materials(name))) for name in mesh.GetMaterials()])
         self._species = {}
@@ -46,6 +30,10 @@ class Simulation:
         self._time_stepping_matrix = {}
         self._source_terms = {}
         self.concentrations = {}
+
+    @property
+    def n_time_steps(self) -> int:
+        return int(ceil(self._t_end / self._time_step_size))
 
     def add_species(
             self,
@@ -160,8 +148,7 @@ class Simulation:
         a.Assemble()
         m.Assemble()
 
-        dt = convert(self._time_step_size, TIME)
-        m.mat.AsVector().data += dt * a.mat.AsVector()
+        m.mat.AsVector().data += self._time_step_size * a.mat.AsVector()
 
         return a, m.mat.Inverse(relevant_dofs)
 
@@ -199,12 +186,11 @@ class Simulation:
 
     def time_step(self):
         residual = {}
-        dt = convert(self._time_step_size, TIME)
         for name, f in self._source_terms.items():
             f.Assemble()
             a = self._diffusion_matrix[name]
             u = self.concentrations[name]
-            residual[name] = dt * (f.vec - a.mat * u.vec)
+            residual[name] = self._time_step_size * (f.vec - a.mat * u.vec)
         for name, u in self.concentrations.items():
             u.vec.data += self._time_stepping_matrix[name] * residual[name]
 

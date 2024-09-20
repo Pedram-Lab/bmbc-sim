@@ -91,7 +91,7 @@ mesh = create_ca_depletion_mesh(
 
 # %%
 # Set up a simulation on the mesh with BAPTA as a buffer
-simulation = Simulation(mesh, time_step=1 * u.ms)
+simulation = Simulation(mesh, time_step=10 * u.us, t_end=20 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
@@ -130,9 +130,8 @@ simulation.setup_problem()
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(simulation, t_end, n_samples):
-    n_steps = int(ceil(t_end.value / simulation._time_step_size.to(u.s).value))
-    sample_int = int(ceil(n_steps / n_samples))
+def time_stepping(simulation, n_samples):
+    sample_int = int(ceil(simulation.n_time_steps / n_samples))
     u_ca_t = GridFunction(simulation._fes, multidim=0)
     u_buf_t = GridFunction(simulation._fes, multidim=0)
     u_com_t = GridFunction(simulation._fes, multidim=0)
@@ -140,7 +139,7 @@ def time_stepping(simulation, t_end, n_samples):
     u_buf_t.AddMultiDimComponent(simulation.concentrations["free_buffer"].vec)
     u_com_t.AddMultiDimComponent(simulation.concentrations["bound_buffer"].vec)
     
-    for i in trange(n_steps):
+    for i in trange(simulation.n_time_steps):
         simulation.time_step()
         if i % sample_int == 0:
             u_ca_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
@@ -153,13 +152,13 @@ def time_stepping(simulation, t_end, n_samples):
 # Time stepping - set initial conditions and do time stepping
 with TaskManager():
     simulation.init_concentrations(
-        calcium={"ecs": 15 * u.mmol / u.L, "cytosol": 0.1 * u.mmol / u.L},
+        calcium={"ecs": 15 * u.mmol / u.L, "cytosol": 0.1 * u.umol / u.L},
         free_buffer={"cytosol": 1 * u.mmol / u.L}, # BAPTA
         #free_buffer={"cytosol": 4.5 * u.mmol / u.L}, # low EGTA
         #free_buffer={"cytosol": 40 * u.mmol / u.L}, # high EGTA
         bound_buffer={"cytosol": 0 * u.mmol / u.L}
     )
-    ca_t, buffer_t, complex_t = time_stepping(simulation, t_end=20 * u.ms, n_samples=100)
+    ca_t, buffer_t, complex_t = time_stepping(simulation, n_samples=100)
 
 # %%
 # Visualize (because of the product structure of the FESpace, the usual
