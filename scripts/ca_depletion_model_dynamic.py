@@ -86,7 +86,7 @@ mesh = create_ca_depletion_mesh(
     cytosol_height=3 * u.um,
     ecs_height=0.1 * u.um,
     mesh_size=0.25 * u.um,
-    channel_radius=0.005 * u.um
+    channel_radius=5 * u.nm
 )
 
 # %%

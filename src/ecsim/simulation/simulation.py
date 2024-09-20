@@ -40,7 +40,7 @@ class Simulation:
             name: str,
             *,
             diffusivity: Dict[str, au.Quantity],
-            clamp: str | Iterable[str] = None
+            clamp: Dict[str, au.Quantity] = None
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
@@ -54,9 +54,7 @@ class Simulation:
         for compartment in diffusivity:
             if compartment not in self._compartments:
                 raise ValueError(f"Compartment {compartment} not found in the mesh.")
-        clamp = clamp or []
-        if not isinstance(clamp, Iterable):
-            clamp = [clamp]
+        clamp = clamp or {}
         for boundary in clamp:
             if boundary not in self.mesh.GetBoundaries():
                 raise ValueError(f"Boundary {boundary} not found in the mesh.")
@@ -200,3 +198,12 @@ class Simulation:
                 i = self._compartments[compartment]
                 v = convert(value, CONCENTRATION)
                 self.concentrations[name].components[i].Set(v)
+
+            try:
+                species = self._species[name]
+                for bnd, value in species.clamp.items():
+                    v = convert(value, CONCENTRATION)
+                    self.concentrations[name].components[0].Set(v, definedon=self.mesh.Region(BND, bnd))
+            except Exception:
+                print(f"WARNING: Could not set up clamp for {name}. Using initial value instead.")
+

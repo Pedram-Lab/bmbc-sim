@@ -8,7 +8,7 @@ import astropy.units as au
 class ChemicalSpecies:
     name: str
     diffusivity: Dict[str, au.Quantity]
-    clamp: Iterable[str]
+    clamp: Dict[str, au.Quantity]
     # TODO: charge, ...?
 
     @property
