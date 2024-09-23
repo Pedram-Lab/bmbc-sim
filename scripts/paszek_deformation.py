@@ -44,7 +44,7 @@
 # |------------------------------------|--------------------------------|
 # | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm   (Nodes = 70x70x3)           |
 # | ECM substrate                | 1.4 μm x 1.4 μm x 400 nm    (Nodes = 70x70x21)        |
-# | Glycocalyx                   | 1.4 μm x 1.4 μm x 43 nm                               |
+# | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
 # | Bond formation geometry      | 240 nm x 240 nm x height of the compartment                               |
 #
 # According to Ashurt and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
@@ -57,9 +57,10 @@
 #
 
 # %%
+import math
+
 import matplotlib.pyplot as plt
 import numpy as np
-
 from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
@@ -67,29 +68,21 @@ from ngsolve.webgui import Draw
 # %%
 # Define units and parameters for the simulation
 from ecsim.units import *
-PRESSURE = MASS / (LENGTH * TIME ** 2)
 FORCE = MASS * LENGTH / TIME ** 2
+SPRING_CONSTANT = FORCE / LENGTH
 
 s = convert(1.4 * u.um, LENGTH) / 2
-ecs_height = convert(43 * u.nm, LENGTH)
+ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)
 mesh_size = convert(20 * u.nm, LENGTH)
 cutout_size = convert(300 * u.nm, LENGTH)
 
-pulling_force = convert(1 * u.pN, FORCE)
-young_ecs = convert(2.5 * u.fN / u.nm ** 2, PRESSURE)
-young_membrane = convert(0.05 * u.pN / u.nm ** 2, PRESSURE)
-poisson_ratio = 0.25
+pulling_force = convert(0.04 * u.pN, FORCE)
+spring_ecs = convert(0.01 * u.pN / u.nm, SPRING_CONSTANT)
+spring_membrane = convert(0.4 * u.pN / u.nm, SPRING_CONSTANT)
 
 # %%
-# Use the NGSolve parameter class to change parameters after defining everything
-mu = 200   # [E] = Pa       (e.g., steel = 200 GPa, cork = 30MPa)
-lam = 200  # [nu] = number  (e.g., steel = 0.3, cork = 0.0)
-clipping = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
-visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 1.0}
-
-# %%
-# Define geometry
+# Define geometry (we consider the substrate as fixed and don't model it explicitly)
 ecs = OrthoBrick(Pnt(-s, -s, 0), Pnt(s, s, ecs_height)).mat("ecs").bc("side")
 membrane = OrthoBrick(Pnt(-s, -s, ecs_height), Pnt(s, s, ecs_height + membrane_height)).mat("membrane").bc("side")
 
@@ -102,6 +95,15 @@ mesh.ngmesh.SetBCName(0, "substrate")
 mesh.ngmesh.SetBCName(4, "top")
 mesh.ngmesh.SetBCName(9, "interface")
 # Draw(mesh)
+
+# %%
+# Use the NGSolve parameter class to change parameters after defining everything
+lame = lambda k: math.sqrt(3) / 4 * k
+mu = mesh.MaterialCF({"ecs": lame(spring_ecs), "membrane": lame(spring_membrane)})
+lam = mesh.MaterialCF({"ecs": lame(spring_ecs), "membrane": lame(spring_membrane)})
+clipping = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
+visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 1.0}
+
 
 # %%
 def stress(strain):
@@ -132,7 +134,7 @@ def compute_solution(points):
 
 
 # %%
-def sample_cutout(mesh, deformation, n_samples=300):
+def sample_cutout(mesh, deformation, n_samples=150):
     x = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
     y = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
     X, Y = np.meshgrid(x, y)
@@ -148,17 +150,17 @@ def sample_cutout(mesh, deformation, n_samples=300):
 def visualize_deformation(mesh, deformation):
     X, Y, Z = sample_cutout(mesh, deformation)
     fig, ax = plt.subplots()
-    c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud')
+    c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud', vmin=0, vmax=18)
     ax.set_xlabel("x [µm]")
     ax.set_ylabel("y [µm]")
-    cbar = fig.colorbar(c, ax=ax, label='deformation [µm]')
+    cbar = fig.colorbar(c, ax=ax, label='deformation [nm]')
     plt.show()
 
 # %%
 # Compute elastic deformation of membrane and ECS for one ...
 points = [(0, 0, ecs_height)]
 deformation_1 = compute_solution(points)
-# Draw(deformation_1, settings=visualization_settings, clipping=clipping)
+Draw(deformation_1, settings=visualization_settings, clipping=clipping)
 
 # %%
 # ... two ...
@@ -177,7 +179,5 @@ deformation_3 = compute_solution(points)
 visualize_deformation(mesh, deformation_1)
 visualize_deformation(mesh, deformation_2)
 visualize_deformation(mesh, deformation_3)
-
-# %%
 
 # %%
