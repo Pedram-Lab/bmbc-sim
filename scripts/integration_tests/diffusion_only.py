@@ -29,8 +29,8 @@ mesh.ngmesh.SetBCName(1, "clamped")
 Draw(mesh)
 
 # %%
-# Set up a simulation on the mesh with BAPTA as a buffer
-simulation = Simulation(mesh, time_step=10 * u.us, t_end=0.1 * u.ms)
+# Set up a simulation
+simulation = Simulation(mesh, time_step=10 * u.us, t_end=1.0 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"solution": 0.6 * u.um**2 / u.ms},
@@ -39,7 +39,7 @@ calcium = simulation.add_species(
 
 
 # %%
-# Time stepping - define a function that pre-computes all timesteps
+# Time stepping - define a function that computes all time steps
 def time_stepping(simulation, n_samples):
     sample_int = int(ceil(simulation.n_time_steps / n_samples))
     ca_t = GridFunction(simulation._fes, multidim=0)
@@ -80,7 +80,6 @@ c = line_evaluator.evaluate(simulation.concentrations["calcium"].components[0])
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x, c, marker='o', linestyle='-', color='blue')
 plt.title(r"$[\mathrm{Ca}^{2+}]$ vs position")
 plt.xlabel(r"x-position ($\mathrm{\mu m}$)")

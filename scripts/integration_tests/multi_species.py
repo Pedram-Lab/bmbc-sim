@@ -99,7 +99,6 @@ comp = line_evaluator.evaluate(simulation.concentrations["bound_buffer"].compone
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
 plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
 plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")

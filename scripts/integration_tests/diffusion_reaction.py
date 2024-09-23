@@ -106,7 +106,6 @@ comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(33))
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
 plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
 plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
@@ -127,7 +126,6 @@ comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(66))
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
 plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
 plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
@@ -148,7 +146,6 @@ comp = line_evaluator.evaluate(comp_t.components[0].MDComponent(100))
 x = line_evaluator.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x, ca, marker='o', linestyle='-', color='blue', label="$[\mathrm{Ca}^{2+}]$")
 plt.plot(x, buf, marker='x', linestyle='-', color='red', label="$[\mathrm{BAPTA}]$")
 plt.plot(x, comp, marker='.', linestyle='-', color='orange', label="$[\mathrm{CaBAPTA}]$")
