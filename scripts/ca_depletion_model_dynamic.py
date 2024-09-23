@@ -91,7 +91,7 @@ mesh = create_ca_depletion_mesh(
 
 # %%
 # Set up a simulation on the mesh with BAPTA as a buffer
-simulation = Simulation(mesh, time_step=10 * u.us, t_end=20 * u.ms)
+simulation = Simulation(mesh, time_step=1 * u.us, t_end=20 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
@@ -119,8 +119,10 @@ simulation.add_channel_flux(
     left="ecs",
     right="cytosol",
     boundary="channel",
-    #rate= 7.04e+03 * u.mmol / (u.L * u.s)  # VOLUME 1
-    rate= 1.86e+09 * u.mmol / (u.L * u.s) #VOLUME 2
+    rate = 1 * u.um / u.ms
+    # old values:
+    # rate= 7.04e+03 * u.mmol / (u.L * u.s)  # VOLUME 1
+    # rate= 1.86e+09 * u.mmol / (u.L * u.s) #VOLUME 2
 )
 
 # %%

@@ -140,7 +140,7 @@ class Simulation:
         for channel in self._channels:
             i = self._compartments[channel.left]
             j = self._compartments[channel.right]
-            rate = convert(channel.rate, FLUX)
+            rate = convert(channel.rate, FLUX_RATE)
             a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
 
         a.Assemble()
