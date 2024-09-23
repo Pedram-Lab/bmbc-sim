@@ -24,18 +24,20 @@
 #
 # | Parameter                          | Definition                              | Value                      |
 # |------------------------------------|-----------------------------------------| ---------------------------|
-# | $\sigma_g$                         | Glycocalyx spring constant              | 0.02 pN/nm                 |
+# | $\sigma_g$                         | Glycocalyx spring constant              | 0.01 pN/nm                 |
 # | $\sigma_m$                         | Membrane spring constant                | 0.4 pN/nm                  |
 # | $\sigma_b$                         | Bond spring constant                    | 2 pN/nm                    |
+# | $\sigma_s$                         | Substrate spring constant               | 1000 pN/nm                 |
 # | $\Delta x$                         | Lattice node spacing                    | 20 nm                      |
 # | $ν$                                | Poisson ratio                           | 0.25                       |
 # | Y$_g$                              | Young's modulus for glycocalyx          | 0.0025 pN/nm$^2$           |
 # | Y$_{m}$                            | Young's modulus for PM                  | 0.05 pN/nm$^2$             |
 # | Y$_{b}$                            | Young's modulus for bond                | 0.25 pN/nm$^2$             |
-# | l$_{g}$                            | Glycocalyx thickness                    | 43 nm                      |
-# | l$_{b}$                            | Equilibrium bond length                 | 27 nm                      |
-# | F                                  | Bond force                              | 0 - 10 pN                  |
-# | l$_{d}$                            | Equilibrium separation distance         | 0-15 nm                    |
+# | Y$_{s}$                            | Young's modulus for substrate           | 125 pN/nm$^2$              |
+# | l$_{g}$                            | Glycocalyx thickness                    | 45 nm                      |
+# | l$_{b}$                            | Equilibrium bond length                 | 18 nm                      |
+# | F                                  | Bond force                              | 4 pN                       |
+# | l$_{d}$                            | Equilibrium separation distance         | 13.5 nm                    |
 #
 #
 # | Compartment                          | Size                         |
@@ -44,6 +46,15 @@
 # | ECM substrate                | 1.4 μm x 1.4 μm x 400 nm    (Nodes = 70x70x21)        |
 # | Glycocalyx                   | 1.4 μm x 1.4 μm x 43 nm                               |
 # | Bond formation geometry      | 240 nm x 240 nm x height of the compartment                               |
+#
+# According to Ashurt and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
+#
+# $\lambda$ = $\eta = \frac{1}{4}\sqrt{3}*k$,
+#
+# where $k$ is the spring constant, with units of pN/nm. Using this formula, the Lamé constants can be computed using above values.  
+#
+# Note: Normally, in the continuum elasticity theory, $\lambda$ describes the material's resistance to uniform compression, and it has units of pressure because it's derived from stress-strain relationships (where stress = force/area). However, in the model described by Ashurt and Hoover, $\lambda$ is connected directly to a spring constant. Springs don't directly involve an area, so the spring constant $k$ has units of force per length (N/m), and the Lamé constant is expressed with the same units in the simplified spring model.
+#
 
 # %%
 import matplotlib.pyplot as plt
