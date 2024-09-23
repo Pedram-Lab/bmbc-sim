@@ -75,7 +75,7 @@ poisson_ratio = 0.25
 mu = 200   # [E] = Pa       (e.g., steel = 200 GPa, cork = 30MPa)
 lam = 200  # [nu] = number  (e.g., steel = 0.3, cork = 0.0)
 clipping = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
-visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
+visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 1.0}
 
 # %%
 # Define geometry
@@ -121,17 +121,52 @@ def compute_solution(points):
 
 
 # %%
-# Visualize elastic deformation of steel and cork under atmospheric pressure
-# The deformation will be under about 2%, which is where the use of linear elasticity is usually justified
+def sample_cutout(mesh, deformation, n_samples=300):
+    x = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
+    y = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
+    X, Y = np.meshgrid(x, y)
+    z = ecs_height
+
+    points = [(x, y, z) for x, y in zip(X.flatten(), Y.flatten())]
+    mips = [mesh(*p) for p in points]
+    deformation_z = [deformation.components[2](p) for p in mips]
+
+    return X, Y, z + np.array(deformation_z).reshape((n_samples, n_samples))
+
+# %%
+def visualize_deformation(mesh, deformation):
+    X, Y, Z = sample_cutout(mesh, deformation)
+    fig, ax = plt.subplots()
+    c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud')
+    ax.set_xlabel("x [µm]")
+    ax.set_ylabel("y [µm]")
+    cbar = fig.colorbar(c, ax=ax, label='deformation [µm]')
+    plt.show()
+
+# %%
+# Compute elastic deformation of membrane and ECS for one ...
 points = [(0, 0, ecs_height)]
 deformation_1 = compute_solution(points)
-Draw(deformation_1, settings=visualization_settings, clipping=clipping)
+# Draw(deformation_1, settings=visualization_settings, clipping=clipping)
 
-# fig, ax = plt.subplots()
-# ax.loglog(f_list, absolute_deformation, 'b-', label="Deformation in negative z-direction [m]")
-# ax.loglog(f_list, absolute_volume, 'r-', label="Absolute change in volume [m^3]")
-# ax.set_xlabel("Pressure [Pa]")
-# ax.legend()
-# plt.show()
+# %%
+# ... two ...
+points = [(-0.04, 0, ecs_height), (0.04, 0, ecs_height)]
+deformation_2 = compute_solution(points)
+# Draw(deformation_2, settings=visualization_settings, clipping=clipping)
+
+# %%
+# ... and three points
+points = [(-0.03, -0.02, ecs_height), (0.03, -0.02, ecs_height), (0, 0.03, ecs_height)]
+deformation_3 = compute_solution(points)
+# Draw(deformation_3, settings=visualization_settings, clipping=clipping)
+
+# %%
+# Visualize elastic deformation of membrane and ECS after some post-processing
+visualize_deformation(mesh, deformation_1)
+visualize_deformation(mesh, deformation_2)
+visualize_deformation(mesh, deformation_3)
+
+# %%
 
 # %%
