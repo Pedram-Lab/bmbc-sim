@@ -41,5 +41,22 @@
 # | ECM substrate                | 1.4 μm x 1.4 μm x 400 nm    (Nodes = 70x70x21)        |
 # | Glycocalyx                   | 1.4 μm x 1.4 μm x 43 nm                               |
 # | Bond formation geometry      | 240 nm x 240 nm x height of the compartment                               |
+#
+#
+# According to Ashurt and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
+#
+# $\lambda$ = $\eta = \frac{1}{4}\sqrt{3}*k$,
+#
+# where $k$ is the spring constant, with units of pN/nm. Accordingly, the Lamé constants have the following values:  
+#
+#
+# | Parameter                          | Definition                              | Value                      |
+# |------------------------------------|-----------------------------------------| ---------------------------|
+# | $\lambda_g = \eta_g$               | Lamé constants for glycocalyx           | 0.008660254037844387 pN/nm |
+# | $\lambda_m = \eta_m$               | Lamé constants for plasma membrane      | 0.17320508075688773 pN/nm  |
+# | $\lambda_b = \eta_b$               | Lamé constants for bond                 | 0.8660254037844386 pN/nm   |
+#
+# Note: Normally, in the continuum elasticity theory, $\lambda$ describes the material's resistance to uniform compression, and it has units of pressure because it's derived from stress-strain relationships (where stress = force/area). However, in the model described by Ashurt and Hoover, $lambda$ is connected directly to a spring constant. Springs don't directly involve an area, so the spring constant $k$ has units of force per length (N/m), and the Lamé constant is expressed with the same units in the simplified spring model.
+#
 
 # %%
