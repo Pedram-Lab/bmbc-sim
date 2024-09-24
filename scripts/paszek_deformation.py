@@ -69,17 +69,18 @@ from ngsolve.webgui import Draw
 # Define units and parameters for the simulation
 from ecsim.units import *
 FORCE = MASS * LENGTH / TIME ** 2
-SPRING_CONSTANT = FORCE / LENGTH
+PRESSURE = FORCE / LENGTH ** 2
 
 s = convert(1.4 * u.um, LENGTH) / 2
 ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)
-mesh_size = convert(20 * u.nm, LENGTH)
+mesh_size = convert(10 * u.nm, LENGTH)
 cutout_size = convert(300 * u.nm, LENGTH)
 
-pulling_force = convert(0.04 * u.pN, FORCE)
-spring_ecs = convert(0.01 * u.pN / u.nm, SPRING_CONSTANT)
-spring_membrane = convert(0.4 * u.pN / u.nm, SPRING_CONSTANT)
+pulling_force = convert(10 * u.pN, FORCE)
+youngs_modulus_ecs = convert(2.5 * u.fN / u.nm ** 2, PRESSURE)
+youngs_modulus_membrane = convert(50 * u.fN / u.nm ** 2, PRESSURE)
+poisson_ratio = 0.25
 
 # %%
 # Define geometry (we consider the substrate as fixed and don't model it explicitly)
@@ -97,10 +98,13 @@ mesh.ngmesh.SetBCName(9, "interface")
 # Draw(mesh)
 
 # %%
-# Use the NGSolve parameter class to change parameters after defining everything
-lame = lambda k: math.sqrt(3) / 4 * k
-mu = mesh.MaterialCF({"ecs": lame(spring_ecs), "membrane": lame(spring_membrane)})
-lam = mesh.MaterialCF({"ecs": lame(spring_ecs), "membrane": lame(spring_membrane)})
+# Set Lamé constants based on Young's modulus and Poisson ratio
+E = mesh.MaterialCF({"ecs": youngs_modulus_ecs, "membrane": youngs_modulus_membrane})
+nu = poisson_ratio
+
+mu = E / (2 * (1 + nu))
+lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+
 clipping = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
 visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 1.0}
 
