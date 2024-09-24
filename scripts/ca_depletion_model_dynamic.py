@@ -71,7 +71,7 @@ from math import ceil
 import csv
 
 import matplotlib.pyplot as plt
-from ngsolve import GridFunction, TaskManager
+from ngsolve import GridFunction, TaskManager, SetNumThreads
 from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 from astropy import units as u
@@ -119,7 +119,7 @@ simulation.add_channel_flux(
     left="ecs",
     right="cytosol",
     boundary="channel",
-    rate = 1 * u.um / u.ms
+    rate = 1e16 * u.um / u.ms
     # old values:
     # rate= 7.04e+03 * u.mmol / (u.L * u.s)  # VOLUME 1
     # rate= 1.86e+09 * u.mmol / (u.L * u.s) #VOLUME 2
@@ -152,6 +152,7 @@ def time_stepping(simulation, n_samples):
 
 # %%
 # Time stepping - set initial conditions and do time stepping
+SetNumThreads(12)
 with TaskManager():
     simulation.init_concentrations(
         calcium={"ecs": 15 * u.mmol / u.L, "cytosol": 0.1 * u.umol / u.L},
@@ -174,33 +175,38 @@ Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multi
 # Create a line evaluator that evaluates a line away from the channel in the cytosol
 line_evaluator_cyt = LineEvaluator(
     mesh,
-    (0.0, 1.5, 2.8),  # Start point (x, y, z)
-    (1.5, 1.5, 2.8),  # End point (x, y, z)
+    (0.0, 1.5, 2.995),  # Start point (x, y, z)
+    (1.5, 1.5, 2.995),  # End point (x, y, z)
     50  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the cytosol
-concentrations_cyt = line_evaluator_cyt.evaluate(simulation.concentrations["calcium"].components[1])
+step = 100
+ca_cyt = line_evaluator_cyt.evaluate(ca_t.components[1].MDComponent(step))
+buffer_cyt = line_evaluator_cyt.evaluate(buffer_t.components[1].MDComponent(step))
+complex_cyt = line_evaluator_cyt.evaluate(complex_t.components[1].MDComponent(step))
 
 # Get the x-coordinates for the plot
 x_coords = line_evaluator_cyt.raw_points[:, 0]  # Extract the x-coordinates
 
 # Plot the results
-plt.figure(figsize=(10, 6))
-plt.plot(x_coords, concentrations_cyt, marker='o', linestyle='-', color='blue')
-plt.title(r"$[\mathrm{Ca}^{2+}]_{\mathrm{cyt}}$ vs Distance from the channel")
+plt.plot(x_coords, ca_cyt, marker='o', linestyle='-', color='red', label='$[\mathrm{Ca}^{2+}]_{\mathrm{cyt}}$')
+plt.plot(x_coords, buffer_cyt, marker='x', linestyle='-', color='blue', label='$[\mathrm{BAPTA}]_{\mathrm{cyt}}$')
+plt.plot(x_coords, complex_cyt, marker='s', linestyle='-', color='magenta', label='$[\mathrm{CaBAPTA}]_{\mathrm{cyt}}$')
+plt.title(r"Concentration vs distance from the channel")
 plt.xlabel(r"Distance from the channel ($\mathrm{\mu m}$)")
-plt.ylabel(r"$[\mathrm{Ca}^{2+}]_{\mathrm{cyt}}$ (nM)")
+plt.ylabel(r"Concentration (mM)")
+plt.legend()
 plt.grid(True)
 plt.show()
 
 # %%
 # Save the values in a CSV file
-with open('calcium_concentrations_cyt_egta_high_vol2.csv', 'w', newline='') as csvfile:
-    csvwriter = csv.writer(csvfile)
-    csvwriter.writerow(['x_coords', 'concentrations_cyt'])  # Escribir la cabecera
-    for x, conc in zip(x_coords, concentrations_cyt):
-        csvwriter.writerow([x, conc])
+# with open('calcium_concentrations_cyt_egta_high_vol2.csv', 'w', newline='') as csvfile:
+#     csvwriter = csv.writer(csvfile)
+#     csvwriter.writerow(['x_coords', 'concentrations_cyt'])
+#     for x, conc in zip(x_coords, concentrations_cyt):
+#         csvwriter.writerow([x, conc])
 
 # %%
 # Create a line evaluator that evaluates a line in the extracellular space (ECS)
@@ -218,7 +224,6 @@ concentrations_ecs = line_evaluator_ecs.evaluate(simulation.concentrations["calc
 x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
 
 # Plot the results
-plt.figure(figsize=(10, 6))
 plt.plot(x_coords_ecs, concentrations_ecs, marker='o', linestyle='-', color='red')
 plt.ylim([14.5, 15.1])
 plt.title(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ vs Distance from the channel")
