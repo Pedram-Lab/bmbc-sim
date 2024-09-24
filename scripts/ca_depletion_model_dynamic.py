@@ -119,7 +119,7 @@ simulation.add_channel_flux(
     left="ecs",
     right="cytosol",
     boundary="channel",
-    rate = 1e16 * u.um / u.ms
+    rate = 1.86e3 * u.um / u.ms
     # old values:
     # rate= 7.04e+03 * u.mmol / (u.L * u.s)  # VOLUME 1
     # rate= 1.86e+09 * u.mmol / (u.L * u.s) #VOLUME 2
@@ -169,15 +169,15 @@ with TaskManager():
 visualization = mesh.MaterialCF({"ecs": ca_t.components[0], "cytosol": ca_t.components[1]})
 clipping = {"function": True,  "pnt": (0, 0, 1.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, "Colormap": {"ncolors": 32, "autoscale": False, "max": 15}}
-Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
+# Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multidim=True, animate=True)
 
 # %%
 # Create a line evaluator that evaluates a line away from the channel in the cytosol
 line_evaluator_cyt = LineEvaluator(
     mesh,
-    (0.0, 0.0, 2.995),  # Start point (x, y, z)
-    (0.6, 0.0, 2.995),  # End point (x, y, z)
-    60  # Number of points to evaluate
+    (0.0, 0.0, 2.98),  # Start point (x, y, z)
+    (0.6, 0.0, 2.98),  # End point (x, y, z)
+    120  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the cytosol
@@ -214,7 +214,7 @@ line_evaluator_ecs = LineEvaluator(
     mesh,
     (0.0, 0.0, 3.005),  # Start point (x, y, z)
     (0.6, 0.0, 3.005),  # End point (x, y, z)
-    60  # Number of points to evaluate
+    120  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the extracellular space (ECS)
@@ -225,7 +225,6 @@ x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
 
 # Plot the results
 plt.plot(x_coords_ecs, concentrations_ecs, marker='o', linestyle='-', color='red')
-plt.ylim([14.5, 15.1])
 plt.title(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ vs Distance from the channel")
 plt.xlabel(r"Distance from the channel ($\mathrm{\mu m}$)")
 plt.ylabel(r"$[\mathrm{Ca}^{2+}]_{\mathrm{ecs}}$ (mM)")
