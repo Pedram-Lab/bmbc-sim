@@ -175,9 +175,9 @@ Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multi
 # Create a line evaluator that evaluates a line away from the channel in the cytosol
 line_evaluator_cyt = LineEvaluator(
     mesh,
-    (0.0, 1.5, 2.995),  # Start point (x, y, z)
-    (1.5, 1.5, 2.995),  # End point (x, y, z)
-    50  # Number of points to evaluate
+    (0.0, 0.0, 2.995),  # Start point (x, y, z)
+    (0.6, 0.0, 2.995),  # End point (x, y, z)
+    60  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the cytosol
@@ -212,9 +212,9 @@ plt.show()
 # Create a line evaluator that evaluates a line in the extracellular space (ECS)
 line_evaluator_ecs = LineEvaluator(
     mesh,
-    (0.0, 1.5, 3.005),  # Start point (x, y, z)
-    (1.5, 1.5, 3.005),  # End point (x, y, z)
-    50  # Number of points to evaluate
+    (0.0, 0.0, 3.005),  # Start point (x, y, z)
+    (0.6, 0.0, 3.005),  # End point (x, y, z)
+    60  # Number of points to evaluate
 )
 
 # Evaluate the concentration in the extracellular space (ECS)
