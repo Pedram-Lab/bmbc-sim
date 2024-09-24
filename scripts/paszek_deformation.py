@@ -106,7 +106,7 @@ mu = E / (2 * (1 + nu))
 lam = E * nu / ((1 + nu) * (1 - 2 * nu))
 
 clipping = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
-visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 1.0}
+visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}, "deformation": 3.0}
 
 
 # %%
@@ -115,7 +115,7 @@ def stress(strain):
 
 # %%
 # Define mechanic problem
-fes = VectorH1(mesh, order=2, dirichlet="substrate")
+fes = VectorH1(mesh, order=1, dirichlet="substrate")
 u, v = fes.TnT()
 
 blf = BilinearForm(fes)
@@ -125,11 +125,11 @@ a_inv = blf.mat.Inverse(fes.FreeDofs())
 
 
 # %%
-def compute_solution(points):
+def compute_solution(points, force):
     deformation = GridFunction(fes)
     lf = LinearForm(fes)
     for p in points:
-        lf += (-pulling_force * v[2])(*p)
+        lf += (-force * v[2])(*p)
     
     with TaskManager():
         lf.Assemble()
@@ -138,7 +138,7 @@ def compute_solution(points):
 
 
 # %%
-def sample_cutout(mesh, deformation, n_samples=150):
+def sample_cutout(mesh, deformation, n_samples=300):
     x = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
     y = np.linspace(-cutout_size / 2, cutout_size / 2, n_samples)
     X, Y = np.meshgrid(x, y)
@@ -151,7 +151,25 @@ def sample_cutout(mesh, deformation, n_samples=150):
     return X, Y, z + np.array(deformation_z).reshape((n_samples, n_samples))
 
 # %%
-def visualize_deformation(mesh, deformation):
+# Compute elastic deformation of membrane and ECS for one ...
+points = [(0, 0, ecs_height)]
+deformation_1 = compute_solution(points, pulling_force)
+# Draw(deformation_1, settings=visualization_settings, clipping=clipping)
+
+# %%
+# ... two ...
+points = [(-0.04, 0, ecs_height), (0.04, 0, ecs_height)]
+deformation_2 = compute_solution(points, 0.9 * pulling_force)
+# Draw(deformation_2, settings=visualization_settings, clipping=clipping)
+
+# %%
+# ... and three points
+points = [(-0.03, -0.02, ecs_height), (0.03, -0.02, ecs_height), (0, 0.03, ecs_height)]
+deformation_3 = compute_solution(points, 0.7 * pulling_force)
+# Draw(deformation_3, settings=visualization_settings, clipping=clipping)
+
+# %%
+def visualize_deformation_2d(mesh, deformation):
     X, Y, Z = sample_cutout(mesh, deformation)
     fig, ax = plt.subplots()
     c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud', vmin=0, vmax=18)
@@ -161,27 +179,29 @@ def visualize_deformation(mesh, deformation):
     plt.show()
 
 # %%
-# Compute elastic deformation of membrane and ECS for one ...
-points = [(0, 0, ecs_height)]
-deformation_1 = compute_solution(points)
-Draw(deformation_1, settings=visualization_settings, clipping=clipping)
-
-# %%
-# ... two ...
-points = [(-0.04, 0, ecs_height), (0.04, 0, ecs_height)]
-deformation_2 = compute_solution(points)
-# Draw(deformation_2, settings=visualization_settings, clipping=clipping)
-
-# %%
-# ... and three points
-points = [(-0.03, -0.02, ecs_height), (0.03, -0.02, ecs_height), (0, 0.03, ecs_height)]
-deformation_3 = compute_solution(points)
-# Draw(deformation_3, settings=visualization_settings, clipping=clipping)
+def visualize_deformation_3d(mesh, deformation):
+    X, Y, Z = sample_cutout(mesh, deformation)
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    c = ax.plot_surface(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", vmin=0, vmax=18, antialiased=False)
+    ax.set_xlim3d(-0.05, 0.05)
+    ax.set_ylim3d(-0.05, 0.05)
+    ax.view_init(160, 70, 0)
+    ax.set_facecolor('black')
+    ax.set_box_aspect((10, 10, 5))
+    ax.set_axis_off()
+    cbar = fig.colorbar(c, ax=ax, label='deformation [nm]')
+    plt.show()
 
 # %%
 # Visualize elastic deformation of membrane and ECS after some post-processing
-visualize_deformation(mesh, deformation_1)
-visualize_deformation(mesh, deformation_2)
-visualize_deformation(mesh, deformation_3)
+visualize_deformation_2d(mesh, deformation_1)
+visualize_deformation_2d(mesh, deformation_2)
+visualize_deformation_2d(mesh, deformation_3)
+
+# %%
+# Visualize elastic deformation of membrane and ECS after some post-processing
+visualize_deformation_3d(mesh, deformation_1)
+visualize_deformation_3d(mesh, deformation_2)
+visualize_deformation_3d(mesh, deformation_3)
 
 # %%
