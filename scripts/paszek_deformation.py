@@ -65,12 +65,10 @@ from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
 
+from ecsim.units import *
+
 # %%
 # Define units and parameters for the simulation
-from ecsim.units import *
-FORCE = MASS * LENGTH / TIME ** 2
-PRESSURE = FORCE / LENGTH ** 2
-
 s = convert(1.4 * u.um, LENGTH) / 2
 ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)
