@@ -47,7 +47,7 @@
 # | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
 # | Bond formation geometry      | 240 nm x 240 nm x height of the compartment                               |
 #
-# According to Ashurt and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
+# According to Ashurst and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
 #
 # $\lambda$ = $\eta = \frac{1}{4}\sqrt{3}*k$,
 #
