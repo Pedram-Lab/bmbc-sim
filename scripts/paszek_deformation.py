@@ -42,19 +42,8 @@
 #
 # | Compartment                          | Size                         |
 # |------------------------------------|--------------------------------|
-# | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm   (Nodes = 70x70x3)           |
-# | ECM substrate                | 1.4 μm x 1.4 μm x 400 nm    (Nodes = 70x70x21)        |
+# | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm          |
 # | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
-# | Bond formation geometry      | 240 nm x 240 nm x height of the compartment                               |
-#
-# According to Ashurst and Hoover, to compare the elastic energy according to the linear-finite-element theory with the energy from the Hooke's law springs, the Lamé constants $\lambda$ and $\eta$ need to be expressed in terms of the spring constant:
-#
-# $\lambda$ = $\eta = \frac{1}{4}\sqrt{3}*k$,
-#
-# where $k$ is the spring constant, with units of pN/nm. Using this formula, the Lamé constants can be computed using above values.  
-#
-# Note: Normally, in the continuum elasticity theory, $\lambda$ describes the material's resistance to uniform compression, and it has units of pressure because it's derived from stress-strain relationships (where stress = force/area). However, in the model described by Ashurt and Hoover, $\lambda$ is connected directly to a spring constant. Springs don't directly involve an area, so the spring constant $k$ has units of force per length (N/m), and the Lamé constant is expressed with the same units in the simplified spring model.
-#
 
 # %%
 import math
@@ -65,12 +54,10 @@ from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
 
+from ecsim.units import *
+
 # %%
 # Define units and parameters for the simulation
-from ecsim.units import *
-FORCE = MASS * LENGTH / TIME ** 2
-PRESSURE = FORCE / LENGTH ** 2
-
 s = convert(1.4 * u.um, LENGTH) / 2
 ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)

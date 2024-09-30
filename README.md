@@ -29,3 +29,4 @@ Saving a notebook will also automatically update the associated `.py` file.
 
 ### Examples
 Currently, all examples are located in the `scripts/` directory. Apart from simulations, there are some files that showcase how to use some aspects of NGSolve in greater detail, since the documentation is sometimes lacking for what we need. These are located in the `tutorials/` subfolder.
+

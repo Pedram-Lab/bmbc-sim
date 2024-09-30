@@ -22,6 +22,9 @@ FORWARD_RATE = (CONCENTRATION * TIME) ** (-1)
 REVERSE_RATE = TIME ** (-1)
 FLUX_RATE = LENGTH / TIME
 
+FORCE = MASS * LENGTH / TIME ** 2
+PRESSURE = FORCE / LENGTH ** 2
+
 
 def convert(quantity, unit):
     """
