@@ -51,7 +51,7 @@ ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)
 mesh_size = convert(40 * u.nm, LENGTH)
 
-pulling_force = convert(2 * u.nN / u.um ** 2, PRESSURE)
+pulling_force = convert(10 * u.pN, FORCE)
 youngs_modulus_ecs = convert(2.5 * u.fN / u.nm ** 2, PRESSURE)
 youngs_modulus_membrane = convert(50 * u.fN / u.nm ** 2, PRESSURE)
 poisson_ratio = 0.25
@@ -97,7 +97,7 @@ blf.Assemble()
 a_inv = blf.mat.Inverse(fes.FreeDofs())
 
 # %%
-def compute_membrane_weight(mesh, nX, nY):
+def compute_membrane_points(mesh, nX, nY):
     # Extract the interface points of the mesh
     mesh_points = mesh.ngmesh.Coordinates()
     interface_indices = np.where(np.isclose(mesh_points[:, 2], ecs_height))[0]
@@ -109,20 +109,22 @@ def compute_membrane_weight(mesh, nX, nY):
     y = np.linspace(-s, s, nY + 2)[1:-1]
     grid = np.column_stack([v.flatten() for v in np.meshgrid(x, y)])
     distances, indices = tree.query(grid)
-
+    indices = np.unique(indices)
+    
     # Compute a function that is 1 at the chosen points and 0 elsewhere
-    w = GridFunction(scalar_fes)
-    w.Set(0)
-    w.vec.FV().NumPy()[interface_indices[indices]] = 1
+    v = GridFunction(scalar_fes)
+    v.Set(0)
+    v.vec.FV().NumPy()[interface_indices[indices]] = 1
 
-    return w, Integrate(w, mesh, definedon=mesh.Boundaries("interface")), np.median(distances)
+    return mesh_points[indices, :], v, indices.shape[0] / interface_indices.shape[0], np.median(distances)
 
 
 # %%
-def compute_solution(weight, force):
+def compute_solution(points, force):
     deformation = GridFunction(fes)
     lf = LinearForm(fes)
-    lf += -force * weight * v[2] * ds("interface")
+    for p in points:
+        lf += (-force * v[2])(*p)
     
     with TaskManager():
         lf.Assemble()
@@ -145,25 +147,41 @@ def sample_surface(mesh, deformation, n_samples=300):
 
 # %%
 # Find grid of points on the membrane surface and visualize weight
-w, surface_ratio, median_distance = compute_membrane_weight(mesh, 10, 10)
-print(f"Part of surface covered: {surface_ratio * 100:.2f}%")
-print(f"Median distance to regular grid points: {median_distance:.3g}nm")
+_, w, surface_ratio, median_distance = compute_membrane_points(mesh, 3, 3)
+print(f"Part of surface nodes covered: {surface_ratio * 100:.2f}%")
+print(f"Median distance to regular grid points: {median_distance * 1000:.3g}nm")
 Draw(w, clipping=clipping)
 
 # %%
 # Compute elastic deformation of membrane and ECS for different densities
-w, surface_ratio, median_distance = compute_membrane_weight(mesh, 20, 20)
+points, _, surface_ratio, median_distance = compute_membrane_points(mesh, 3, 3)
 print(f"Part of surface covered: {surface_ratio * 100:.2f}%")
-print(f"Median distance to regular grid points: {median_distance:.3g}um")
-deformation_1 = compute_solution(w, pulling_force)
-Draw(deformation_1, clipping=clipping)
+print(f"Median distance to regular grid points: {median_distance * 1000:.3g}nm")
+deformation_1 = compute_solution(points, pulling_force)
+print(f"Maximum deformation: {np.max(np.abs(deformation_1.vec.FV().NumPy())) * 1000:.2g}nm")
+# Draw(deformation_1, clipping=clipping)
 
+# %%
+points, _, surface_ratio, median_distance = compute_membrane_points(mesh, 10, 10)
+print(f"Part of surface covered: {surface_ratio * 100:.2f}%")
+print(f"Median distance to regular grid points: {median_distance * 1000:.3g}nm")
+deformation_2 = compute_solution(points, pulling_force)
+print(f"Maximum deformation: {np.max(np.abs(deformation_2.vec.FV().NumPy())) * 1000:.2g}nm")
+# Draw(deformation_2, clipping=clipping)
+
+# %%
+points, _, surface_ratio, median_distance = compute_membrane_points(mesh, 20, 20)
+print(f"Part of surface covered: {surface_ratio * 100:.2f}%")
+print(f"Median distance to regular grid points: {median_distance * 1000:.3g}nm")
+deformation_3 = compute_solution(points, pulling_force)
+print(f"Maximum deformation: {np.max(np.abs(deformation_3.vec.FV().NumPy())) * 1000:.2g}nm")
+# Draw(deformation_3, clipping=clipping)
 
 # %%
 def visualize_deformation_2d(mesh, deformation):
     X, Y, Z = sample_surface(mesh, deformation)
     fig, ax = plt.subplots()
-    c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud', vmin=0, vmax=18)
+    c = ax.pcolormesh(X, Y, (ecs_height - Z) * 1000, cmap="gnuplot", shading='gouraud', vmin=0, vmax=30)
     ax.set_xlabel("x [µm]")
     ax.set_ylabel("y [µm]")
     cbar = fig.colorbar(c, ax=ax, label='deformation [nm]')
