@@ -34,15 +34,16 @@ def _convert_to_volume_mesh(surface_mesh, bnd_to_fd):
     return new_mesh
 
 
-def create_ca_depletion_mesh(*, side_length, cytosol_height, ecs_height, channel_radius, mesh_size):
-    s = convert(side_length, LENGTH) / 2
+def create_ca_depletion_mesh(*, side_length_x, side_length_y, cytosol_height, ecs_height, channel_radius, mesh_size):
+    sx = convert(side_length_x, LENGTH) / 2
+    sy = convert(side_length_y, LENGTH) / 2
     cytosol_height = convert(cytosol_height, LENGTH)
     ecs_height = convert(ecs_height, LENGTH)
     channel_radius = convert(channel_radius, LENGTH)
     mesh_size = convert(mesh_size, LENGTH)
 
-    cytosol = Box(Pnt(-s, -s, 0), Pnt(s, s, cytosol_height))
-    ecs = Box(Pnt(-s, -s, cytosol_height), Pnt(s, s, cytosol_height + ecs_height))
+    cytosol = Box(Pnt(-sx, -sy, 0), Pnt(sx, sy, cytosol_height))
+    ecs = Box(Pnt(-sx, -sy, cytosol_height), Pnt(sx, sy, cytosol_height + ecs_height))
     left, right, front, back, bottom, top = (0, 1, 2, 3, 4, 5)
 
     # Assign boundary conditions
