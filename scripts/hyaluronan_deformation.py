@@ -28,9 +28,8 @@
 #
 # | Compartment                          | Size                         |
 # |------------------------------------|--------------------------------|
-# | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm
-# | ECM substrate                | 1.4 μm x 1.4 μm x 400 nm
-# | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
+# | Cell membrane                | 1 μm x 1 μm x 40 nm
+# | Glycocalyx                   | 1 μm x 1 μm x 45 nm                               |
 
 # %%
 import math
@@ -51,7 +50,7 @@ ecs_height = convert(45 * u.nm, LENGTH)
 membrane_height = convert(40 * u.nm, LENGTH)
 mesh_size = convert(40 * u.nm, LENGTH)
 
-pulling_force = convert(10 * u.pN, FORCE)
+pulling_force = convert(5 * u.pN, FORCE)
 youngs_modulus_ecs = convert(2.5 * u.fN / u.nm ** 2, PRESSURE)
 youngs_modulus_membrane = convert(50 * u.fN / u.nm ** 2, PRESSURE)
 poisson_ratio = 0.25
