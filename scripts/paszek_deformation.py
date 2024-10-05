@@ -46,8 +46,6 @@
 # | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
 
 # %%
-import math
-
 import matplotlib.pyplot as plt
 import numpy as np
 from netgen.csg import *

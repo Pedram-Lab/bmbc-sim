@@ -175,8 +175,8 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -90}]}, 
 # Create a line evaluator that evaluates a line away from the channel in the cytosol
 line_evaluator_cyt = LineEvaluator(
     mesh,
-    (0.0, 0.0, 2.98),  # Start point (x, y, z)
-    (0.6, 0.0, 2.98),  # End point (x, y, z)
+    (0.0, 0.0, 2.995),  # Start point (x, y, z)
+    (0.6, 0.0, 2.995),  # End point (x, y, z)
     120  # Number of points to evaluate
 )
 
