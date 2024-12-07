@@ -2,14 +2,14 @@
 A collection of scripts for solving problems that arise in extracellular matrix simulations using [NGSolve](https://ngsolve.org/).
 
 ### Setup
-Run the following line from the terminal to create a new environment called ngsolve:
+Run the following line from the terminal to create a new environment called ecsim:
 ```bash
 conda env create -f environment.yaml
 ```
 
 Activate the environment:
 ```bash
-conda activate ngsolve
+conda activate ecsim
 ```
 
 If not already installed, execute the following command (with active conda environment) to install the local package. This is necessary to run the examples with the `netgen` command (see below).
