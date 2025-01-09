@@ -1,47 +1,26 @@
-from dataclasses import dataclass
+from math import ceil
 from typing import Dict, Iterable
 
 import astropy.units as au
-import astropy.constants as const
-from ngsolve import (Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction,
-                     CoefficientFunction, InnerProduct)
+from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction, Integrate
 from pyngcore import BitArray
 
-# Define common units for the simulation
-LENGTH_UNIT = au.um
-TIME_UNIT = au.s
-CONCENTRATION_UNIT = au.amol / au.um ** 3  # equivalent to mM = mmol / L
+from ecsim.units import *
+from .simulation_agents import ChemicalSpecies, Reaction, ChannelFlux
 
-
-@dataclass
-class ChemicalSpecies:
-    name: str
-    diffusivity: Dict[str, au.Quantity]
-    clamp: Iterable[str]
-    valence: int
-
-    @property
-    def compartments(self):
-        return self.diffusivity.keys()
-
-@dataclass
-class Reaction:
-    reactants: Iterable[ChemicalSpecies]
-    products: Iterable[ChemicalSpecies]
-    kf: Dict[str, au.Quantity]
-    kr: Dict[str, au.Quantity]
-
-@dataclass
-class ChannelFlux:
-    left: str
-    right: str
-    boundary: str
-    rate: au.Quantity
 
 class Simulation:
-    def __init__(self, mesh: Mesh, time_step: au.Quantity, order: int = 2):
+    def __init__(
+            self,
+            mesh: Mesh,
+            *,
+            time_step: au.Quantity,
+            t_end: au.Quantity,
+            order: int = 2
+    ):
         self.mesh = mesh
-        self._time_step_size = time_step
+        self._time_step_size = convert(time_step, TIME)
+        self._t_end = convert(t_end, TIME)
         self._compartments = {name: i for i, name in enumerate(mesh.GetMaterials())}
         compartment_fes_list = [Compress(H1(mesh, order=order, definedon=mesh.Materials(name))) for name in mesh.GetMaterials()]
         constraint_fes = FESpace("number", mesh)
@@ -57,13 +36,17 @@ class Simulation:
         self._f_pot = None
         self._potential = GridFunction(self._fes)
 
+    @property
+    def n_time_steps(self) -> int:
+        return int(ceil(self._t_end / self._time_step_size))
+
     def add_species(
             self,
             name: str,
             *,
             diffusivity: Dict[str, au.Quantity],
             valence: int = 0,
-            clamp: str | Iterable[str] = None
+            clamp: Dict[str, au.Quantity] = None
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
@@ -78,9 +61,7 @@ class Simulation:
         for compartment in diffusivity:
             if compartment not in self._compartments:
                 raise ValueError(f"Compartment {compartment} not found in the mesh.")
-        clamp = clamp or []
-        if not isinstance(clamp, Iterable):
-            clamp = [clamp]
+        clamp = clamp or {}
         for boundary in clamp:
             if boundary not in self.mesh.GetBoundaries():
                 raise ValueError(f"Boundary {boundary} not found in the mesh.")
@@ -161,21 +142,22 @@ class Simulation:
         u, v = self._fes.TnT()
         for compartment, diffusivity in species.diffusivity.items():
             i = self._compartments[compartment]
-            D = diffusivity.to(LENGTH_UNIT ** 2 / TIME_UNIT).value
+            D = convert(diffusivity, DIFFUSIVITY)
             a += D * grad(u[i]) * grad(v[i]) * dx(compartment)
             m += u[i] * v[i] * dx(compartment)
 
         for channel in self._channels:
             i = self._compartments[channel.left]
             j = self._compartments[channel.right]
-            rate = channel.rate.to(CONCENTRATION_UNIT / TIME_UNIT).value
+            # make sure the flux is as prescribed no matter the actual area of the channel in the mesh
+            channel_area = Integrate(1, self.mesh, BND, order=1, definedon=self.mesh.Boundaries(channel.boundary))
+            rate = convert(channel.rate, FLUX_RATE) / channel_area
             a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
 
         a.Assemble()
         m.Assemble()
 
-        dt = self._time_step_size.to(TIME_UNIT).value
-        m.mat.AsVector().data += dt * a.mat.AsVector()
+        m.mat.AsVector().data += self._time_step_size * a.mat.AsVector()
 
         return a, m.mat.Inverse(relevant_dofs)
 
@@ -188,7 +170,7 @@ class Simulation:
         _, v = self._fes.TnT()
         for compartment in reaction.kf:
             i = self._compartments[compartment]
-            kf = reaction.kf[compartment].to(CONCENTRATION_UNIT / TIME_UNIT).value
+            kf = convert(reaction.kf[compartment], FORWARD_RATE)
 
             # TODO: find a better default value (or skip if reactants / products are not present in the compartment)
             forward_reaction = CoefficientFunction(1.0)
@@ -201,7 +183,7 @@ class Simulation:
 
         for compartment in reaction.kr:
             i = self._compartments[compartment]
-            kr = reaction.kr[compartment].to(1 / TIME_UNIT).value
+            kr = convert(reaction.kr[compartment], REVERSE_RATE)
 
             reverse_reaction = CoefficientFunction(1.0)
             for product in reaction.products:
@@ -265,7 +247,7 @@ class Simulation:
             f.Assemble()
             a = self._diffusion_matrix[name]
             u = self.concentrations[name]
-            residual[name] = dt * (f.vec - a.mat * u.vec)
+            residual[name] = self._time_step_size * (f.vec - a.mat * u.vec)
 
         for name, u in self.concentrations.items():
             u.vec.data += self._time_stepping_matrix[name] * residual[name]
@@ -274,5 +256,13 @@ class Simulation:
         for name, values in initial_concentrations.items():
             for compartment, value in values.items():
                 i = self._compartments[compartment]
-                v = value.to(CONCENTRATION_UNIT).value
+                v = convert(value, CONCENTRATION)
                 self.concentrations[name].components[i].Set(v)
+
+            try:
+                species = self._species[name]
+                for bnd, value in species.clamp.items():
+                    v = convert(value, CONCENTRATION)
+                    self.concentrations[name].components[0].Set(v, definedon=self.mesh.Region(BND, bnd))
+            except Exception:
+                print(f"WARNING: Could not set up clamp for {name}. Using initial value instead.")

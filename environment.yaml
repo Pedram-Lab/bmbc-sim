@@ -2,15 +2,16 @@ name: ecsim
 channels:
   - conda-forge
 dependencies:
-  - python ==3.10
-  - numpy
-  - scipy
-  - matplotlib
-  - tqdm
+  - astropy
   - jupyter
   - jupytext
-  - astropy
+  - matplotlib
+  - numpy
   - pip
+  - pytest
+  - python ==3.10
+  - scipy
+  - tqdm
   - pip:
     - ngsolve
     - webgui_jupyter_widgets

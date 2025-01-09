@@ -4,6 +4,8 @@ notebooks/
 scratch/
 *.ipynb
 *.vol
+*.csv
+*.vtu
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
