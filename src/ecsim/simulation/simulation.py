@@ -2,7 +2,7 @@ from math import ceil
 from typing import Dict, Iterable
 
 import astropy.units as au
-from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction
+from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction, Integrate
 from pyngcore import BitArray
 
 from ecsim.units import *
@@ -140,7 +140,9 @@ class Simulation:
         for channel in self._channels:
             i = self._compartments[channel.left]
             j = self._compartments[channel.right]
-            rate = convert(channel.rate, FLUX_RATE)
+            # make sure the flux is as prescribed no matter the actual area of the channel in the mesh
+            channel_area = Integrate(1, self.mesh, BND, order=1, definedon=self.mesh.Boundaries(channel.boundary))
+            rate = convert(channel.rate, FLUX_RATE) / channel_area
             a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
 
         a.Assemble()
