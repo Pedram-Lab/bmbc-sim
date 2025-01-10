@@ -18,9 +18,10 @@
 # diffusion.
 
 # %%
-from math import ceil
+from math import ceil, pi
 
 import numpy as np
+from scipy.special import erfc
 from netgen.occ import *
 from ngsolve import *
 from ngsolve.webgui import Draw
@@ -48,17 +49,17 @@ t_end = convert(1 * au.ms, TIME)
 
 # %%
 # Define geometry
-ecs = Box(Pnt(-1, -0.1, -0.1), Pnt(1, 0.1, 0.1)).mat("ecs").bc("side")
-ecs.faces[0].bc("clamped")
+ecs_left = Box(Pnt(-1, -0.1, -0.1), Pnt(0, 0.1, 0.1)).mat("left").bc("side")
+ecs_right = Box(Pnt(0, -0.1, -0.1), Pnt(1, 0.1, 0.1)).mat("right").bc("side")
 
-geo = OCCGeometry(ecs)
+geo = OCCGeometry(Glue([ecs_left, ecs_right]))
 mesh = Mesh(geo.GenerateMesh(maxh=0.02))
 Draw(mesh)
 
 
 # %%
 # Define FE spaces
-concentration_fes = H1(mesh, order=1, dirichlet="clamped")
+concentration_fes = H1(mesh, order=1)
 constraint_fes = FESpace("number", mesh)
 potential_fes = FESpace([concentration_fes, constraint_fes])
 concentration = GridFunction(concentration_fes)
@@ -101,8 +102,8 @@ def time_stepping(ca, pot, t_end, tau, use_pot):
     pot_start = GridFunction(concentration_fes)
     ca_end = GridFunction(concentration_fes)
 
-    ca.Set(0)
-    ca.Set(1, BND)
+    initial_ca = concentration_fes.mesh.MaterialCF({"left": 1.0, "right": 0.0})
+    ca.Set(initial_ca)
     pot.components[0].Set(0)
     pot.components[1].Set(0)
 
@@ -144,7 +145,7 @@ with TaskManager():
     potential.components[0].Set(0)
     ca_end, potential_start = time_stepping(concentration, potential, t_end=t_end, tau=tau, use_pot=True)
 
-n_samples = 100
+n_samples = 51
 ca_end_with, xs = evaluate_solution(ca_end, n_samples)
 potential_start_with, _ = evaluate_solution(potential_start, n_samples)
 
@@ -174,21 +175,36 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
 
 # %%
-plt.plot(xs, ca_end_with, label="with potential")
-plt.plot(xs, ca_end_without, label="without potential")
-plt.title("Evaluation at t_end")
+# We can compute the analytical solution for the corresponding 1D problem to compare with our solution for the diffusion part
+p = lambda n: pi * (2 * n + 1) / 2
+exact_solution = 1/2 + sum((-1) ** n / p(n) * np.exp(-p(n) ** 2) * np.cos(p(n) * (xs + 1)) for n in range(100))
+plt.plot(xs, exact_solution, label="theoretical solution")
+plt.plot(xs, ca_end_with, '.', label="with potential")
+plt.plot(xs, ca_end_without, '.', label="without potential")
+plt.title("Evaluation after 1ms")
 plt.xlabel("x [µm]")
 plt.ylabel("Ca concentration [mM]")
-plt.legend()
+plt.legend(loc='lower left')
 plt.show()
+
+# %%
+# In order to compute the theoretical potential at the beginning, we need to compute how much Ca is present at that point
+concentration.Set(0)
+concentration.Set(1, BND)
+ca_amount = Integrate(concentration, mesh) # in amol
+volume = Integrate(CoefficientFunction(1), mesh)
+print(f"{ca_amount=}, {volume=}, {ca_amount / volume}")
+Draw(ca_end)
 
 # %%
 plt.plot(xs, potential_start_with, label="with potential")
 plt.plot(xs, potential_start_without, label="without potential")
+plt.plot(xs, 1 / ((xs + 1.01) * 10), label="Theoretical potential")
 plt.title("Initial potential")
 plt.xlabel("x [µm]")
 plt.ylabel("Potential [mV]")
 plt.legend()
+plt.text(-0.3, 10, f'Potential difference: {np.ptp(potential_start_with):.2f}mV', fontsize=12, verticalalignment='bottom')
 plt.show()
 
 # %%
