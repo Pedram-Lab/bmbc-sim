@@ -43,7 +43,7 @@ F = convert(96485.3365 * au.C / au.mol, CHARGE / SUBSTANCE)
 valence = 2
 beta = convert(valence * const.e.si / (const.k_B * 310 * au.K), CHARGE / ENERGY)
 
-ca_ecs = convert(2 * au.mol / au.L, CONCENTRATION)
+ca_ecs = convert(1 * au.mmol / au.L, CONCENTRATION)
 tau = convert(1 * au.us, TIME)
 t_end = convert(1 * au.ms, TIME)
 
@@ -102,7 +102,7 @@ def time_stepping(ca, pot, t_end, tau, use_pot):
     pot_start = GridFunction(concentration_fes)
     ca_end = GridFunction(concentration_fes)
 
-    initial_ca = concentration_fes.mesh.MaterialCF({"left": 1.0, "right": 0.0})
+    initial_ca = concentration_fes.mesh.MaterialCF({"left": ca_ecs, "right": 0.0})
     ca.Set(initial_ca)
     pot.components[0].Set(0)
     pot.components[1].Set(0)
@@ -178,9 +178,9 @@ settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
 # We can compute the analytical solution for the corresponding 1D problem to compare with our solution for the diffusion part
 p = lambda n: pi * (2 * n + 1) / 2
 exact_solution = 1/2 + sum((-1) ** n / p(n) * np.exp(-p(n) ** 2) * np.cos(p(n) * (xs + 1)) for n in range(100))
-plt.plot(xs, exact_solution, label="theoretical solution")
-plt.plot(xs, ca_end_with, '.', label="with potential")
-plt.plot(xs, ca_end_without, '.', label="without potential")
+plt.plot(xs, exact_solution, label="Theoretical solution")
+plt.plot(xs, ca_end_with, '.', label="With potential")
+plt.plot(xs, ca_end_without, '.', label="Without potential")
 plt.title("Evaluation after 1ms")
 plt.xlabel("x [µm]")
 plt.ylabel("Ca concentration [mM]")
@@ -188,23 +188,24 @@ plt.legend(loc='lower left')
 plt.show()
 
 # %%
-# In order to compute the theoretical potential at the beginning, we need to compute how much Ca is present at that point
-concentration.Set(0)
-concentration.Set(1, BND)
-ca_amount = Integrate(concentration, mesh) # in amol
-volume = Integrate(CoefficientFunction(1), mesh)
-print(f"{ca_amount=}, {volume=}, {ca_amount / volume}")
-Draw(ca_end)
+# In order to compute the theoretical potential at the beginning, we need to compute the charge density
+initial_ca = concentration_fes.mesh.MaterialCF({"left": 1.0, "right": 0.0})
+concentration.Set(initial_ca)
+n_charges = F * ca_ecs * valence
+source_strength = n_charges / permittivity
+# Draw(concentration)
 
 # %%
-plt.plot(xs, potential_start_with, label="with potential")
-plt.plot(xs, potential_start_without, label="without potential")
-plt.plot(xs, 1 / ((xs + 1.01) * 10), label="Theoretical potential")
+# Again, we can analytically compute the solution to the corresponding 1D Poisson equation for the potential
+# To this end, we must take charges and the permeability into account, which we do manually for comparison reasons
+exact_solution = source_strength * sum((-1) ** n / p(n) ** 3 * np.cos(p(n) * (xs + 1)) for n in range(100))
+plt.plot(xs, exact_solution, label="Theoretical potential")
+plt.plot(xs, potential_start_with, '.', label="With potential")
+plt.plot(xs, potential_start_without, '.', label="Without potential")
 plt.title("Initial potential")
 plt.xlabel("x [µm]")
 plt.ylabel("Potential [mV]")
 plt.legend()
-plt.text(-0.3, 10, f'Potential difference: {np.ptp(potential_start_with):.2f}mV', fontsize=12, verticalalignment='bottom')
 plt.show()
 
 # %%
