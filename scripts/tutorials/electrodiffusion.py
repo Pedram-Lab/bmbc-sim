@@ -49,8 +49,9 @@ t_end = convert(1 * au.ms, TIME)
 
 # %%
 # Define geometry
-ecs_left = Box(Pnt(-1, -0.1, -0.1), Pnt(0, 0.1, 0.1)).mat("left").bc("side")
-ecs_right = Box(Pnt(0, -0.1, -0.1), Pnt(1, 0.1, 0.1)).mat("right").bc("side")
+s = 0.05
+ecs_left = Box(Pnt(-1, -s, -s), Pnt(0, s, s)).mat("left").bc("side")
+ecs_right = Box(Pnt(0, -s, -s), Pnt(1, s, s)).mat("right").bc("side")
 
 geo = OCCGeometry(Glue([ecs_left, ecs_right]))
 mesh = Mesh(geo.GenerateMesh(maxh=0.02))
@@ -151,10 +152,8 @@ potential_start_with, _ = evaluate_solution(potential_start, n_samples)
 
 # %%
 # Visualize whole solution if desired
-clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
-settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=0.02)
-# Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
+# Draw(ca_end, mesh)
+# Draw(potential_start, mesh)
 
 # %%
 # Compute time evolution without the potential
@@ -191,8 +190,8 @@ plt.show()
 # In order to compute the theoretical potential at the beginning, we need to compute the charge density
 initial_ca = concentration_fes.mesh.MaterialCF({"left": 1.0, "right": 0.0})
 concentration.Set(initial_ca)
-n_charges = F * ca_ecs * valence
-source_strength = n_charges / permittivity
+charge_density = F * ca_ecs * valence
+source_strength = charge_density / permittivity
 # Draw(concentration)
 
 # %%
@@ -200,7 +199,7 @@ source_strength = n_charges / permittivity
 # To this end, we must take charges and the permeability into account, which we do manually for comparison reasons
 exact_solution = source_strength * sum((-1) ** n / p(n) ** 3 * np.cos(p(n) * (xs + 1)) for n in range(100))
 plt.plot(xs, exact_solution, label="Theoretical potential")
-plt.plot(xs, potential_start_with, '.', label="With potential")
+plt.plot(xs, potential_start_with, 'x', label="With potential")
 plt.plot(xs, potential_start_without, '.', label="Without potential")
 plt.title("Initial potential")
 plt.xlabel("x [µm]")
