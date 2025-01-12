@@ -43,7 +43,7 @@ F = convert(96485.3365 * au.C / au.mol, CHARGE / SUBSTANCE)
 valence = 2
 beta = convert(valence * const.e.si / (const.k_B * 310 * au.K), CHARGE / ENERGY)
 
-ca_ecs = convert(1 * au.mmol / au.L, CONCENTRATION)
+ca_ecs = convert(1e-3 * au.mmol / au.L, CONCENTRATION)
 tau = convert(1 * au.us, TIME)
 t_end = convert(1 * au.ms, TIME)
 
@@ -168,17 +168,15 @@ potential_start_without, _ = evaluate_solution(potential_start, n_samples)
 
 # %%
 # Visualize whole solution if desired
-clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
-settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=0.02)
-# Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
+# Draw(ca_end, mesh)
+# Draw(potential_start, mesh)
 
 # %%
 # We can compute the analytical solution for the corresponding 1D problem to compare with our solution for the diffusion part
 p = lambda n: pi * (2 * n + 1) / 2
 exact_solution = 1/2 + sum((-1) ** n / p(n) * np.exp(-p(n) ** 2) * np.cos(p(n) * (xs + 1)) for n in range(100))
-plt.plot(xs, exact_solution, label="Theoretical solution")
-plt.plot(xs, ca_end_with, '.', label="With potential")
+plt.plot(xs, 1e-3 * exact_solution, label="Theoretical solution")
+plt.plot(xs, ca_end_with, 'x', label="With potential")
 plt.plot(xs, ca_end_without, '.', label="Without potential")
 plt.title("Evaluation after 1ms")
 plt.xlabel("x [µm]")
