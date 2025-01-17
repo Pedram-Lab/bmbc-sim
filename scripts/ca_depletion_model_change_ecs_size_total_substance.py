@@ -71,7 +71,7 @@ from math import ceil
 import csv
 
 import matplotlib.pyplot as plt
-from ngsolve import GridFunction, TaskManager, SetNumThreads, Integrate
+from ngsolve import GridFunction, TaskManager, SetNumThreads
 from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 from astropy import units as u
@@ -81,23 +81,18 @@ from ecsim.simulation import Simulation
 
 # %%
 # Create meshed geometry
-ecs_wh = 50 * u.nm
-ecs_length = 2 * u.um
 mesh = create_ca_depletion_mesh(
-    side_length_x = ecs_length,
-    side_length_y = ecs_wh,
-    cytosol_height = 1 * u.um,
+    side_length_x = 2 * u.um,
+    side_length_y = 1 * u.um,
     #side_length=3 * u.um,
-    ecs_height=ecs_wh,
-    mesh_size=0.2 * u.um,
+    ecs_height=50 * u.nm,
+    mesh_size=0.25 * u.um,
     channel_radius=25 * u.nm
 )
-Draw(mesh)
 
 # %%
 # Set up a simulation on the mesh with BAPTA as a buffer
-t_end = 100 * u.ms
-simulation = Simulation(mesh, time_step=1 * u.us, t_end=t_end)
+simulation = Simulation(mesh, time_step=1 * u.us, t_end=20 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
@@ -179,160 +174,85 @@ Draw(ca_t.components[1], clipping=clipping, settings=settings, interpolate_multi
 
 # %%
 import numpy as np
-from ecsim.units import SUBSTANCE, CONCENTRATION
+line_evaluator_ecs = LineEvaluator(
+    mesh,
+    (0.0, 0.0, 0.1005),  # Start point (x, y, z)
+    (2.0, 0.0, 0.1005),  # End point (x, y, z)
+    120  # Number of points to evaluate
+)
 
 # Evaluate the concentration in the cytosol
-ca_ecs_total = np.array([Integrate(ca_t.components[0].MDComponent(step), simulation.mesh, definedon=mesh.Materials("ecs")) for step in range(100)])
+step = 100
+ca_ecs_total = [Integrate(ca_t.components[0].MDComponent(step), simulation.mesh, definedon=mesh.Material("ecs")) for step in range(100)]
+# ca_cyt = np.array([line_evaluator_cyt.evaluate(ca_t.components[1].MDComponent(step)) for step in range(101)])
+# #buffer_cyt = line_evaluator_cyt.evaluate(buffer_t.components[1].MDComponent(step))
+# buffer_cyt = np.array([line_evaluator_cyt.evaluate(buffer_t.components[1].MDComponent(step))for step in range(101)])
+# #complex_cyt = line_evaluator_cyt.evaluate(complex_t.components[1].MDComponent(step))
+# complex_cyt = np.array([line_evaluator_cyt.evaluate(complex_t.components[1].MDComponent(step))for step in range(101)])
 
-ca_ecs_concentration = (ca_ecs_total * SUBSTANCE / (ecs_wh ** 2 * ecs_length)).to(CONCENTRATION)
+# Get the x-coordinates for the plot
+x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]  # Extract the x-coordinates
 
 # %%
-import matplotlib.pyplot as plt
-t = np.linspace(0, t_end, 100)
-plt.plot(t, ca_ecs_concentration)
-print(ca_ecs_concentration)
-print(t)
-
-# %%
-# Crear el archivo CSV con tiempo y concentración de calcio en ecs
-import csv
-
-# Asegúrate de que `t` y `ca_ecs_concentration` tengan la misma longitud
-filename = "ca_ecs_concentration_100ms_ecs_50nm.csv"
-with open(filename, mode='w', newline='') as file:
-    writer = csv.writer(file)
-    
-    # Escribir encabezado
-    writer.writerow(["Time (ms)", "Ca2+ Concentration in ECS (mmol/L)"])
-    
-    # Escribir filas de datos
-    for time, concentration in zip(t, ca_ecs_concentration):
-        writer.writerow([time, concentration])
-
+n_samples=100
+sample_interval = int(ceil(simulation.n_time_steps / n_samples))
+sample_interval
 
 
 # %%
-# Calcular el volumen de cytosol
-cytosol_volume = (2 * ecs_length) * (2 * ecs_wh) * (1 * u.um)
+import numpy as np
 
+# Calcular el intervalo de muestreo (sample_interval) y convertir time_step a segundos
+sample_interval = int(ceil(simulation.n_time_steps / 100))  # 100 es el número de muestras actuales (n_samples)
+time_step_size_seconds = float(simulation._time_step_size) * 1e-3  # Convertir de milisegundos a segundos
 
-# %%
-# Evaluar la concentración de calcio en el cytosol
-ca_cyt_total = np.array([Integrate(ca_t.components[1].MDComponent(step), simulation.mesh, definedon=mesh.Materials("cytosol")) for step in range(100)])
+# Calcular el vector de tiempo ajustado usando el intervalo de muestreo
+# Cada paso en `ca_cyt` corresponde a sample_interval pasos en la simulación original
+time_vector = np.arange(ca_cyt.shape[0]) * sample_interval * time_step_size_seconds
 
-# Calcular la concentración de calcio en el cytosol
-ca_cyt_concentration = (ca_cyt_total * SUBSTANCE / cytosol_volume).to(CONCENTRATION)
-
-
-# %%
-# Evaluate the concentration in the cytosol
-ca_cyt_total = np.array([Integrate(ca_t.components[1].MDComponent(step), simulation.mesh, definedon=mesh.Materials("cytosol")) for step in range(100)])
-
-ca_cyt_concentration = (ca_cyt_total * SUBSTANCE / (ecs_wh ** 2 * ecs_length)).to(CONCENTRATION)
-
-# %%
-# Calcular la concentración de calcio en el citosol
-ca_cyt_total = np.array([Integrate(ca_t.components[1].MDComponent(step), simulation.mesh, definedon=mesh.Materials("cytosol")) for step in range(100)])
-
-# Calcular el volumen del citosol (ajustar según el tamaño de cytosol definido)
-cytosol_volume = (2 * ecs_length) * (2 * ecs_wh) * (1 * u.um)
-
-# Calcular la concentración de calcio en el citosol
-ca_cyt_concentration = (ca_cyt_total * SUBSTANCE / cytosol_volume).to(CONCENTRATION)
-
-# Crear la gráfica de tiempo vs concentración de calcio en citosol
-t = np.linspace(0, t_end.value, 100)  # Convertir t_end a valor numérico si es necesario
-plt.figure(figsize=(8, 6))
-plt.plot(t, ca_cyt_concentration, label="Ca2+ in Cytosol")
-plt.xlabel("Time (ms)")
-plt.ylabel("Concentration (mmol/L)")
-plt.title("Calcium Concentration in Cytosol over Time")
-plt.legend()
-plt.grid(True)
-plt.show()
-
-
-# %%
-# Asegúrate de que `t` y `ca_ecs_concentration` tengan la misma longitud
-filename = "ca_cyt_concentration_100ms_ecs_50nm.csv"
-with open(filename, mode='w', newline='') as file:
-    writer = csv.writer(file)
-    
-    # Escribir encabezado
-    writer.writerow(["Time (ms)", "Ca2+ Concentration in cytosol (mmol/L)"])
-    
-    # Escribir filas de datos
-    for time, concentration in zip(t, ca_cyt_concentration):
-        writer.writerow([time, concentration])
+# Imprimir el vector de tiempo ajustado
+print(f"Vector de tiempo ajustado:\n{time_vector}")
 
 
 # %%
 import matplotlib.pyplot as plt
-t = np.linspace(0, t_end, 100)
-plt.plot(t, ca_cyt_concentration)
-print(ca_cyt_concentration)
-print(t)
 
-# %%
-# n_samples=100
-# sample_interval = int(ceil(simulation.n_time_steps / n_samples))
-# sample_interval
+# Crear una figura para la gráfica
+plt.figure(figsize=(10, 6))
 
+# Graficar cada línea de `ca_cyt` con respecto a `time_vector`
+# Seleccionamos 10 curvas de `ca_cyt` distribuidas uniformemente
+num_samples_to_plot = 10  # Número de curvas que quieres graficar
+indices_to_plot = np.linspace(0, ca_cyt.shape[1] - 1, num_samples_to_plot, dtype=int)  # Índices de las columnas a graficar
 
-# %%
-# import numpy as np
+# Graficar solo las concentraciones correspondientes a los índices seleccionados
+for i in indices_to_plot:
+    plt.plot(time_vector, ca_cyt[:, i], marker='o', linestyle='-', label=f'x = {x_coords[i]:.3f} µm')  # Graficar cada columna seleccionada de `ca_cyt`
 
-# # Calcular el intervalo de muestreo (sample_interval) y convertir time_step a segundos
-# sample_interval = int(ceil(simulation.n_time_steps / 100))  # 100 es el número de muestras actuales (n_samples)
-# time_step_size_seconds = float(simulation._time_step_size) * 1e-3  # Convertir de milisegundos a segundos
-
-# # Calcular el vector de tiempo ajustado usando el intervalo de muestreo
-# # Cada paso en `ca_cyt` corresponde a sample_interval pasos en la simulación original
-# time_vector = np.arange(ca_cyt.shape[0]) * sample_interval * time_step_size_seconds
-
-# # Imprimir el vector de tiempo ajustado
-# print(f"Vector de tiempo ajustado:\n{time_vector}")
+# Configurar etiquetas y título
+plt.title("Calcium Concentration vs Time")
+plt.xlabel("Time (s)")  # Eje X representa el tiempo en segundos
+plt.ylabel("Calcium Concentration (mM)")  # Eje Y representa la concentración de calcio
+plt.legend(loc='upper right')  # Mostrar la leyenda en la esquina superior derecha
+plt.grid(True)  # Activar cuadrícula
+plt.show()  # Mostrar la gráfica
 
 
 # %%
-# import matplotlib.pyplot as plt
+# Create a line evaluator that evaluates a line in the extracellular space (ECS)
+line_evaluator_ecs = LineEvaluator(
+    mesh,
+    (0.0, 0.0, 0.3005),  # Start point (x, y, z)
+    (0.06, 0.0, 0.3005),  # End point (x, y, z)
+    120  # Number of points to evaluate
+)
 
-# # Crear una figura para la gráfica
-# plt.figure(figsize=(10, 6))
+# Evaluate the concentration in the extracellular space (ECS)
+#concentrations_ecs = line_evaluator_ecs.evaluate(simulation.concentrations["calcium"].components[0])
+concentrations_ecs = np.array([line_evaluator_ecs.evaluate(simulation.concentrations["calcium"].components[0])for step in range(101)])
 
-# # Graficar cada línea de `ca_cyt` con respecto a `time_vector`
-# # Seleccionamos 10 curvas de `ca_cyt` distribuidas uniformemente
-# num_samples_to_plot = 10  # Número de curvas que quieres graficar
-# indices_to_plot = np.linspace(0, ca_ecs_total.shape[1] - 1, num_samples_to_plot, dtype=int)  # Índices de las columnas a graficar
-
-# # Graficar solo las concentraciones correspondientes a los índices seleccionados
-# for i in indices_to_plot:
-#     plt.plot(time_vector, ca_ecs_total[:, i], marker='o', linestyle='-', label=f'x = {x_coords_ecs[i]:.3f} µm')  # Graficar cada columna seleccionada de `ca_cyt`
-
-# # Configurar etiquetas y título
-# plt.title("Calcium Concentration vs Time")
-# plt.xlabel("Time (s)")  # Eje X representa el tiempo en segundos
-# plt.ylabel("Substance")  # Eje Y representa la concentración de calcio
-# plt.legend(loc='upper right')  # Mostrar la leyenda en la esquina superior derecha
-# plt.grid(True)  # Activar cuadrícula
-# plt.show()  # Mostrar la gráfica
-
-
-# %%
-# # Create a line evaluator that evaluates a line in the extracellular space (ECS)
-# line_evaluator_ecs = LineEvaluator(
-#     mesh,
-#     (0.0, 0.0, 0.3005),  # Start point (x, y, z)
-#     (0.06, 0.0, 0.3005),  # End point (x, y, z)
-#     120  # Number of points to evaluate
-# )
-
-# # Evaluate the concentration in the extracellular space (ECS)
-# #concentrations_ecs = line_evaluator_ecs.evaluate(simulation.concentrations["calcium"].components[0])
-# concentrations_ecs = np.array([line_evaluator_ecs.evaluate(simulation.concentrations["calcium"].components[0])for step in range(101)])
-
-# # Get the x-coordinates for the plot
-# x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
+# Get the x-coordinates for the plot
+x_coords_ecs = line_evaluator_ecs.raw_points[:, 0]
 
 # %%
 # print(f"Último valor del vector de tiempo ajustado: {time_vector[-1]} segundos")  # Debe ser aproximadamente 0.02
@@ -341,94 +261,94 @@ print(t)
 # %%
 
 # %%
-# import csv
+import csv
 
-# # Nombre del archivo CSV donde se guardarán los datos
-# output_filename = 'ca_cyt_concentrations_vs_time_300nm_300nm_200nm.csv'
+# Nombre del archivo CSV donde se guardarán los datos
+output_filename = 'ca_cyt_concentrations_vs_time_300nm_300nm_200nm.csv'
 
-# # Crear la cabecera para el archivo CSV
-# header = ['Time (s)']  # Primera columna será el tiempo
-# header.extend([f'x = {x:.3f} µm' for x in x_coords])  # Agregar columnas para cada coordenada x
+# Crear la cabecera para el archivo CSV
+header = ['Time (s)']  # Primera columna será el tiempo
+header.extend([f'x = {x:.3f} µm' for x in x_coords])  # Agregar columnas para cada coordenada x
 
-# # Abrir un archivo CSV para escritura
-# with open(output_filename, 'w', newline='') as csvfile:
-#     csvwriter = csv.writer(csvfile)
+# Abrir un archivo CSV para escritura
+with open(output_filename, 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
     
-#     # Escribir la cabecera en el archivo
-#     csvwriter.writerow(header)
+    # Escribir la cabecera en el archivo
+    csvwriter.writerow(header)
     
-#     # Escribir los datos fila por fila
-#     # Cada fila representa un instante de tiempo, por lo que se escribe el tiempo y todas las concentraciones correspondientes
-#     for i, time in enumerate(time_vector):
-#         row = [time]  # Agregar el tiempo como la primera entrada de la fila
-#         row.extend(ca_cyt[i, :])  # Agregar las concentraciones de ca_cyt en todas las posiciones x
-#         csvwriter.writerow(row)
+    # Escribir los datos fila por fila
+    # Cada fila representa un instante de tiempo, por lo que se escribe el tiempo y todas las concentraciones correspondientes
+    for i, time in enumerate(time_vector):
+        row = [time]  # Agregar el tiempo como la primera entrada de la fila
+        row.extend(ca_cyt[i, :])  # Agregar las concentraciones de ca_cyt en todas las posiciones x
+        csvwriter.writerow(row)
 
-# print(f"Datos guardados exitosamente en {output_filename}")
+print(f"Datos guardados exitosamente en {output_filename}")
 
 
 # %%
-# # Importar numpy y matplotlib (si no están importados)
-# import numpy as np
-# import matplotlib.pyplot as plt
+# Importar numpy y matplotlib (si no están importados)
+import numpy as np
+import matplotlib.pyplot as plt
 
-# # Crear un array para almacenar las concentraciones en cada paso de tiempo
-# # Array de dimensiones: (n_time_steps, número de puntos en la línea)
-# concentrations_ecs = np.array([line_evaluator_ecs.evaluate(ca_t.components[0].MDComponent(step)) for step in range(101)])
+# Crear un array para almacenar las concentraciones en cada paso de tiempo
+# Array de dimensiones: (n_time_steps, número de puntos en la línea)
+concentrations_ecs = np.array([line_evaluator_ecs.evaluate(ca_t.components[0].MDComponent(step)) for step in range(101)])
 
-# # Calcular el intervalo de muestreo (sample_interval) y convertir time_step a segundos
-# sample_interval = int(ceil(simulation.n_time_steps / 100))  # 100 es el número de muestras actuales (n_samples)
-# time_step_size_seconds = float(simulation._time_step_size) * 1e-3  # Convertir de milisegundos a segundos
+# Calcular el intervalo de muestreo (sample_interval) y convertir time_step a segundos
+sample_interval = int(ceil(simulation.n_time_steps / 100))  # 100 es el número de muestras actuales (n_samples)
+time_step_size_seconds = float(simulation._time_step_size) * 1e-3  # Convertir de milisegundos a segundos
 
-# # Calcular el vector de tiempo ajustado usando el intervalo de muestreo
-# # Cada paso en `concentrations_ecs` corresponde a sample_interval pasos en la simulación original
-# time_vector = np.arange(concentrations_ecs.shape[0]) * sample_interval * time_step_size_seconds
+# Calcular el vector de tiempo ajustado usando el intervalo de muestreo
+# Cada paso en `concentrations_ecs` corresponde a sample_interval pasos en la simulación original
+time_vector = np.arange(concentrations_ecs.shape[0]) * sample_interval * time_step_size_seconds
 
-# # Crear una figura para la gráfica
-# plt.figure(figsize=(10, 6))
+# Crear una figura para la gráfica
+plt.figure(figsize=(10, 6))
 
-# # Seleccionar cuántas curvas quieres graficar de `concentrations_ecs`
-# num_samples_to_plot = 10  # Número de curvas a graficar
-# indices_to_plot = np.linspace(0, concentrations_ecs.shape[1] - 1, num_samples_to_plot, dtype=int)  # Índices de columnas
+# Seleccionar cuántas curvas quieres graficar de `concentrations_ecs`
+num_samples_to_plot = 10  # Número de curvas a graficar
+indices_to_plot = np.linspace(0, concentrations_ecs.shape[1] - 1, num_samples_to_plot, dtype=int)  # Índices de columnas
 
-# # Graficar solo las concentraciones correspondientes a los índices seleccionados
-# for i in indices_to_plot:
-#     plt.plot(time_vector, concentrations_ecs[:, i], marker='o', linestyle='-', label=f'x = {x_coords_ecs[i]:.3f} µm')
+# Graficar solo las concentraciones correspondientes a los índices seleccionados
+for i in indices_to_plot:
+    plt.plot(time_vector, concentrations_ecs[:, i], marker='o', linestyle='-', label=f'x = {x_coords_ecs[i]:.3f} µm')
 
-# # Configurar etiquetas y título
-# plt.title("Extracellular Calcium Concentration vs Time")
-# plt.xlabel("Time (s)")  # Eje X representa el tiempo en segundos
-# plt.ylabel("Calcium Concentration (mM)")  # Eje Y representa la concentración de calcio
-# plt.legend(loc='upper right')  # Mostrar la leyenda en la esquina superior derecha
-# plt.grid(True)  # Activar cuadrícula
-# plt.show()  # Mostrar la gráfica
+# Configurar etiquetas y título
+plt.title("Extracellular Calcium Concentration vs Time")
+plt.xlabel("Time (s)")  # Eje X representa el tiempo en segundos
+plt.ylabel("Calcium Concentration (mM)")  # Eje Y representa la concentración de calcio
+plt.legend(loc='upper right')  # Mostrar la leyenda en la esquina superior derecha
+plt.grid(True)  # Activar cuadrícula
+plt.show()  # Mostrar la gráfica
 
 
 # %%
-# import csv
+import csv
 
-# # Nombre del archivo CSV donde se guardarán los datos
-# output_filename_ecs = 'ecs_calcium_concentrations_vs_time_300nm_300nm_200nm.csv'
+# Nombre del archivo CSV donde se guardarán los datos
+output_filename_ecs = 'ecs_calcium_concentrations_vs_time_300nm_300nm_200nm.csv'
 
-# # Crear la cabecera para el archivo CSV
-# header_ecs = ['Time (s)']  # Primera columna será el tiempo
-# header_ecs.extend([f'x = {x:.3f} µm' for x in x_coords_ecs])  # Agregar columnas para cada coordenada x
+# Crear la cabecera para el archivo CSV
+header_ecs = ['Time (s)']  # Primera columna será el tiempo
+header_ecs.extend([f'x = {x:.3f} µm' for x in x_coords_ecs])  # Agregar columnas para cada coordenada x
 
-# # Abrir un archivo CSV para escritura
-# with open(output_filename_ecs, 'w', newline='') as csvfile:
-#     csvwriter = csv.writer(csvfile)
+# Abrir un archivo CSV para escritura
+with open(output_filename_ecs, 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
     
-#     # Escribir la cabecera en el archivo
-#     csvwriter.writerow(header_ecs)
+    # Escribir la cabecera en el archivo
+    csvwriter.writerow(header_ecs)
     
-#     # Escribir los datos fila por fila
-#     # Cada fila representa un instante de tiempo, por lo que se escribe el tiempo y todas las concentraciones correspondientes
-#     for i, time in enumerate(time_vector):
-#         row = [time]  # Agregar el tiempo como la primera entrada de la fila
-#         row.extend(concentrations_ecs[i, :])  # Agregar las concentraciones de concentrations_ecs en todas las posiciones x
-#         csvwriter.writerow(row)
+    # Escribir los datos fila por fila
+    # Cada fila representa un instante de tiempo, por lo que se escribe el tiempo y todas las concentraciones correspondientes
+    for i, time in enumerate(time_vector):
+        row = [time]  # Agregar el tiempo como la primera entrada de la fila
+        row.extend(concentrations_ecs[i, :])  # Agregar las concentraciones de concentrations_ecs en todas las posiciones x
+        csvwriter.writerow(row)
 
-# print(f"Datos guardados exitosamente en {output_filename_ecs}")
+print(f"Datos guardados exitosamente en {output_filename_ecs}")
 
 
 # %%

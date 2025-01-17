@@ -139,7 +139,7 @@ def sample_cutout(mesh, deformation, n_samples=300):
 # Compute elastic deformation of membrane and ECS for one ...
 points = [(0, 0, ecs_height)]
 deformation_1 = compute_solution(points, pulling_force)
-# Draw(deformation_1, settings=visualization_settings, clipping=clipping)
+Draw(deformation_1, settings=visualization_settings, clipping=clipping)
 
 # %%
 # ... two ...
