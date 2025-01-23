@@ -9,7 +9,7 @@ class ChemicalSpecies:
     name: str
     diffusivity: Dict[str, au.Quantity]
     clamp: Dict[str, au.Quantity]
-    # TODO: charge, ...?
+    valence: int
 
     @property
     def compartments(self):

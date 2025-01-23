@@ -95,35 +95,36 @@ simulation = Simulation(mesh, time_step=1 * u.us, t_end=20 * u.ms)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 600 * u.um**2 / u.s, "cytosol": 220 * u.um**2 / u.s},
-    clamp={"ecs_top": 15 * u.mmol / u.L}
+    clamp={"ecs_top": 15 * u.mmol / u.L},
+    valence=2
 )
 free_buffer = simulation.add_species(
     "free_buffer",
-    #diffusivity={"cytosol": 95 * u.um**2 / u.s} #BAPTA
-    diffusivity={"cytosol": 113 * u.um**2 / u.s} #EGTA
+    diffusivity={"cytosol": 95 * u.um**2 / u.s},
+    valence=-2
 )
 bound_buffer = simulation.add_species(
     "bound_buffer",
-    #diffusivity={"cytosol": 95 * u.um**2 / u.s} #BAPTA
-    diffusivity={"cytosol": 113 * u.um**2 / u.s} #EGTA
+    diffusivity={"cytosol": 113 * u.um**2 / u.s},
+    valence=0
 )
 simulation.add_reaction(
     reactants=(calcium, free_buffer),
     products=bound_buffer,
-    kf={"cytosol": 450 / (u.s * u.umol / u.L)}, #BAPTA
-    kr={"cytosol": 80 / u.s} #BAPTA
-    #kf={"cytosol": 2.7 / (u.s * u.umol / u.L)}, #EGTA
-    #kr={"cytosol": 0.5 / u.s} #EGTA
+    kf={"cytosol": 450 * u.umol / (u.L * u.s)},
+    kr={"cytosol": 80 / u.s}
 )
 simulation.add_channel_flux(
     left="ecs",
     right="cytosol",
     boundary="channel",
-    rate = 1.86e3 * u.um / u.ms
-    # old values:
-    # rate= 7.04e+03 * u.mmol / (u.L * u.s)  # VOLUME 1
-    # rate= 1.86e+09 * u.mmol / (u.L * u.s) #VOLUME 2
+    rate=1 * u.mmol / (u.L * u.s)
 )
+
+# Alternative: EGTA as buffer
+# free_buffer = simulation.add_species("free_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s}, valence=-2)
+# bound_buffer = simulation.add_species("bound_buffer", diffusivity={"cytosol": 113 * u.um**2 / u.s}, valence=0)
+# simulation.add_reaction(reactants=(calcium, free_buffer), products=bound_buffer, kf={"cytosol": 2.7 * u.mmol / (u.L * u.s)}, kr={"cytosol": 0.5 / u.s})
 
 # %%
 # Internally set up all finite element infrastructure

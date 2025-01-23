@@ -15,9 +15,11 @@
 # %% [markdown]
 # # Poisson-Nernst-Planck equations
 # This script solves the Poisson-Nernst-Planck equations for a simple geometry to show how to couple diffusion and
-# electrostatics.
+# electrostatics. Parameter values are taken from (Horgmo Jæger, Tveito; _Differential Equations for Studies in Computational Electrophysiology_ 2023).
 
 # %%
+from math import ceil
+
 from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
@@ -30,15 +32,15 @@ from tqdm.notebook import trange
 # %%
 # Parameters (of calcium in extracellular space)
 # Caution is needed when converting units: we want the geometry in um and concentrations in mM (= mmol / L = amol/um^3)
-diffusivity = 0.71 * au.um ** 2 / au.s
+diffusivity = (0.71e6 * au.nm ** 2 / au.ms).to(au.um ** 2 / au.s)
 relative_permittivity = 80.0
 permittivity = relative_permittivity * const.eps0.to(au.F / au.um)
 F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
 valence = 2
-beta = valence * const.e.si / (const.k_B * 310 * au.K)
-ca_ecs = 2 * au.mmol / au.L
+beta = (valence * const.e.si / (const.k_B * 310 * au.K)).to(au.C * au.s ** 2 / (au.kg * au.um ** 2))
+ca_ecs = 2 * au.mol / au.L
 source_point = (-0.4, 0.0, 0.1)
-tau = 100 * au.us
+tau = 1 * au.us
 
 # %%
 # Define geometry
@@ -64,7 +66,7 @@ m_ecs = BilinearForm(ecs_fes)
 m_ecs += u_ecs * v_ecs * dx
 
 f_ecs = LinearForm(ecs_fes)
-f_ecs += (ca_ecs.to(au.mmol / au.L).value * v_ecs) (*source_point)  # point source of calcium
+f_ecs += (ca_ecs.to(au.amol / au.um ** 3).value * v_ecs) (*source_point)  # point source of calcium
 f_ecs += -diffusivity.value * beta.value * concentration * InnerProduct(grad(potential.components[0]), grad(v_ecs)) * dx
 
 a_ecs.Assemble()
@@ -113,39 +115,40 @@ def time_stepping(ca, pot, t_end, tau, n_samples, use_pot):
 
 # %%
 # Evaluation of solutions
-def evalutate_solution(sol, t_end, tau, n_samples):
+def evaluate_solution(sol, t_end, tau, n_samples):
     dt = tau.to(au.s).value
     n_steps = int(ceil(t_end.to(au.s).value / dt))
     sample_int = int(ceil(n_steps / n_samples))
     mip_near = mesh(*source_point)
     mip_far = mesh(0.4, 0.0, 0.9)
 
-    time, near, far = [], [], []
+    time, near, far, mass = [], [], [], []
     k = 0
     for i in range(n_steps):
         if i % sample_int == 0:
-            time.append(i * tau.value)
+            time.append(i * tau)
             near.append(sol.MDComponent(k)(mip_near))
             far.append(sol.MDComponent(k)(mip_far))
+            mass.append(Integrate(sol.MDComponent(k), mesh))
             k += 1
-    return time, near, far
+    return time, near, far, mass
 
 # %%
 # Compute time evolution with the potential
 n_samples = 100
-t_end = 0.1 * au.s
+t_end = 1 * au.ms
 with TaskManager():
     concentration.Set(0)
     potential.components[0].Set(0)
     ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=True)
     
-time, ca_full_near, ca_full_far = evalutate_solution(ca_t, t_end, tau, n_samples)
+time, ca_full_near, ca_full_far, ca_full_mass = evaluate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=0.02)
 # Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
 
 # %%
@@ -155,30 +158,42 @@ with TaskManager():
     potential.components[0].Set(0)
     ca_t, potential_t = time_stepping(concentration, potential, t_end=t_end, tau=tau, n_samples=n_samples, use_pot=False)
 
-time, ca_only_near, ca_only_far = evalutate_solution(ca_t, t_end, tau, n_samples)
+time, ca_only_near, ca_only_far, ca_only_mass = evaluate_solution(ca_t, t_end, tau, n_samples)
 
 # %%
 # Visualize whole solution if desired
 clipping = {"function": True,  "pnt": (0, 0, 0.5), "vec": (0, 1, 0)}
 settings = {"camera": {"transformations": [{"type": "rotateX", "angle": -80}]}}
-# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=2.0)
+# Draw(ca_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=0.0, max=0.02)
 # Draw(potential_t, mesh, clipping=clipping, settings=settings, interpolate_multidim=True, animate=True, autoscale=False, min=-0.01, max=0.01)
 
 # %%
-plt.plot(time, ca_full_near, label="with potential")
-plt.plot(time, ca_only_near, label="without potential")
+t = [r.to(au.ms).value for r in time[:]]
+plt.plot(t, ca_full_near, label="with potential")
+plt.plot(t, ca_only_near, label="without potential")
 plt.title("Evaluation at ca-source")
-plt.xlabel("Time [us]")
+plt.xlabel("Time [ms]")
 plt.ylabel("Ca concentration [mM]")
 plt.legend()
 plt.show()
 
 # %%
-plt.plot(time, ca_full_far, label="with potential")
-plt.plot(time, ca_only_far, label="without potential")
+t = [s.to(au.ms).value for s in time]
+plt.plot(t, ca_full_far, label="with potential")
+plt.plot(t, ca_only_far, label="without potential")
 plt.title("Evaluation far away from ca-source")
-plt.xlabel("Time [us]")
+plt.xlabel("Time [ms]")
 plt.ylabel("Ca concentration [mM]")
+plt.legend()
+plt.show()
+
+# %%
+t = [s.to(au.ms).value for s in time]
+plt.plot(t, ca_full_mass, label="with potential")
+plt.plot(t, ca_only_mass, label="without potential")
+plt.title("Total amount of ca-ions")
+plt.xlabel("Time [ms]")
+plt.ylabel("Ca amount [mmol]")
 plt.legend()
 plt.show()
 
