@@ -141,12 +141,16 @@ def compute_diffusion_time(
     return t, concentration
 
 # %%
+# Compute diffusion time in free space
 mesh = create_porous_geometry(n_spheres_per_dim=0, volume_fraction=0.0, mesh_size=0.1)
 t_unhindered, concentration = compute_diffusion_time(mesh, diffusivity=DIFFUSIVITY, tau=TAU)
 print(f"Time needed for diffusion: {t_unhindered:.2f} ms")
 Draw(concentration, clipping=clipping_settings, settings=visualization_settings)
 
 # %%
+# Compute diffusion time in porous medium
+# Since the diffusion time is inversely proportional to the diffusion
+# coefficient, we can use it to compute the tortuosity (which is sqrt(D_eff / D))
 mesh = create_porous_geometry(n_spheres_per_dim=5, volume_fraction=0.49, mesh_size=0.1)
 t_hindered, concentration = compute_diffusion_time(mesh, diffusivity=DIFFUSIVITY, tau=TAU)
 print(f"Time needed for diffusion: {t_hindered:.2f} ms")
