@@ -71,8 +71,8 @@ def create_porous_geometry(
     # Create spheres
     if n_spheres_per_dim > 0:
         sphere_midpoints_per_dim = np.linspace(0, 1, 2 * n_spheres_per_dim + 1)[1::2]
-        max_radius = 1 / n_spheres_per_dim
-        radius = (pi / 6 * volume_fraction) ** (1 / 3)  * max_radius
+        max_radius = 1 / (2 * n_spheres_per_dim)
+        radius = (volume_fraction / (pi / 6)) ** (1 / 3)  * max_radius
 
         for x in sphere_midpoints_per_dim:
             for y in sphere_midpoints_per_dim:
@@ -144,11 +144,13 @@ def compute_diffusion_time(
 mesh = create_porous_geometry(n_spheres_per_dim=0, volume_fraction=0.0, mesh_size=0.1)
 t_unhindered, concentration = compute_diffusion_time(mesh, diffusivity=DIFFUSIVITY, tau=TAU)
 print(f"Time needed for diffusion: {t_unhindered:.2f} ms")
-Draw(concentration)
+Draw(concentration, clipping=clipping_settings, settings=visualization_settings)
 
 # %%
-mesh = create_porous_geometry(n_spheres_per_dim=5, volume_fraction=0.2, mesh_size=0.1)
+mesh = create_porous_geometry(n_spheres_per_dim=5, volume_fraction=0.49, mesh_size=0.1)
 t_hindered, concentration = compute_diffusion_time(mesh, diffusivity=DIFFUSIVITY, tau=TAU)
 print(f"Time needed for diffusion: {t_hindered:.2f} ms")
 print(f"Tortuosity: {np.sqrt(t_hindered / t_unhindered):.2f}")
-Draw(concentration)
+Draw(concentration, clipping=clipping_settings, settings=visualization_settings)
+
+# %%
