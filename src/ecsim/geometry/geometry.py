@@ -6,7 +6,7 @@ from ngsolve import Mesh, CoefficientFunction
 from netgen.meshing import FaceDescriptor, Element2D
 from netgen.meshing import Mesh as NetgenMesh
 
-from .units import *
+from ecsim.units import *
 
 
 def _convert_to_volume_mesh(surface_mesh, bnd_to_fd):
@@ -16,7 +16,7 @@ def _convert_to_volume_mesh(surface_mesh, bnd_to_fd):
     old_to_new = {}
     for e in surface_mesh.Elements2D():
         for v in e.vertices:
-            if (v not in old_to_new):
+            if v not in old_to_new:
                 old_to_new[v] = new_mesh.Add(surface_mesh[v])
 
     # Arrange face descriptors for the new mesh
