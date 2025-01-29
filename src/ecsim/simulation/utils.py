@@ -52,16 +52,10 @@ class SimulationClock:
         """Check if the simulation is still running."""
         return self.current_time < self.end_time
 
-    def event_status(self, event_name: str) -> bool:
-        """Return the current status of a given event.
+    def event_occurs(self, event_name: str) -> bool:
+        """Check if a specific event occurs at the current time step.
         :param event_name: The name of the event to check.
-        :return: True if the event is active, False otherwise.
+        :return: True if the event occurs, False otherwise.
         :raises KeyError: If the event does not exist.
         """
         return self.counter % self.events[event_name] == 0
-
-if __name__ == "__main__":
-    clock = SimulationClock(n_steps=10, end_time=10.0, events={"foo": 5}, verbose=True)
-    while clock.is_running():
-        clock.advance()
-        print(f"{clock.counter}: {clock.current_time} foo={clock.event_status('foo')}")
