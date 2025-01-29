@@ -14,6 +14,7 @@ CURRENT: u.Unit = u.pA
 SUBSTANCE: u.Unit = u.amol
 TEMPERATURE: u.Unit = u.K
 LUMINOUS_INTENSITY: u.Unit = u.cd
+ANGLE: u.Unit = u.rad
 
 # Define derived units
 AREA = LENGTH ** 2

@@ -1,13 +1,13 @@
 """
 Create the simulation geometry from [Rusakov 2001].
 """
-import math
+from math import pi
 
 from netgen.occ import Box, Cone, Dir, Glue, HalfSpace, Pnt, Sphere, gp_Ax2, Z, OCCGeometry
 import numpy as np
 import astropy.units as u
 
-from ecsim.units import LENGTH, convert
+from ecsim.units import ANGLE, LENGTH, convert
 
 def create_rusakov_geometry(
     total_size: u.Quantity,
@@ -39,7 +39,7 @@ def create_rusakov_geometry(
     gd = convert(glia_distance, LENGTH)
     gw = convert(glia_width, LENGTH)
 
-    gca = convert(glial_coverage_angle, u.deg)
+    gca = convert(glial_coverage_angle, ANGLE)
 
     # Create the containing box
     box = Box(Pnt(-ts/2, -ts/2, -ts/2), Pnt(ts/2, ts/2, ts/2))
@@ -57,26 +57,26 @@ def create_rusakov_geometry(
     # Create the glial cell with given coverage
     glia = Sphere(Pnt(0, 0, 0), sr + gd + gw) - Sphere(Pnt(0, 0, 0), sr + gd)
     glia.faces.col = (0, 1, 0)
-    if np.isclose(gca, 180) or gca > 180:
+    if np.isclose(gca, pi) or gca > pi:
         # No cutout
         pass
     elif np.isclose(gca, 0) or gca < 0:
         # Cut out the whole glial cell
         glia = glia - box
-    elif np.isclose(gca, 90):
+    elif np.isclose(gca, pi / 2):
         # Cut exactly half of the shperical shell
         glia = glia - HalfSpace(Pnt(0, 0, 0), Dir(0, 0, 1))
-    elif gca < 90:
+    elif gca < pi / 2:
         # Intersect with a cone of the given angle in the upper half plane
         h = (sr + gd + gw) * 1.1
-        r_base = h * np.tan(gca / 180 * math.pi)
-        glial_cutout = Cone(gp_Ax2(Pnt(0, 0, h), -Z), r_base, 0.0, h, 2 * math.pi)
+        r_base = h * np.tan(gca)
+        glial_cutout = Cone(gp_Ax2(Pnt(0, 0, h), -Z), r_base, 0.0, h, 2 * pi)
         glia = glia * glial_cutout
-    elif gca > 90:
+    elif gca > pi / 2:
         # Subtract a cone of the given angle in the lower half plane
         h = (sr + gd + gw) * 1.1
-        r_base = h * np.tan((180 - gca) / 180 * math.pi)
-        glial_cutout = Cone(gp_Ax2(Pnt(0, 0, -h), Z), r_base, 0.0, h, 2 * math.pi)
+        r_base = h * np.tan(pi - gca)
+        glial_cutout = Cone(gp_Ax2(Pnt(0, 0, -h), Z), r_base, 0.0, h, 2 * pi)
         glia = glia - glial_cutout
 
     return Glue([box, pre_synapse, post_synapse, glia])
