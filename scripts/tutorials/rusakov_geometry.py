@@ -5,6 +5,9 @@
 # terminals are surrounded in some distance by a glial cell with an adjustable
 # coverage angle (measured from the top). The whole geometry is contained in an
 # enclosing box.
+#
+# In all plots, the presynaptic terminal is colored red, the postsynaptic terminal
+# is colored blue, and the glial cell is colored green.
 
 # %%
 from netgen.webgui import Draw

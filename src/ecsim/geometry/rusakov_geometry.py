@@ -46,11 +46,11 @@ def create_rusakov_geometry(
     box.faces.col = (0.5, 0.5, 0.5)
 
     # Create the synaptic terminals separated by the synaptic cleft
-    pre_synapse_cutout = HalfSpace(Pnt(0, 0, cs/2), Dir(0, 0, 1))
+    pre_synapse_cutout = HalfSpace(Pnt(0, 0, -cs/2), Dir(0, 0, -1))
     pre_synapse = Sphere(Pnt(0, 0, 0), sr) - pre_synapse_cutout
     pre_synapse.faces.col = (1, 0, 0)
 
-    post_synapse_cutout = HalfSpace(Pnt(0, 0, -cs/2), Dir(0, 0, -1))
+    post_synapse_cutout = HalfSpace(Pnt(0, 0, cs/2), Dir(0, 0, 1))
     post_synapse = Sphere(Pnt(0, 0, 0), sr) - post_synapse_cutout
     post_synapse.faces.col = (0, 0, 1)
 
