@@ -2,9 +2,14 @@
 Utility functions for working with Netgen geometries and meshes.
 """
 from typing import Dict
+
+import astropy.units as u
 from netgen.meshing import Mesh as NetgenMesh
-from ngsolve import Mesh
+from netgen.occ import TopoDS_Shape, OCCGeometry
 from netgen.meshing import Element2D, FaceDescriptor
+from ngsolve import Mesh
+
+from ecsim.units import LENGTH, convert
 
 def convert_to_volume_mesh(
         surface_mesh: NetgenMesh,
@@ -41,3 +46,15 @@ def convert_to_volume_mesh(
     # Generate volume mesh from surface
     new_mesh.GenerateVolumeMesh()
     return new_mesh
+
+def create_mesh(
+        geo: TopoDS_Shape,
+        mesh_size: u.Quantity,
+):
+    """
+    Generate a mesh from a geometry.
+    :param geo: The geometry to mesh.
+    :param mesh_size: The maximum mesh size.
+    :return: The mesh.
+    """
+    return OCCGeometry(geo).GenerateMesh(maxh=convert(mesh_size, LENGTH))
