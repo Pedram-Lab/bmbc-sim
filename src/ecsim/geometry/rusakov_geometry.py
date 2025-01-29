@@ -44,15 +44,19 @@ def create_rusakov_geometry(
     # Create the containing box
     box = Box(Pnt(-ts/2, -ts/2, -ts/2), Pnt(ts/2, ts/2, ts/2))
     box.faces.col = (0.5, 0.5, 0.5)
+    box.bc("ecs_boundary")
+    box.mat("ecs")
 
     # Create the synaptic terminals separated by the synaptic cleft
-    pre_synapse_cutout = HalfSpace(Pnt(0, 0, -cs/2), Dir(0, 0, -1))
-    pre_synapse = Sphere(Pnt(0, 0, 0), sr) - pre_synapse_cutout
+    pre_synapse_cutout = HalfSpace(Pnt(0, 0, -cs/2), Dir(0, 0, -1)).bc("presynaptic_membrane")
+    pre_synapse = Sphere(Pnt(0, 0, 0), sr).bc("terminal_membrane") - pre_synapse_cutout
     pre_synapse.faces.col = (1, 0, 0)
+    pre_synapse.mat("presynapse")
 
-    post_synapse_cutout = HalfSpace(Pnt(0, 0, cs/2), Dir(0, 0, 1))
-    post_synapse = Sphere(Pnt(0, 0, 0), sr) - post_synapse_cutout
+    post_synapse_cutout = HalfSpace(Pnt(0, 0, cs/2), Dir(0, 0, 1)).bc("postsynaptic_membrane")
+    post_synapse = Sphere(Pnt(0, 0, 0), sr).bc("terminal_membrane") - post_synapse_cutout
     post_synapse.faces.col = (0, 0, 1)
+    post_synapse.mat("postsynapse")
 
     # Create the glial cell with given coverage
     glia = Sphere(Pnt(0, 0, 0), sr + gd + gw) - Sphere(Pnt(0, 0, 0), sr + gd)
@@ -78,5 +82,8 @@ def create_rusakov_geometry(
         r_base = h * np.tan(pi - gca)
         glial_cutout = Cone(gp_Ax2(Pnt(0, 0, -h), Z), r_base, 0.0, h, 2 * pi)
         glia = glia - glial_cutout
+
+    glia.bc("glial_membrane")
+    glia.mat("glia")
 
     return Glue([box, pre_synapse, post_synapse, glia])
