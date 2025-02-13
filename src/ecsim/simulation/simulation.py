@@ -2,6 +2,7 @@ from math import ceil
 from typing import Dict, Iterable
 
 import astropy.units as au
+import astropy.constants as const
 from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction, Integrate
 from pyngcore import BitArray
 
@@ -200,13 +201,13 @@ class Simulation:
             diffusivity = self._species[name].diffusivity
             for compartment, index in self._compartments.items():
                 if compartment in diffusivity:
-                    D = diffusivity[compartment].to(LENGTH_UNIT ** 2 / TIME_UNIT).value
+                    D = diffusivity[compartment].to(LENGTH ** 2 / TIME).value
                     drift = InnerProduct(grad(self._potential.components[index]), grad(v[index]))
                     self._source_terms[name] += D * beta.value * u.components[index] * drift  * dx(compartment)
 
     def _setup_potential_equation(self):
         # TODO: set permittivity based on the compartments
-        permittivity = 80.0 * const.eps0.to(au.F / LENGTH_UNIT)
+        permittivity = 80.0 * const.eps0.to(au.F / LENGTH)
         F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
 
         u, v = self._fes.TnT()
@@ -235,7 +236,7 @@ class Simulation:
 
     def time_step(self):
         residual = {}
-        dt = self._time_step_size.to(TIME_UNIT).value
+        dt = self._time_step_size.to(TIME).value
 
         # Solve the potential equation
         self._f_pot.Assemble()
