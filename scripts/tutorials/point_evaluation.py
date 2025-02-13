@@ -34,7 +34,8 @@ write_as_csv = False
 # %%
 # Create meshed geometry
 mesh = create_ca_depletion_mesh(
-    side_length=3 * au.um,
+    side_length_x=3 * au.um,
+    side_length_y=3 * au.um,
     cytosol_height=3 * au.um,
     ecs_height=0.1 * au.um,
     mesh_size=0.25 * au.um,
@@ -43,11 +44,11 @@ mesh = create_ca_depletion_mesh(
 
 # %%
 # Define and assemble the FE-problem
-simulation = Simulation(mesh, time_step=1 * au.ms)
+simulation = Simulation(mesh, time_step=1 * au.ms, t_end=1 * au.s)
 calcium = simulation.add_species(
     "calcium",
     diffusivity={"ecs": 1 * au.um**2 / au.s, "cytosol": 1 * au.um**2 / au.s},
-    clamp={"ecs_top": 15 * au.millimole}
+    clamp={"ecs_top": 15 * au.mole / au.liter}
 )
 simulation.add_channel_flux(
     left="ecs",
@@ -58,16 +59,16 @@ simulation.add_channel_flux(
 
 # %%
 # Time stepping - define a function that pre-computes all timesteps
-def time_stepping(simulation, t_end, n_samples):
-    n_steps = int(ceil(t_end / simulation._time_step_size.to(au.s).value))
+def time_stepping(sim: Simulation, n_samples: int):
+    n_steps = sim.n_time_steps
     sample_int = int(ceil(n_steps / n_samples))
-    u_t = GridFunction(simulation._fes, multidim=0)
-    u_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
+    u_t = GridFunction(sim._fes, multidim=0)
+    u_t.AddMultiDimComponent(sim.concentrations["calcium"].vec)
     
     for i in trange(n_steps):
-        simulation.time_step()
+        sim.time_step()
         if i % sample_int == 0:
-            u_t.AddMultiDimComponent(simulation.concentrations["calcium"].vec)
+            u_t.AddMultiDimComponent(sim.concentrations["calcium"].vec)
     return u_t
 
 
@@ -76,9 +77,9 @@ def time_stepping(simulation, t_end, n_samples):
 with TaskManager():
     simulation.setup_problem()
     simulation.init_concentrations(
-        calcium={"ecs": 15 * au.millimole, "cytosol": 0.1 * au.micromole},
+        calcium={"ecs": 15 * au.mole / au.liter, "cytosol": 0.1 * au.millimole / au.liter},
     )
-    c_t = time_stepping(simulation, t_end=1, n_samples=100)
+    c_t = time_stepping(simulation, n_samples=100)
 
 # %% [markdown]
 # # Cytosolic calcium dynamics along a line segment bewteen two points

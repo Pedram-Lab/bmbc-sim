@@ -1,6 +1,14 @@
 [project]
 name = "ecsim"
 version = "0.1.0"
+description = "Extracellular Matrix Simulations"
+requires-python = ">= 3.12"
+readme = "README.md"
+license = "BSD-3-Clause"
+authors = [
+  {name = "Michael Innerberger", email = "innerbergerm@hhmi.org"},
+  {name = "Norma Perez", email = "perezrosasn@janelia.hhmi.org"},
+]
 
 [build-system]
 requires = ["setuptools"]

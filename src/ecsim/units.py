@@ -1,16 +1,20 @@
+"""
+Defines the SI-base units used in the simulations. The choice of units is based
+on the typical values of the quantities in the simulation (e.g., concentration
+in mM, length in um, etc.).
+"""
 import astropy.units as u
 
 
-# Define the SI-base units used in the simulation
-# The choice of units is based on the typical values of the quantities in the simulation
-# (e.g., concentration in mM, length in um, etc.)
-MASS = u.ng
-TIME = u.ms
-LENGTH = u.um
-CURRENT = u.pA
-SUBSTANCE = u.amol
-TEMPERATURE = u.K
-LUMINOUS_INTENSITY = u.cd
+# Define base units
+MASS: u.Unit = u.ng
+TIME: u.Unit = u.ms
+LENGTH: u.Unit = u.um
+CURRENT: u.Unit = u.pA
+SUBSTANCE: u.Unit = u.amol
+TEMPERATURE: u.Unit = u.K
+LUMINOUS_INTENSITY: u.Unit = u.cd
+ANGLE: u.Unit = u.rad
 
 # Define derived units
 AREA = LENGTH ** 2
@@ -32,7 +36,10 @@ CAPACITANCE = CHARGE / POTENTIAL
 PERMITTIVITY = CAPACITANCE / LENGTH
 
 
-def convert(quantity, unit):
+def convert(
+        quantity: u.Quantity,
+        unit: u.UnitBase
+) -> float:
     """
     Convert a quantity to a different unit.
     :param quantity: The quantity to convert.
