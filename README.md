@@ -12,11 +12,6 @@ Activate the environment:
 conda activate ecsim
 ```
 
-If not already installed, execute the following command (with active conda environment) to install the local package. This is necessary to run the examples with the `netgen` command (see below).
-```bash
-pip install -e .
-```
-
 Then, you should be able to run the examples using:
 ```bash
 python <filename>  # just console output, no GUI
