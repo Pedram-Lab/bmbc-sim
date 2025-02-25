@@ -22,7 +22,7 @@ def create_rusakov_geometry(
     synaptic terminals separated by a synaptic cleft. The terminals are
     surrounded in some distance by a glial cell with an adjustable coverage
     angle (measured from the top). The whole geometry is contained in an
-    enclosing box.
+    enclosing box of porous neuropil.
 
     :param total_size: The side-length of the enclosing cube.
     :param synapse_radius: The radius of the synaptic terminals.
@@ -58,8 +58,13 @@ def create_rusakov_geometry(
     post_synapse.faces.col = (0, 0, 1)
     post_synapse.mat("postsynapse")
 
+    synapse_ecs = Sphere(Pnt(0, 0, 0), sr + gd).bc("synapse_boundary")
+    synapse_ecs.faces.col = (0.5, 0, 0.5)
+    synapse_ecs.mat("synapse_ecs")
+
     # Create the glial cell with given coverage
-    glia = Sphere(Pnt(0, 0, 0), sr + gd + gw) - Sphere(Pnt(0, 0, 0), sr + gd)
+    box = box - synapse_ecs
+    glia = Sphere(Pnt(0, 0, 0), sr + gd + gw) - synapse_ecs
     glia.faces.col = (0, 1, 0)
     if np.isclose(gca, pi) or gca > pi:
         # No cutout
@@ -86,4 +91,4 @@ def create_rusakov_geometry(
     glia.bc("glial_membrane")
     glia.mat("glia")
 
-    return Glue([box, pre_synapse, post_synapse, glia])
+    return Glue([box, pre_synapse, post_synapse, synapse_ecs, glia])
