@@ -28,7 +28,7 @@ SYNAPSE_RADIUS = 0.1 * u.um  # Fig. 4
 CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse"
 GLIA_DISTANCE = 30 * u.nm    # Guessed
 GLIA_WIDTH = 100 * u.nm      # Sec. "Glial sheath and glutamate transporter density"
-GLIA_COVERAGE = 0.5          # Varied
+GLIA_COVERAGE = 0.95          # Varied
 TORTUOSITY = 1.4             # Sec. "Synaptic geometry"
 POROSITY = 0.12              # Sec. "Synaptic geometry"
 
@@ -98,17 +98,17 @@ tau = convert(TIME_STEP, TIME)
 events = {"sampling": 10}
 clock = SimulationClock(time_step=tau, end_time=t_end, events=events, verbose=True)
 
-dist = convert(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, LENGTH)
 eval_points = np.array([
-    [0, 0, 0],          # 1: center
-    [dist, 0, 0],       # 2: inside glia, near cleft
-    [0, 0, dist],       # 3: inside glia, far from cleft
+    [0, 0, 0],        # 1: center
 ])
 eval_synapse = PointEvaluator(mesh, eval_points)
-dist = convert(SYNAPSE_RADIUS + GLIA_WIDTH + 2 * GLIA_DISTANCE, LENGTH)
+dist1 = convert(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, LENGTH)
+dist2 = convert(SYNAPSE_RADIUS + GLIA_WIDTH + 2 * GLIA_DISTANCE, LENGTH)
 eval_points = np.array([
-    [0, 0, - dist],  # 4: outside glia (below)
-    [0, 0, dist],   # 5: outside glia (above)
+    [dist1, 0, 0],    # 2: inside glia, near cleft
+    [0, 0, dist1],    # 3: inside glia, far from cleft
+    [0, 0, - dist2],  # 4: outside glia (below)
+    [0, 0, dist2],    # 5: outside glia (above)
 ])
 eval_neuropil = PointEvaluator(mesh, eval_points)
 
@@ -152,7 +152,7 @@ for i, values in enumerate(evaluations.T):
 plt.xlabel('Time (ms)')
 plt.ylabel('Calcium Concentration (mM)')
 plt.xlim(0, convert(END_TIME, TIME))
-plt.ylim(0, 1.1 * ca_0)
+plt.ylim(0.4, 1.4)
 plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
 plt.show()
