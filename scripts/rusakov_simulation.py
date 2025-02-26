@@ -69,8 +69,8 @@ fes_neuropil = Compress(H1(mesh, order=1, definedon="ecs", dirichlet="ecs_bounda
 fes = fes_synapse * fes_neuropil
 (test_s, test_n), (trial_s, trial_n) = fes.TnT()
 
-D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY)
-D_neuropil = D_synapse / TORTUOSITY**2
+D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
+D_neuropil = D_synapse
 a = BilinearForm(fes)
 a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
 a += D_neuropil * grad(test_n) * grad(trial_n) * dx("ecs")
@@ -152,7 +152,7 @@ for i, values in enumerate(evaluations.T):
 plt.xlabel('Time (ms)')
 plt.ylabel('Calcium Concentration (mM)')
 plt.xlim(0, convert(END_TIME, TIME))
-plt.ylim(0, 1.1 * ca_0)
+plt.ylim(0.4, 1.4)
 plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
 plt.show()
