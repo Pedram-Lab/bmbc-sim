@@ -74,6 +74,7 @@ D_neuropil = D_synapse / TORTUOSITY**2
 a = BilinearForm(fes)
 a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
 a += D_neuropil * grad(test_n) * grad(trial_n) * dx("ecs")
+a += POROSITY * (test_s - test_n) * (trial_s - trial_n) * ds("synapse_boundary")
 a.Assemble()
 
 m = BilinearForm(fes)
@@ -150,6 +151,8 @@ for i, values in enumerate(evaluations.T):
 
 plt.xlabel('Time (ms)')
 plt.ylabel('Calcium Concentration (mM)')
+plt.xlim(0, convert(END_TIME, TIME))
+plt.ylim(0, 1.1 * ca_0)
 plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
 plt.show()
