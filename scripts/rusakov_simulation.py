@@ -65,21 +65,21 @@ mesh = Mesh(create_mesh(geo, mesh_size=MESH_SIZE))
 # Set up FEM objects
 # see https://docu.ngsolve.org/latest/i-tutorials/unit-2.13-interfaces/interfaceresistivity.html
 fes_synapse = Compress(H1(mesh, order=1, definedon="synapse_ecs"))
-fes_neuropil = Compress(H1(mesh, order=1, definedon="ecs", dirichlet="ecs_boundary"))
+fes_neuropil = Compress(H1(mesh, order=1, definedon="neuropil", dirichlet="neuropil_boundary"))
 fes = fes_synapse * fes_neuropil
 (test_s, test_n), (trial_s, trial_n) = fes.TnT()
 
-D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
-D_neuropil = D_synapse
+D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY)
+D_neuropil = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
 a = BilinearForm(fes)
 a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
-a += D_neuropil * grad(test_n) * grad(trial_n) * dx("ecs")
+a += D_neuropil * grad(test_n) * grad(trial_n) * dx("neuropil")
 a += POROSITY * (test_s - test_n) * (trial_s - trial_n) * ds("synapse_boundary")
 a.Assemble()
 
 m = BilinearForm(fes)
 m += test_s * trial_s * dx("synapse_ecs")
-m += test_n * trial_n * dx("ecs")
+m += test_n * trial_n * dx("neuropil")
 m.Assemble()
 
 phi = convert(TIME_CONSTANT, 1 / TIME)

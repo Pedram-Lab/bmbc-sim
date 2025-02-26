@@ -44,8 +44,8 @@ def create_rusakov_geometry(
     # Create the containing box
     box = Box(Pnt(-ts/2, -ts/2, -ts/2), Pnt(ts/2, ts/2, ts/2))
     box.faces.col = (0.5, 0.5, 0.5)
-    box.bc("ecs_boundary")
-    box.mat("ecs")
+    box.bc("neuropil_boundary")
+    box.mat("neuropil")
 
     # Create the synaptic terminals separated by the synaptic cleft
     pre_synapse_cutout = HalfSpace(Pnt(0, 0, -cs/2), Dir(0, 0, -1)).bc("presynaptic_membrane")
