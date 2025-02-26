@@ -63,28 +63,23 @@ mesh = Mesh(create_mesh(geo, mesh_size=MESH_SIZE))
 
 # %%
 # Set up FEM objects
+# see https://docu.ngsolve.org/latest/i-tutorials/unit-2.13-interfaces/interfaceresistivity.html
 fes_synapse = Compress(H1(mesh, order=1, definedon="synapse_ecs"))
 fes_neuropil = Compress(H1(mesh, order=1, definedon="ecs", dirichlet="ecs_boundary"))
-test_synapse, trial_synapse = fes_synapse.TnT()
-test_neuropil, trial_neuropil = fes_neuropil.TnT()
+fes = fes_synapse * fes_neuropil
+(test_s, test_n), (trial_s, trial_n) = fes.TnT()
 
 D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY)
-a_synapse = BilinearForm(fes_synapse)
-a_synapse += D_synapse * grad(test_synapse) * grad(trial_synapse) * dx
-a_synapse.Assemble()
-
-m_synapse = BilinearForm(fes_synapse)
-m_synapse += test_synapse * trial_synapse * dx
-m_synapse.Assemble()
-
 D_neuropil = D_synapse / TORTUOSITY**2
-a_neuropil = BilinearForm(fes_neuropil)
-a_neuropil += D_neuropil * grad(test_neuropil) * grad(trial_neuropil) * dx
-a_neuropil.Assemble()
+a = BilinearForm(fes)
+a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
+a += D_neuropil * grad(test_n) * grad(trial_n) * dx("ecs")
+a.Assemble()
 
-m_neuropil = BilinearForm(fes_neuropil)
-m_neuropil += test_neuropil * trial_neuropil * dx
-m_neuropil.Assemble()
+m = BilinearForm(fes)
+m += test_s * trial_s * dx("synapse_ecs")
+m += test_n * trial_n * dx("ecs")
+m.Assemble()
 
 phi = convert(TIME_CONSTANT, 1 / TIME)
 t_param = Parameter(0)
@@ -92,8 +87,8 @@ const_F = const.e.si * const.N_A
 terminal_area = Integrate(1, mesh.Boundaries("presynaptic_membrane"), BND)
 Q_0 = convert(CHANNEL_CURRENT / (2 * const_F), SUBSTANCE / TIME)
 Q = N_CHANNELS * Q_0 * phi * t_param * exp(-phi * t_param) / terminal_area
-b = LinearForm(fes_synapse)
-b += D_synapse * Q * trial_synapse * ds("presynaptic_membrane")
+b = LinearForm(fes)
+b += D_synapse * Q * trial_s * ds("presynaptic_membrane")
 
 # %%
 # Initialize the simulation
@@ -116,39 +111,33 @@ eval_points = np.array([
 ])
 eval_neuropil = PointEvaluator(mesh, eval_points)
 
-mstar_synapse = m_synapse.mat.CreateMatrix()
-mstar_synapse.AsVector().data = m_synapse.mat.AsVector() + tau * a_synapse.mat.AsVector()
-inv_synapse = mstar_synapse.Inverse(freedofs=fes_synapse.FreeDofs())
-
-mstar_neuropil = m_neuropil.mat.CreateMatrix()
-mstar_neuropil.AsVector().data = m_neuropil.mat.AsVector() + tau * a_neuropil.mat.AsVector()
-inv_neuropil = mstar_neuropil.Inverse(freedofs=fes_neuropil.FreeDofs())
+mstar = m.mat.CreateMatrix()
+mstar.AsVector().data = m.mat.AsVector() + tau * a.mat.AsVector()
+mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
 
 ca_0 = convert(CA_RESTING, CONCENTRATION)
-ca_synapse = GridFunction(fes_synapse)
-ca_synapse.Set(ca_0)
-ca_neuropil = GridFunction(fes_neuropil)
-ca_neuropil.Set(ca_0)
+ca = GridFunction(fes)
+ca.components[0].Set(ca_0)
+ca.components[1].Set(ca_0)
 
 # %%
 # Run the simulation
-evaluations = [np.concat((eval_synapse.evaluate(ca_synapse), eval_neuropil.evaluate(ca_neuropil)))]
+evaluations = [np.concat((eval_synapse.evaluate(ca.components[0]),
+                          eval_neuropil.evaluate(ca.components[1])))]
 time_points = [clock.current_time]
-delta_synapse = ca_synapse.vec.CreateVector()
-delta_neuropil = ca_neuropil.vec.CreateVector()
+delta = ca.vec.CreateVector()
 while clock.is_running():
     t_param.Set(clock.current_time)
     b.Assemble()
-    delta_synapse.data = inv_synapse * (a_synapse.mat * ca_synapse.vec + b.vec)
-    delta_neuropil.data = inv_neuropil * (a_neuropil.mat * ca_neuropil.vec)
-    ca_synapse.vec.data += -tau * delta_synapse
-    ca_neuropil.vec.data += -tau * delta_neuropil
+    delta.data = mstar_inv * (a.mat * ca.vec + b.vec)
+    ca.vec.data += -tau * delta
     clock.advance()
     if clock.event_occurs("sampling"):
-        values = np.concat((eval_synapse.evaluate(ca_synapse), eval_neuropil.evaluate(ca_neuropil)))
+        values = np.concat((eval_synapse.evaluate(ca.components[0]),
+                            eval_neuropil.evaluate(ca.components[1])))
         evaluations.append(values)
         time_points.append(clock.current_time)
-Draw(ca_synapse, clipping=clipping_settings, settings=visualization_settings)
+Draw(ca.components[0], clipping=clipping_settings, settings=visualization_settings)
 
 # %%
 # Plot the point values over time
