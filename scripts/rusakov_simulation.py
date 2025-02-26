@@ -11,7 +11,7 @@ import astropy.units as u
 import astropy.constants as const
 from ngsolve.webgui import Draw
 from ngsolve import (H1, BilinearForm, LinearForm, grad, GridFunction, Mesh, Parameter,
-                     Integrate, BND, exp, dx, ds)
+                     Integrate, BND, exp, dx, ds, Compress)
 
 from ecsim.geometry import create_rusakov_geometry, create_mesh, PointEvaluator
 from ecsim.units import DIFFUSIVITY, CONCENTRATION, SUBSTANCE, TIME, LENGTH, convert
@@ -29,6 +29,8 @@ CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse"
 GLIA_DISTANCE = 30 * u.nm    # Guessed
 GLIA_WIDTH = 100 * u.nm      # Sec. "Glial sheath and glutamate transporter density"
 GLIA_COVERAGE = 0.5          # Varied
+TORTUOSITY = 1.4             # Sec. "Synaptic geometry"
+POROSITY = 0.12              # Sec. "Synaptic geometry"
 
 # Ca parameters
 CA_RESTING = 1.3 * u.mmol / u.L       # Sec. "Presynaptic calcium influx"
@@ -61,16 +63,23 @@ mesh = Mesh(create_mesh(geo, mesh_size=MESH_SIZE))
 
 # %%
 # Set up FEM objects
-fes = H1(mesh, order=1, definedon="ecs", dirichlet="ecs_boundary")
-v_test, v_trial = fes.TnT()
+# see https://docu.ngsolve.org/latest/i-tutorials/unit-2.13-interfaces/interfaceresistivity.html
+fes_synapse = Compress(H1(mesh, order=1, definedon="synapse_ecs"))
+fes_neuropil = Compress(H1(mesh, order=1, definedon="neuropil", dirichlet="neuropil_boundary"))
+fes = fes_synapse * fes_neuropil
+(test_s, test_n), (trial_s, trial_n) = fes.TnT()
 
-D = convert(D_COEFFICIENT, DIFFUSIVITY)
+D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY)
+D_neuropil = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
 a = BilinearForm(fes)
-a += D * grad(v_test) * grad(v_trial) * dx
+a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
+a += D_neuropil * grad(test_n) * grad(trial_n) * dx("neuropil")
+a += POROSITY * (test_s - test_n) * (trial_s - trial_n) * ds("synapse_boundary")
 a.Assemble()
 
 m = BilinearForm(fes)
-m += v_test * v_trial * dx
+m += test_s * trial_s * dx("synapse_ecs")
+m += test_n * trial_n * dx("neuropil")
 m.Assemble()
 
 phi = convert(TIME_CONSTANT, 1 / TIME)
@@ -80,7 +89,7 @@ terminal_area = Integrate(1, mesh.Boundaries("presynaptic_membrane"), BND)
 Q_0 = convert(CHANNEL_CURRENT / (2 * const_F), SUBSTANCE / TIME)
 Q = N_CHANNELS * Q_0 * phi * t_param * exp(-phi * t_param) / terminal_area
 b = LinearForm(fes)
-b += D * Q * v_trial * ds("presynaptic_membrane")
+b += D_synapse * Q * trial_s * ds("presynaptic_membrane")
 
 # %%
 # Initialize the simulation
@@ -94,35 +103,42 @@ eval_points = np.array([
     [0, 0, 0],          # 1: center
     [dist, 0, 0],       # 2: inside glia, near cleft
     [0, 0, dist],       # 3: inside glia, far from cleft
-    [0, 0, -2 * dist],   # 4: outside glia (below)
-    [0, 0, 2 * dist],  # 5: outside glia (above)
 ])
-evaluator = PointEvaluator(mesh, eval_points)
+eval_synapse = PointEvaluator(mesh, eval_points)
+dist = convert(SYNAPSE_RADIUS + GLIA_WIDTH + 2 * GLIA_DISTANCE, LENGTH)
+eval_points = np.array([
+    [0, 0, - dist],  # 4: outside glia (below)
+    [0, 0, dist],   # 5: outside glia (above)
+])
+eval_neuropil = PointEvaluator(mesh, eval_points)
 
 mstar = m.mat.CreateMatrix()
 mstar.AsVector().data = m.mat.AsVector() + tau * a.mat.AsVector()
-inv = mstar.Inverse(freedofs=fes.FreeDofs())
+mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
 
 ca_0 = convert(CA_RESTING, CONCENTRATION)
 ca = GridFunction(fes)
-ca.Set(ca_0)
+ca.components[0].Set(ca_0)
+ca.components[1].Set(ca_0)
 
 # %%
 # Run the simulation
-evaluations = [evaluator.evaluate(ca)]
+evaluations = [np.concat((eval_synapse.evaluate(ca.components[0]),
+                          eval_neuropil.evaluate(ca.components[1])))]
 time_points = [clock.current_time]
 delta = ca.vec.CreateVector()
 while clock.is_running():
     t_param.Set(clock.current_time)
     b.Assemble()
-    delta.data = inv * (a.mat * ca.vec + b.vec)
+    delta.data = mstar_inv * (a.mat * ca.vec + b.vec)
     ca.vec.data += -tau * delta
     clock.advance()
     if clock.event_occurs("sampling"):
-        values = evaluator.evaluate(ca)
+        values = np.concat((eval_synapse.evaluate(ca.components[0]),
+                            eval_neuropil.evaluate(ca.components[1])))
         evaluations.append(values)
         time_points.append(clock.current_time)
-Draw(ca, clipping=clipping_settings, settings=visualization_settings)
+Draw(ca.components[0], clipping=clipping_settings, settings=visualization_settings)
 
 # %%
 # Plot the point values over time
@@ -130,11 +146,13 @@ evaluations = np.array(evaluations)
 time_points = np.array(time_points)
 
 plt.figure(figsize=(10, 6))
-for i, point in enumerate(eval_points):
-    plt.plot(time_points, evaluations[:, i], label=f'Point {i+1}')
+for i, values in enumerate(evaluations.T):
+    plt.plot(time_points, values, label=f'Point {i+1}')
 
 plt.xlabel('Time (ms)')
 plt.ylabel('Calcium Concentration (mM)')
+plt.xlim(0, convert(END_TIME, TIME))
+plt.ylim(0.4, 1.4)
 plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
 plt.show()
