@@ -7,7 +7,6 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 import pandas as pd
 import astropy.units as u
 import astropy.constants as const
