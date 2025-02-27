@@ -7,6 +7,8 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import pandas as pd
 import astropy.units as u
 import astropy.constants as const
 from ngsolve.webgui import Draw
@@ -23,9 +25,9 @@ visualization_settings = {"camera": {"transformations": [{"type": "rotateX", "an
 
 # %%
 # Geometry parameters
-TOTAL_SIZE = 2 * u.um        # Guessed
-SYNAPSE_RADIUS = 0.1 * u.um  # Fig. 4
-CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse"
+TOTAL_SIZE = 2 * u.um        # Guessed/probably 2 - 20 um 
+SYNAPSE_RADIUS = 0.1 * u.um  # Fig. 4 / 0.11 um
+CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse" (30 nm -200 nm)
 GLIA_DISTANCE = 30 * u.nm    # Guessed
 GLIA_WIDTH = 100 * u.nm      # Sec. "Glial sheath and glutamate transporter density"
 GLIA_COVERAGE = 0.5          # Varied
@@ -43,6 +45,8 @@ N_CHANNELS = 39                       # Fig. 4
 MESH_SIZE = 0.1 * u.um
 TIME_STEP = 1.0 * u.us
 END_TIME = 1.5 * u.ms
+
+# %%
 
 # %%
 # Create the geometry
@@ -157,4 +161,64 @@ plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
 plt.show()
 
+
+# Extract the minima from each time series
+min_values = np.min(evaluations, axis=0)
+min_time_indices = np.argmin(evaluations, axis=0)
+min_time_points = time_points[min_time_indices]
+
+# Plot the minimum values
+plt.figure(figsize=(10, 6))
+for i, (t, v) in enumerate(zip(min_time_points, min_values)):
+    plt.plot(t, v, 'o', label=f'Point {i+1}')
+    plt.text(t, v, f'Point {i+1}', fontsize=10, verticalalignment='bottom', horizontalalignment='right')
+
+plt.xlabel('Time (ms)')
+plt.ylabel('Minimum Calcium Concentration (mM)')
+plt.title('Minimum Calcium Concentration Over Time')
+plt.legend()
+plt.show()
+
 # %%
+# Create a list of minimum points
+min_points_list = [(f'Point {i+1}', t, v) for i, (t, v) in enumerate(zip(min_time_points, min_values))]
+print("List of minimum points:")
+print(min_points_list)
+
+# Extract the minima from each time series
+min_values = np.min(evaluations, axis=0)
+min_time_indices = np.argmin(evaluations, axis=0)
+min_time_points = time_points[min_time_indices]
+
+# Plot the minimum values
+plt.figure(figsize=(10, 6))
+plt.plot(min_time_points, min_values, 'o-', label='Minimum Values')
+
+plt.xlabel('Time (ms)')
+plt.ylabel('Minimum Calcium Concentration (mM)')
+plt.title('Minimum Calcium Concentration Over Time')
+plt.legend()
+plt.show()
+
+# %%
+# Convert data to a DataFrame and save to CSV
+evaluations = np.array(evaluations)
+time_points = np.array(time_points)
+data = {'Time (ms)': time_points}
+for i in range(evaluations.shape[1]):
+    data[f'Point {i+1} (mM)'] = evaluations[:, i]
+df = pd.DataFrame(data)
+df.to_csv("calcium_total_size_2_um_synapse_radius_0p1_cleft_size_0p03.csv", index=False)
+
+# Plot the point values over time
+plt.figure(figsize=(10, 6))
+for i, point in enumerate(eval_points):
+    plt.plot(time_points, evaluations[:, i], label=f'Point {i+1}')
+
+plt.xlabel('Time (ms)')
+plt.ylabel('Calcium Concentration (mM)')
+plt.title('Calcium Concentration Over Time at Different Points')
+plt.legend()
+plt.show()
+
+print("Data saved in 'calcium_cleft_size_10nm.csv'")
