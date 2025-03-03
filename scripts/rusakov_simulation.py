@@ -27,7 +27,7 @@ TOTAL_SIZE = 2 * u.um        # Guessed
 SYNAPSE_RADIUS = 0.1 * u.um  # Fig. 4
 CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse"
 GLIA_DISTANCE = 30 * u.nm    # Guessed
-GLIA_WIDTH = 100 * u.nm      # Sec. "Glial sheath and glutamate transporter density"
+GLIA_WIDTH = 50 * u.nm       # Sec. "Glial sheath and glutamate transporter density"
 GLIA_COVERAGE = 0.5          # Varied
 TORTUOSITY = 1.4             # Sec. "Synaptic geometry"
 POROSITY = 0.12              # Sec. "Synaptic geometry"
@@ -74,7 +74,7 @@ D_neuropil = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
 a = BilinearForm(fes)
 a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
 a += D_neuropil * grad(test_n) * grad(trial_n) * dx("neuropil")
-a += POROSITY * (test_s - test_n) * (trial_s - trial_n) * ds("synapse_boundary")
+a += (test_s - test_n) * (trial_s - trial_n / POROSITY) * ds("synapse_boundary")
 a.Assemble()
 
 m = BilinearForm(fes)
@@ -105,10 +105,9 @@ eval_points = np.array([
     [0, 0, dist],       # 3: inside glia, far from cleft
 ])
 eval_synapse = PointEvaluator(mesh, eval_points)
-dist = convert(SYNAPSE_RADIUS + GLIA_WIDTH + 2 * GLIA_DISTANCE, LENGTH)
 eval_points = np.array([
-    [0, 0, - dist],  # 4: outside glia (below)
-    [0, 0, dist],   # 5: outside glia (above)
+    [0, 0, -2 * dist],  # 4: outside glia (below)
+    [0, 0, 2 * dist],   # 5: outside glia (above)
 ])
 eval_neuropil = PointEvaluator(mesh, eval_points)
 
