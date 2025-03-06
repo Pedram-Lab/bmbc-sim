@@ -10,6 +10,7 @@ dependencies:
   - pip
   - pytest
   - python==3.12
+  - pyvista
   - scipy
   - tqdm
   - pip:
