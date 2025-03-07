@@ -32,9 +32,18 @@ BASES = {
 
 def to_simulation_units(value: u.Quantity, physical_name: str = None) -> float:
     """Convert a value to simulation units.
-    :param value: The value to convert.
-    :param physical_name: The physical quantity to convert. If not None, the
-        value is checked to be of the correct physical quantity.
+
+    Args:
+        value: The value to convert.
+        physical_name: The physical quantity to convert. If not None, the value
+            is checked to be of the correct physical quantity.
+
+    Returns:
+        The value of the quantity in simulation units.
+
+    Raises:
+        ValueError: The argument `physical_name` was given and the quantity
+            could not be converted to this unit.
     """
     # Check if the value is of the correct physical quantity
     if physical_name is not None:
