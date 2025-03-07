@@ -1,47 +1,58 @@
-import abc
+from typing import Iterable
 import ngsolve as ngs
+import astropy.units as u
+
+from ecsim.units import to_simulation_units
 
 
-class Region(abc.ABC):
+class Region():
     """A region within a geometry representing a biological structure. Chemical
     solutions are continuous across region boundaries which are not
     :class:`Membrane`s.
     """
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        diffusion_coefficient: u.Quantity,
+    ) -> None:
         """Create a new region.
         Args:
             name: The name of the region.
         """
         self.name = name
-
-    @abc.abstractmethod
-    def diffusion_coefficient(self) -> float:
-        """Get the diffusion coefficient of the region in simulation units.
-        Returns:
-            The diffusion coefficient of the region.
-        """
+        self.diffusion_coefficient = diffusion_coefficient
 
 
-class Compartment(abc.ABC):
+class Compartment():
     """A compartment within a geometry representing a biological structure.
     Chemical solutions are discontinuous across compartment boundaries. Those
     boundaries have to be modeled explicitly as :class:`Membrane`s).
     """
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        regions: Region | Iterable[Region]
+    ) -> None:
         """Create a new compartment.
+
         Args:
             name: The name of the compartment.
+            regions: The regions within the compartment.
         """
         self.name = name
+        if isinstance(regions, Region):
+            self.regions = [regions]
+        else:
+            self.regions = regions
 
-    @abc.abstractmethod
     def get_regions(self) -> list[Region]:
         """Get the regions within the compartment.
+
         Returns:
             The regions within the compartment.
         """
+        return self.regions
 
-    @abc.abstractmethod
     def add_diffusion_to_form(
         self,
         form: ngs.BilinearForm,
@@ -50,43 +61,50 @@ class Compartment(abc.ABC):
     ) -> None:
         """Add the ion kinetics within the compartment to the given bilinear
         form.
+
         Args:
             form: The form to describe diffusion within the compartment (changed
                 in place).
             test_fun: A test function for the compartment.
             trial_fun: A trial function for the compartment
         """
+        if len(self.regions) == 1:
+            diffusion_coefficient = to_simulation_units(
+                self.regions[0].diffusion_coefficient(), 'diffusivity'
+            )
+        else:
+            mesh = form.space.mesh
+            coefficients = {
+                r.name: to_simulation_units(r.diffusion_coefficient(), 'diffusivity')
+                for r in self.region
+            }
+            diffusion_coefficient = mesh.MaterialCF(coefficients)
+
+        form += diffusion_coefficient * ngs.grad(test_fun) * ngs.grad(trial_fun) * ngs.dx
 
 
-class Membrane(abc.ABC):
+class Membrane():
     """A membrane within a geometry representing a biological structure. A
     membrane separates two :class:`Compartment`s. Transport across the membrane
     is modeled explicitly.
     """
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        left: Compartment,
+        right: Compartment
+    ) -> None:
         """Create a new membrane.
+
         Args:
             name: The name of the membrane.
+            left: The compartment on the left side of the membrane.
+            right: The compartment on the right side of the membrane.
         """
         self.name = name
+        self.left = left
+        self.right = right
 
-    @abc.abstractmethod
-    def add_transport_to_form(
-        self,
-        form: ngs.BilinearForm,
-        test_fun_left: ngs.comp.ProxyFunction,
-        trial_fun_left: ngs.comp.ProxyFunction,
-        test_fun_right: ngs.comp.ProxyFunction,
-        trial_fun_right: ngs.comp.ProxyFunction
-    ) -> None:
-        """Add the ion kinetics within the membrane to the given bilinear form.
-        Args:
-            form: The form to describe diffusion within the membrane.
-            test_fun_left: A test function for the compartment left of the membrane.
-            trial_fun_left: A trial function for the compartment left of the membrane.
-            test_fun_right: A test function for the compartment right of the membrane.
-            trial_fun_right: A trial function for the compartment right of the membrane.
-        """
 
 class GeometryDescription:
     """A bio-chemical description of the geometry of a simulation.
