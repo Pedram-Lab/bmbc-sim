@@ -6,6 +6,7 @@ dependencies:
   - jupyter
   - jupytext
   - matplotlib
+  - networkx
   - numpy==2.1.3
   - pip
   - pytest
