@@ -2,12 +2,12 @@
 """
 Geometries consisting of simple geometric shapes for testing purposes.
 """
-from netgen.occ import Box, Pnt, Z, Face, Wire, Circle, Glue, Fuse, OCCGeometry
+from netgen import occ
 from netgen.meshing import FaceDescriptor
 from ngsolve import Mesh
 from astropy.units import Quantity
 
-from ecsim.units import LENGTH, convert
+from ecsim.units import to_simulation_units
 from ecsim.geometry._utils import convert_to_volume_mesh
 
 
@@ -32,15 +32,15 @@ def create_ca_depletion_mesh(
     :param channel_radius: The radius of the channel in the membrane.
     :param mesh_size: The maximum mesh size.
     """
-    sx = convert(side_length_x, LENGTH) / 2
-    sy = convert(side_length_y, LENGTH) / 2
-    cytosol_height = convert(cytosol_height, LENGTH)
-    ecs_height = convert(ecs_height, LENGTH)
-    channel_radius = convert(channel_radius, LENGTH)
-    mesh_size = convert(mesh_size, LENGTH)
+    sx = to_simulation_units(side_length_x, 'length') / 2
+    sy = to_simulation_units(side_length_y, 'length') / 2
+    cytosol_height = to_simulation_units(cytosol_height, 'length')
+    ecs_height = to_simulation_units(ecs_height, 'length')
+    channel_radius = to_simulation_units(channel_radius, 'length')
+    mesh_size = to_simulation_units(mesh_size, 'length')
 
-    cytosol = Box(Pnt(-sx, -sy, 0), Pnt(sx, sy, cytosol_height))
-    ecs = Box(Pnt(-sx, -sy, cytosol_height), Pnt(sx, sy, cytosol_height + ecs_height))
+    cytosol = occ.Box(occ.Pnt(-sx, -sy, 0), occ.Pnt(sx, sy, cytosol_height))
+    ecs = occ.Box(occ.Pnt(-sx, -sy, cytosol_height), occ.Pnt(sx, sy, cytosol_height + ecs_height))
     left, right, front, back, bottom, top = (0, 1, 2, 3, 4, 5)
 
     # Assign boundary conditions
@@ -51,19 +51,19 @@ def create_ca_depletion_mesh(
     ecs.faces[top].bc("ecs_top")
 
     # Cut a hole into the ecs-cytosol interface
-    channel = Face(Wire(Circle(Pnt(0, 0, cytosol_height), Z, channel_radius)))
+    channel = occ.Face(occ.Wire(occ.Circle(occ.Pnt(0, 0, cytosol_height), occ.Z, channel_radius)))
     channel.maxh = mesh_size / 2
     channel.bc("channel")
     membrane = (cytosol.faces[top] - channel).bc("membrane")
-    interface = Glue([membrane, channel])  # if fused, channel vanishes
+    interface = occ.Glue([membrane, channel])  # if fused, channel vanishes
 
     # Only take parts that make up the actual geometry
-    geo = Fuse([interface, ecs.faces[top], cytosol.faces[bottom]]
-               + [cytosol.faces[f] for f in [front, back, left, right]]
-               + [ecs.faces[f] for f in [front, back, left, right]])
+    geo = occ.Fuse([interface, ecs.faces[top], cytosol.faces[bottom]]
+                   + [cytosol.faces[f] for f in [front, back, left, right]]
+                   + [ecs.faces[f] for f in [front, back, left, right]])
 
     # Generate a mesh on the surface and convert it to a volume mesh
-    surface_mesh = OCCGeometry(geo).GenerateMesh(maxh=mesh_size)
+    surface_mesh = occ.OCCGeometry(geo).GenerateMesh(maxh=mesh_size)
     bnd_to_fd = {
         "channel": FaceDescriptor(surfnr=1, domin=2, domout=1, bc=1),
         "membrane": FaceDescriptor(surfnr=2, domin=2, domout=1, bc=2),
