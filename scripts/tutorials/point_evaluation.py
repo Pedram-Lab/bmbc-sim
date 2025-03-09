@@ -62,7 +62,7 @@ simulation.add_channel_flux(
 def time_stepping(sim: Simulation, n_samples: int):
     n_steps = sim.n_time_steps
     sample_int = int(ceil(n_steps / n_samples))
-    u_t = GridFunction(sim._fes, multidim=0)
+    u_t = GridFunction(sim._fes_rd, multidim=0)
     u_t.AddMultiDimComponent(sim.concentrations["calcium"].vec)
     
     for i in trange(n_steps):

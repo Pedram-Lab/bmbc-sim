@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 import astropy.units as u
 import ngsolve as ngs
@@ -38,10 +39,8 @@ class Simulation:
                     self._rd_fes.ndof)
 
         # Set up empty containers for simulation data
-        self._blf = {}
-        self._rhs = {}
-        self._concentrations = {}
-        self._test_and_trial = {}
+        self._fem_setup: dict[str, FemSetup] = {}
+        self._fem_matrices: dict[str, FemMatrices] = {}
 
 
     def add_species(
@@ -61,13 +60,7 @@ class Simulation:
         logger.debug("Add species %s to simulation.", species)
 
         # Set up finite element structures for the species
-        self._blf[species] = ngs.BilinearForm(self._rd_fes)
-        self._rhs[species] = ngs.LinearForm(self._rd_fes)
-        self._concentrations[species] = ngs.GridFunction(self._rd_fes)
-        self._test_and_trial[species] = {
-            self.geometry_description.compartments[i]: (test, trial)
-            for i, (test, trial) in enumerate(zip(*self._rd_fes.TnT()))
-        }
+        self._fem_setup[species] = FemSetup(self._rd_fes, self.geometry_description.compartments)
 
         return species
 
@@ -110,6 +103,117 @@ class Simulation:
             }
             diffusivity = mesh.MaterialCF(coeffs, default=0.0)
 
-        blf = self._blf[species]
-        test, trial = self._test_and_trial[species][compartment]
+        blf = self._fem_setup[species].blf
+        test, trial = self._fem_setup[species].test_and_trial[compartment]
         blf += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
+
+
+    def simulate_until(
+            self,
+            *,
+            time_step: u.Quantity,
+            end_time: u.Quantity,
+            start_time: u.Quantity = 0 * u.s,
+    ) -> None:
+        """Run the simulation until a given end time.
+
+        :param time_step: The time step to use for the simulation.
+        :param end_time: The end time of the simulation.
+        :param start_time: The start time of the simulation.
+        :raises ValueError: If the end time is not greater than the start time.
+        """
+        if end_time <= start_time:
+            raise ValueError("End time must be greater than start time.")
+
+        n_steps = int((end_time - start_time) / time_step)
+        self.simulate_for(time_step=time_step, n_steps=n_steps, start_time=start_time)
+
+
+    def simulate_for(
+            self,
+            *,
+            time_step: u.Quantity,
+            n_steps: int,
+            start_time: u.Quantity = 0 * u.s,
+    ) -> None:
+        """Run the simulation for a given number of time steps.
+
+        :param time_step: The time step to use for the simulation.
+        :param n_steps: The number of time steps to run the simulation for.
+        :param start_time: The start time of the simulation.
+        :raises ValueError: If the number of steps is less than 1 or time step is not positive.
+        """
+        if n_steps < 1:
+            raise ValueError("Number of steps must be at least 1.")
+        if time_step <= 0 * u.s:
+            raise ValueError("Time step must be positive.")
+
+        for species in self.species:
+            logger.info("Setting up simulation for species %s.", species.name)
+            self._fem_matrices[species] = self._fem_setup[species].assemble(
+                dt=to_simulation_units(time_step, 'time'),
+                geometry_description=self.geometry_description,
+            )
+
+        logger.info("Running simulation for %d steps of size %s.", n_steps, time_step)
+
+
+class FemSetup():
+    """Gathers symbolic expressions for the finite element setup.
+    """
+    def __init__(self, fes: ngs.FESpace, compartments: list[str]):
+        self.blf = ngs.BilinearForm(fes)
+        self.rhs = ngs.LinearForm(fes)
+        self.active_dofs = ngs.BitArray(fes.ndof)
+        self.test_and_trial = {
+            compartments[i]: (test, trial)
+            for i, (test, trial) in enumerate(zip(*fes.TnT()))
+        }
+
+
+    def assemble(
+            self,
+            dt: float,
+            geometry_description: GeometryDescription
+    ) -> 'FemMatrices':
+        """Assemble the bilinear and linear forms for the simulation.
+        """
+        fes = self.blf.space
+
+        # Assemble the stiffness matrix
+        self.blf.Assemble()
+        stiffness = self.blf.mat
+
+        # Set up the mass matrix
+        mass = ngs.BilinearForm(fes)
+        for compartment in geometry_description.compartments:
+            test, trial = self.test_and_trial[compartment]
+            mass += test * trial * ngs.dx
+        mass.Assemble()
+        mass = mass.mat
+
+        mass.AsVector().data += dt * stiffness.AsVector()
+
+        return FemMatrices(stiffness=stiffness,
+                           exp_a_delta_t=mass.Inverse(self.active_dofs))
+
+
+    def set_dofs(self, dof_array, region, value):
+        """Set the values of the degrees of freedom in a given region.
+
+        :param dof_array: The array of degrees of freedom to set. Changes are
+            made in place.
+        :param region: The region in which to set the degrees of freedom.
+        :param value: The value to set the degrees of freedom to.
+        """
+        for el in region.Elements():
+            for dof in self.blf.space.GetDofNrs(el):
+                dof_array[dof] = value
+
+
+@dataclass
+class FemMatrices():
+    """Gathers the assembled bilinear and linear forms.
+    """
+    exp_a_delta_t: ngs.BaseMatrix
+    stiffness: ngs.BaseMatrix
