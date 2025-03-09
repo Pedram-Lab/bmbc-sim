@@ -19,8 +19,8 @@ class GeometryDescription:
         multi-region compartment, which is indicated by naming it
         'compartment:region'. Membranes are mesh boundaries that separate two
         compartments.
-        Args:
-            mesh: The mesh to create the geometry description from.
+
+        :param mesh: The mesh to create the geometry description from.
         """
         logger.info('Creating geometry description from mesh.')
         self.mesh = mesh
@@ -43,7 +43,8 @@ class GeometryDescription:
             compartment_regions.append(region)
             self._compartments[compartment_name] = compartment_regions
             logger.debug('Inferred compartment %s from region %s', compartment_name, region)
-        logger.info('Found %d compartments: %s', len(self._compartments), list(self._compartments.keys()))
+        logger.info('Found %d compartments: %s',
+                    len(self._compartments), list(self._compartments.keys()))
 
         # Store all boundaries as (left, right, name)
         boundaries = {
@@ -94,34 +95,36 @@ class GeometryDescription:
 
     def get_regions(self, compartment: str) -> list[str]:
         """Get all regions of a compartment.
-        Args:
-            compartment: The compartment to get the regions of.
-        return tuple(
-            region for region in self.regions if _extract_compartment(region) == compartment)
+        
+        :param compartment: The compartment to get the regions of.
+        :returns regions: The regions of the given compartment.
         """
         return self._compartments[compartment]
 
 
     def get_membrane_neighbors_left(self, membrane: str) -> set[str]:
         """Get all compartments on the left side of a membrane.
-        Args:
-            membrane: The membrane to get the neighbors of.
+        
+        :param membrane: The membrane to get the neighbors of.
+        :returns neighbors: The compartments on the left side of the membrane.
         """
         return self._membranes[membrane][0]
 
 
     def get_membrane_neighbors_right(self, membrane: str) -> set[str]:
         """Get all compartments on the right side of a membrane.
-        Args:
-            membrane: The membrane to get the neighbors of.
+        
+        :param membrane: The membrane to get the neighbors of.
+        :returns neighbors: The compartments on the right side of the membrane.
         """
         return self._membranes[membrane][1]
 
 
     def get_membrane_neighbors(self, membrane: str) -> set[str]:
         """Get all compartments on both sides of a membrane.
-        Args:
-            membrane: The membrane to get the neighbors of.
+        
+        :param membrane: The membrane to get the neighbors of.
+        :returns neighbors: The compartments on both sides of the membrane.
         """
         return self.get_membrane_neighbors_left(membrane) \
             | self.get_membrane_neighbors_right(membrane)
@@ -130,10 +133,10 @@ class GeometryDescription:
     def visualize(self, resolve_regions: bool = True) -> None:
         """Visualize the geometry description. The compartments are
         represented as nodes and the membranes as edges.
-        Args:
-            resolve_regions: Whether to resolve regions or not. If True, the
-                regions are used as nodes. If False, the compartments are used
-                as nodes.
+        
+        :param resolve_regions: Whether to resolve regions or not. If True, the
+            regions are used as nodes. If False, the compartments are used as
+            nodes.
         """
         # Create a graph with compartments as nodes and membranes as edges
         graph = nx.MultiGraph()
@@ -181,9 +184,8 @@ class GeometryDescription:
 
 def _extract_compartment(region: str) -> str:
     """Extract the compartment name from a region name.
-    Args:
-        region: The region name.
-    Returns:
-        The compartment name.
+    
+    :param region: The region name.
+    :returns: The compartment name.
     """
     return region.split(':')[0] if ':' in region else region
