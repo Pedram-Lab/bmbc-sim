@@ -1,4 +1,5 @@
 from itertools import accumulate
+import logging
 
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -6,6 +7,7 @@ import ngsolve as ngs
 
 
 NO_DOMAIN = 'exterior'
+logger = logging.getLogger(__name__)
 
 
 class GeometryDescription:
@@ -20,6 +22,7 @@ class GeometryDescription:
         Args:
             mesh: The mesh to create the geometry description from.
         """
+        logger.info('Creating geometry description from mesh.')
         self.mesh = mesh
 
         # Add all other compartments as nodes (with special node for 'outside of
@@ -30,6 +33,7 @@ class GeometryDescription:
             for region in mesh.Materials(name).Split()
         }
         self.regions: list[str] = list(set(regions.values()))
+        logger.info('Found %d regions: %s', len(self.regions), self.regions)
 
         # Cluster regions into compartments
         self._compartments: dict[str, str] = {}
@@ -38,6 +42,8 @@ class GeometryDescription:
             compartment_regions = self._compartments.get(compartment_name, [])
             compartment_regions.append(region)
             self._compartments[compartment_name] = compartment_regions
+            logger.debug('Inferred compartment %s from region %s', compartment_name, region)
+        logger.info('Found %d compartments: %s', len(self._compartments), list(self._compartments.keys()))
 
         # Store all boundaries as (left, right, name)
         boundaries = {
@@ -53,6 +59,7 @@ class GeometryDescription:
             n2 = regions[neighbors[1]] if len(neighbors) > 1 else NO_DOMAIN
 
             self._full_membrane_connectivity.add((n1, n2, name))
+            logger.debug('Connected %s to %s via membrane %s', n1, n2, name)
 
         # Store membrane names
         self._membranes = {}
@@ -68,6 +75,7 @@ class GeometryDescription:
             membrane_neighbors[0].append(left)
             membrane_neighbors[1].append(right)
             self._membranes[name] = membrane_neighbors
+        logger.info('Found %d membranes: %s', len(self._membranes), list(self._membranes.keys()))
 
 
     @property
