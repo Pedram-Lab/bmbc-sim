@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import ngsolve as ngs
 
 
+NO_DOMAIN = 'exterior'
+
+
 class GeometryDescription:
     """TODO
     """
@@ -26,7 +29,7 @@ class GeometryDescription:
             for name in set(mesh.GetMaterials())
             for region in mesh.Materials(name).Split()
         }
-        self.regions: list[str] = list(set(regions.values())) + ['no_domain']
+        self.regions: list[str] = list(set(regions.values()))
 
         # Cluster regions into compartments
         self._compartments: dict[str, str] = {}
@@ -47,7 +50,7 @@ class GeometryDescription:
             neighbors = bnd.Neighbours(ngs.VOL).Split()
 
             n1 = regions[neighbors[0]]
-            n2 = regions[neighbors[1]] if len(neighbors) > 1 else 'no_domain'
+            n2 = regions[neighbors[1]] if len(neighbors) > 1 else NO_DOMAIN
 
             self._full_membrane_connectivity.add((n1, n2, name))
 
@@ -126,6 +129,7 @@ class GeometryDescription:
         """
         # Create a graph with compartments as nodes and membranes as edges
         graph = nx.MultiGraph()
+        graph.add_node(NO_DOMAIN)
         if resolve_regions:
             graph.add_nodes_from(self.regions)
             for left, right, name in self._full_membrane_connectivity:
