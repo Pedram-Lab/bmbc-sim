@@ -95,7 +95,7 @@ class GeometryDescription:
 
     def get_regions(self, compartment: str, *, full_names=False) -> list[str]:
         """Get all regions of a compartment.
-        
+
         :param compartment: The compartment to get the regions of.
         :param full_names: Whether to return the full names of the regions or
             the names without the compartments.
@@ -203,3 +203,13 @@ def _strip_compartment(region: str) -> str:
     :returns: The region name without the compartment.
     """
     return region.split(':')[1] if ':' in region else region
+
+
+def full_name(compartment: str, region: str) -> str:
+    """Get the full name of a region within a compartment.
+    
+    :param compartment: The compartment name.
+    :param region: The region name.
+    :returns: The full name of the region.
+    """
+    return f'{compartment}:{region}'
