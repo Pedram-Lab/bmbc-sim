@@ -69,11 +69,11 @@ class GeometryDescription:
 
             if left_compartment == right_compartment:
                 # A membrane connects different compartments
-                continue 
+                continue
 
-            membrane_neighbors = self._membranes.get(name, ([], []))
-            membrane_neighbors[0].append(left)
-            membrane_neighbors[1].append(right)
+            membrane_neighbors = self._membranes.get(name, (set(), set()))
+            membrane_neighbors[0].add(left_compartment)
+            membrane_neighbors[1].add(right_compartment)
             self._membranes[name] = membrane_neighbors
         logger.info('Found %d membranes: %s', len(self._membranes), list(self._membranes.keys()))
 
@@ -102,7 +102,7 @@ class GeometryDescription:
         return self._compartments[compartment]
 
 
-    def get_membrane_neighbors_left(self, membrane: str) -> list[str]:
+    def get_membrane_neighbors_left(self, membrane: str) -> set[str]:
         """Get all compartments on the left side of a membrane.
         Args:
             membrane: The membrane to get the neighbors of.
@@ -110,7 +110,7 @@ class GeometryDescription:
         return self._membranes[membrane][0]
 
 
-    def get_membrane_neighbors_right(self, membrane: str) -> list[str]:
+    def get_membrane_neighbors_right(self, membrane: str) -> set[str]:
         """Get all compartments on the right side of a membrane.
         Args:
             membrane: The membrane to get the neighbors of.
@@ -118,13 +118,13 @@ class GeometryDescription:
         return self._membranes[membrane][1]
 
 
-    def get_membrane_neighbors(self, membrane: str) -> list[str]:
+    def get_membrane_neighbors(self, membrane: str) -> set[str]:
         """Get all compartments on both sides of a membrane.
         Args:
             membrane: The membrane to get the neighbors of.
         """
         return self.get_membrane_neighbors_left(membrane) \
-            + self.get_membrane_neighbors_right(membrane)
+            | self.get_membrane_neighbors_right(membrane)
 
 
     def visualize(self, resolve_regions: bool = True) -> None:
