@@ -93,13 +93,17 @@ class GeometryDescription:
         return list(self._membranes.keys())
 
 
-    def get_regions(self, compartment: str) -> list[str]:
+    def get_regions(self, compartment: str, *, full_names=False) -> list[str]:
         """Get all regions of a compartment.
         
         :param compartment: The compartment to get the regions of.
+        :param full_names: Whether to return the full names of the regions or
+            the names without the compartments.
         :returns regions: The regions of the given compartment.
         """
-        return self._compartments[compartment]
+        return self._compartments[compartment] if full_names \
+            else [_strip_compartment(region)
+                  for region in self._compartments[compartment]]
 
 
     def get_membrane_neighbors_left(self, membrane: str) -> set[str]:
@@ -189,3 +193,13 @@ def _extract_compartment(region: str) -> str:
     :returns: The compartment name.
     """
     return region.split(':')[0] if ':' in region else region
+
+
+def _strip_compartment(region: str) -> str:
+    """Strip the compartment name from a region name. If the region is the sole
+    region within a compartment, return the full name.
+    
+    :param region: The region name.
+    :returns: The region name without the compartment.
+    """
+    return region.split(':')[1] if ':' in region else region

@@ -33,12 +33,26 @@ def test_geometry_contains_everything(geometry_description):
     assert set(geometry_description.membranes) == {'right_membrane', 'clamped', 'reflective'}
 
 
+def test_geometry_identifies_full_subregions_correctly(geometry_description):
+    """Test that the geometry identifies regions that make up compartments
+    correctly.
+    """
+    ecm_regions = geometry_description.get_regions('ecm', full_names=True)
+    cell_regions = geometry_description.get_regions('cell', full_names=True)
+
+    assert set(ecm_regions) == {'ecm:left', 'ecm:right'}
+    assert set(cell_regions) == {'cell'}
+
+
 def test_geometry_identifies_subregions_correctly(geometry_description):
     """Test that the geometry identifies regions that make up compartments
     correctly.
     """
-    assert set(geometry_description.get_regions('ecm')) == {'ecm:left', 'ecm:right'}
-    assert set(geometry_description.get_regions('cell')) == {'cell'}
+    ecm_regions = geometry_description.get_regions('ecm')
+    cell_regions = geometry_description.get_regions('cell')
+
+    assert set(ecm_regions) == {'left', 'right'}
+    assert set(cell_regions) == {'cell'}
 
 
 def test_geometry_identifies_membrane_neighbors_correctly(geometry_description):
