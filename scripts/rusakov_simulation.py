@@ -10,11 +10,10 @@ import matplotlib.pyplot as plt
 import astropy.units as u
 import astropy.constants as const
 from ngsolve.webgui import Draw
-from ngsolve import (H1, BilinearForm, LinearForm, grad, GridFunction, Mesh, Parameter,
-                     Integrate, BND, exp, dx, ds, Compress)
+import ngsolve as ngs
 
 from ecsim.geometry import create_rusakov_geometry, create_mesh, PointEvaluator
-from ecsim.units import DIFFUSIVITY, CONCENTRATION, SUBSTANCE, TIME, LENGTH, convert
+from ecsim.units import to_simulation_units
 from ecsim.simulation import SimulationClock
 
 # %%
@@ -59,46 +58,47 @@ Draw(geo, clipping=clipping_settings, settings=visualization_settings)
 
 # %%
 # Create the mesh
-mesh = Mesh(create_mesh(geo, mesh_size=MESH_SIZE))
+mesh = ngs.Mesh(create_mesh(geo, mesh_size=MESH_SIZE))
 
 # %%
 # Set up FEM objects
 # see https://docu.ngsolve.org/latest/i-tutorials/unit-2.13-interfaces/interfaceresistivity.html
-fes_synapse = Compress(H1(mesh, order=1, definedon="synapse_ecs"))
-fes_neuropil = Compress(H1(mesh, order=1, definedon="neuropil", dirichlet="neuropil_boundary"))
+fes_synapse = ngs.Compress(ngs.H1(mesh, order=1, definedon="synapse_ecs"))
+fes_neuropil = ngs.Compress(
+    ngs.H1(mesh, order=1, definedon="neuropil", dirichlet="neuropil_boundary"))
 fes = fes_synapse * fes_neuropil
 (test_s, test_n), (trial_s, trial_n) = fes.TnT()
 
-D_synapse = convert(D_COEFFICIENT, DIFFUSIVITY)
-D_neuropil = convert(D_COEFFICIENT, DIFFUSIVITY) / TORTUOSITY**2
-a = BilinearForm(fes)
-a += D_synapse * grad(test_s) * grad(trial_s) * dx("synapse_ecs")
-a += D_neuropil * grad(test_n) * grad(trial_n) * dx("neuropil")
-a += (test_s - test_n) * (trial_s - trial_n / POROSITY) * ds("synapse_boundary")
+D_synapse = to_simulation_units(D_COEFFICIENT, 'diffusivity')
+D_neuropil = to_simulation_units(D_COEFFICIENT, 'diffusivity') / TORTUOSITY**2
+a = ngs.BilinearForm(fes)
+a += D_synapse * ngs.grad(test_s) * ngs.grad(trial_s) * ngs.dx("synapse_ecs")
+a += D_neuropil * ngs.grad(test_n) * ngs.grad(trial_n) * ngs.dx("neuropil")
+a += (test_s - test_n) * (trial_s - trial_n / POROSITY) * ngs.ds("synapse_boundary")
 a.Assemble()
 
-m = BilinearForm(fes)
-m += test_s * trial_s * dx("synapse_ecs")
-m += test_n * trial_n * dx("neuropil")
+m = ngs.BilinearForm(fes)
+m += test_s * trial_s * ngs.dx("synapse_ecs")
+m += test_n * trial_n * ngs.dx("neuropil")
 m.Assemble()
 
-phi = convert(TIME_CONSTANT, 1 / TIME)
-t_param = Parameter(0)
+phi = to_simulation_units(TIME_CONSTANT, 'frequency')
+t_param = ngs.Parameter(0)
 const_F = const.e.si * const.N_A
-terminal_area = Integrate(1, mesh.Boundaries("presynaptic_membrane"), BND)
-Q_0 = convert(CHANNEL_CURRENT / (2 * const_F), SUBSTANCE / TIME)
-Q = N_CHANNELS * Q_0 * phi * t_param * exp(-phi * t_param) / terminal_area
-b = LinearForm(fes)
-b += D_synapse * Q * trial_s * ds("presynaptic_membrane")
+terminal_area = ngs.Integrate(1, mesh.Boundaries("presynaptic_membrane"), ngs.BND)
+Q_0 = to_simulation_units(CHANNEL_CURRENT / (2 * const_F), 'catalytic activity')
+Q = N_CHANNELS * Q_0 * phi * t_param * ngs.exp(-phi * t_param) / terminal_area
+b = ngs.LinearForm(fes)
+b += D_synapse * Q * trial_s * ngs.ds("presynaptic_membrane")
 
 # %%
 # Initialize the simulation
-t_end = convert(END_TIME, TIME)
-tau = convert(TIME_STEP, TIME)
+t_end = to_simulation_units(END_TIME, 'time')
+tau = to_simulation_units(TIME_STEP, 'time')
 events = {"sampling": 10}
 clock = SimulationClock(time_step=tau, end_time=t_end, events=events, verbose=True)
 
-dist = convert(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, LENGTH)
+dist = to_simulation_units(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, 'length')
 eval_points = np.array([
     [0, 0, 0],          # 1: center
     [dist, 0, 0],       # 2: inside glia, near cleft
@@ -115,8 +115,8 @@ mstar = m.mat.CreateMatrix()
 mstar.AsVector().data = m.mat.AsVector() + tau * a.mat.AsVector()
 mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
 
-ca_0 = convert(CA_RESTING, CONCENTRATION)
-ca = GridFunction(fes)
+ca_0 = to_simulation_units(CA_RESTING, 'molar concentration')
+ca = ngs.GridFunction(fes)
 ca.components[0].Set(ca_0)
 ca.components[1].Set(ca_0)
 
@@ -150,7 +150,7 @@ for i, values in enumerate(evaluations.T):
 
 plt.xlabel('Time (ms)')
 plt.ylabel('Calcium Concentration (mM)')
-plt.xlim(0, convert(END_TIME, TIME))
+plt.xlim(0, to_simulation_units(END_TIME, 'time'))
 plt.ylim(0.4, 1.4)
 plt.title('Calcium Concentration Over Time at Different Points')
 plt.legend()
