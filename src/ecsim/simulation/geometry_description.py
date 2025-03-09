@@ -9,7 +9,11 @@ class GeometryDescription:
     """TODO
     """
     def __init__(self, mesh: ngs.Mesh) -> None:
-        """Create a new geometry description.
+        """Create a new geometry description. Regions and interfaces are
+        inferred from the mesh. Regions can either be compartments or part of a
+        multi-region compartment, which is indicated by naming it
+        'compartment:region'. Membranes are mesh boundaries that separate two
+        compartments.
         Args:
             mesh: The mesh to create the geometry description from.
         """
@@ -22,30 +26,94 @@ class GeometryDescription:
             for name in set(mesh.GetMaterials())
             for region in mesh.Materials(name).Split()
         }
-        self.regions: tuple[str, ...] = tuple(set(regions.values())) + ('no_domain',)
+        self.regions: list[str] = list(set(regions.values())) + ['no_domain']
 
         # Cluster regions into compartments
-        compartments = set(_extract_compartment(region) for region in self.regions)
-        self.compartments: tuple[str, ...] = tuple(compartments)
+        self._compartments: dict[str, str] = {}
+        for region in self.regions:
+            compartment_name = _extract_compartment(region)
+            compartment_regions = self._compartments.get(compartment_name, [])
+            compartment_regions.append(region)
+            self._compartments[compartment_name] = compartment_regions
 
-        # Store all edges as (left, right, name)
+        # Store all boundaries as (left, right, name)
         boundaries = {
             bnd: name
             for name in set(mesh.GetBoundaries())
             for bnd in mesh.Boundaries(name).Split()
         }
-        self._membrane_connectivity = set()
+        self._full_membrane_connectivity = set()
         for bnd, name in boundaries.items():
             neighbors = bnd.Neighbours(ngs.VOL).Split()
 
             n1 = regions[neighbors[0]]
             n2 = regions[neighbors[1]] if len(neighbors) > 1 else 'no_domain'
 
-            self._membrane_connectivity.add((n1, n2, name))
+            self._full_membrane_connectivity.add((n1, n2, name))
 
         # Store membrane names
-        membranes = set(name for _, _, name in self._membrane_connectivity)
-        self.membranes: tuple[str, ...] = tuple(membranes)
+        self._membranes = {}
+        for left, right, name in self._full_membrane_connectivity:
+            left_compartment = _extract_compartment(left)
+            right_compartment = _extract_compartment(right)
+
+            if left_compartment == right_compartment:
+                # A membrane connects different compartments
+                continue 
+
+            membrane_neighbors = self._membranes.get(name, ([], []))
+            membrane_neighbors[0].append(left)
+            membrane_neighbors[1].append(right)
+            self._membranes[name] = membrane_neighbors
+
+
+    @property
+    def compartments(self) -> list[str]:
+        """The list of compartments.
+        """
+        return list(self._compartments.keys())
+
+
+    @property
+    def membranes(self) -> list[str]:
+        """The list of membranes.
+        """
+        return list(self._membranes.keys())
+
+
+    def get_regions(self, compartment: str) -> list[str]:
+        """Get all regions of a compartment.
+        Args:
+            compartment: The compartment to get the regions of.
+        return tuple(
+            region for region in self.regions if _extract_compartment(region) == compartment)
+        """
+        return self._compartments[compartment]
+
+
+    def get_membrane_neighbors_left(self, membrane: str) -> list[str]:
+        """Get all compartments on the left side of a membrane.
+        Args:
+            membrane: The membrane to get the neighbors of.
+        """
+        return self._membranes[membrane][0]
+
+
+    def get_membrane_neighbors_right(self, membrane: str) -> list[str]:
+        """Get all compartments on the right side of a membrane.
+        Args:
+            membrane: The membrane to get the neighbors of.
+        """
+        return self._membranes[membrane][1]
+
+
+    def get_membrane_neighbors(self, membrane: str) -> list[str]:
+        """Get all compartments on both sides of a membrane.
+        Args:
+            membrane: The membrane to get the neighbors of.
+        """
+        return self.get_membrane_neighbors_left(membrane) \
+            + self.get_membrane_neighbors_right(membrane)
 
 
     def visualize(self, resolve_regions: bool = True) -> None:
@@ -60,11 +128,11 @@ class GeometryDescription:
         graph = nx.MultiGraph()
         if resolve_regions:
             graph.add_nodes_from(self.regions)
-            for left, right, name in self._membrane_connectivity:
+            for left, right, name in self._full_membrane_connectivity:
                 graph.add_edge(left, right, name=name)
         else:
             graph.add_nodes_from(self.compartments)
-            for left, right, name in self._membrane_connectivity:
+            for left, right, name in self._full_membrane_connectivity:
                 graph.add_edge(
                     _extract_compartment(left),
                     _extract_compartment(right),
