@@ -47,7 +47,7 @@ beta = to_simulation_units(VALENCE * const.e.si / (const.k_B * 310 * u.K))
 
 # Simulation parameters
 MESH_SIZE = 0.1 * u.um
-TIME_STEP = 1.0 * u.us
+TIME_STEP = 0.1 * u.us
 END_TIME = 1.5 * u.ms
 
 # %%
@@ -95,6 +95,7 @@ m = ngs.BilinearForm(fes)
 m += test_s * trial_s * ngs.dx("synapse_ecs")
 m += test_n * trial_n * ngs.dx("neuropil")
 m.Assemble()
+minv = m.mat.Inverse(fes.FreeDofs())
 
 (pot_test_s, pot_test_n, p), (pot_trial_s, pot_trial_n, q) = potential_fes.TnT()
 a_pot = ngs.BilinearForm(potential_fes)
@@ -110,7 +111,7 @@ terminal_area = ngs.Integrate(1, mesh.Boundaries("presynaptic_membrane"), ngs.BN
 Q_0 = to_simulation_units(CHANNEL_CURRENT / (2 * const_F), 'catalytic activity')
 Q = N_CHANNELS * Q_0 * phi * t_param * ngs.exp(-phi * t_param) / terminal_area
 b = ngs.LinearForm(fes)
-b += D_synapse * Q * trial_s * ngs.ds("presynaptic_membrane")
+b += -D_synapse * Q * trial_s * ngs.ds("presynaptic_membrane")
 b += -D_synapse * beta * ca.components[0] \
     * ngs.InnerProduct(ngs.grad(pot.components[0]), ngs.grad(trial_s)) * ngs.dx("synapse_ecs")
 b += -D_neuropil * beta * ca.components[1] \
@@ -125,7 +126,7 @@ b_pot += F * VALENCE * ca.components[1] * trial_n * ngs.dx
 t_end = to_simulation_units(END_TIME, 'time')
 tau = to_simulation_units(TIME_STEP, 'time')
 events = {"sampling": 10}
-clock = SimulationClock(time_step=tau, end_time=t_end, events=events, verbose=True)
+clock = SimulationClock(time_step=tau / 2, end_time=t_end, events=events, verbose=True)
 
 dist = to_simulation_units(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, 'length')
 eval_points = np.array([
@@ -141,7 +142,7 @@ eval_points = np.array([
 eval_neuropil = PointEvaluator(mesh, eval_points)
 
 mstar = m.mat.CreateMatrix()
-mstar.AsVector().data = m.mat.AsVector() + tau * a.mat.AsVector()
+mstar.AsVector().data = m.mat.AsVector() + tau / 2 * a.mat.AsVector()
 mstar_inv = mstar.Inverse(freedofs=fes.FreeDofs())
 
 a_pot.Assemble()
@@ -158,13 +159,23 @@ evaluations = [np.concat((eval_synapse.evaluate(ca.components[0]),
 time_points = [clock.current_time]
 delta = ca.vec.CreateVector()
 while clock.is_running():
-    t_param.Set(clock.current_time)
-    b_pot.Assemble()
-    pot.vec.data = a_pot_inv * b_pot.vec
-    b.Assemble()
-    delta.data = mstar_inv * (a.mat * ca.vec + b.vec)
+    # Strang-splitting: Half-step for diffusion
+    delta.data = mstar_inv * (a.mat * ca.vec)
     ca.vec.data += -tau * delta
     clock.advance()
+
+    # Full-step for transport
+    b_pot.Assemble()
+    pot.vec.data = a_pot_inv * b_pot.vec
+    t_param.Set(clock.current_time)
+    b.Assemble()
+    ca.vec.data += tau * (minv * b.vec)
+
+    # Half-step for diffusion
+    delta.data = mstar_inv * (a.mat * ca.vec)
+    ca.vec.data += -tau * delta
+    clock.advance()
+
     if clock.event_occurs("sampling"):
         values = np.concat((eval_synapse.evaluate(ca.components[0]),
                             eval_neuropil.evaluate(ca.components[1])))
