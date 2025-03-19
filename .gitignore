@@ -1,4 +1,5 @@
 # Project-specific ignores
+**/.DS_Store
 results/
 notebooks/
 scratch/
@@ -7,6 +8,8 @@ scratch/
 *.csv
 *.vtu
 *.vtk
+*.stl
+*.pvd
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
