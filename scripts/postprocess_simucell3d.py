@@ -1,8 +1,11 @@
 import numpy as np
 import pyvista as pv
 
+from ecsim.meshing import pyvista_surface_to_netgen
+from ngsolve import Draw
 
-mesh = pv.read("result_3590.vtk")
+
+mesh = pv.read("scripts/result_3590.vtk")
 
 # plotter = pv.Plotter()
 # plotter.add_mesh(mesh, scalars='face_cell_id')
@@ -82,15 +85,15 @@ def get_fully_contained_box(mesh):
 
 
 # We want a certain percentage of the volume to become ECS
-ECS_PERCENTAGE = 0.5
+ECS_PERCENTAGE = 0.2
 INTERACTIVE = False
 FACTOR = (1 - ECS_PERCENTAGE) ** (1 / 3)
-
-volume = sum(compute_volume(mesh, cell_id) for cell_id in cell_ids)
-print(f"total volume: {volume}")
-
+mesh.points *= 1e6 # scale to micrometers
 
 shrink_cells(mesh, cell_ids, FACTOR)
+volume = sum(compute_volume(mesh, cell_id) for cell_id in cell_ids)
+print(f"total volume: {volume} um^3")
+
 plotter = pv.Plotter()
 if INTERACTIVE:
     plotter.add_mesh_clip_box(mesh, scalars='face_cell_id')
@@ -101,3 +104,15 @@ else:
     plotter.add_mesh(clipped_mesh, scalars='face_cell_id')
     # plotter.add_mesh(box, color='red', opacity=0.5)
 plotter.show()
+
+# Postprocess the meshes to look smoother and not have self-intersections
+# cells = [extract_single_cell(surface, cell_id) for cell_id in cell_ids[:1]]
+cells = extract_single_cell(mesh, cell_ids[0])
+# cells = surface
+# cells = pv.merge(cells)
+cells = cells.extract_surface()
+cells = cells.clean()
+cells = cells.smooth(n_iter=100)
+
+# Save as STL for netgen to load
+cells.save("scripts/cells.stl")
