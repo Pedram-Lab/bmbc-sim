@@ -22,15 +22,15 @@ def geometry_description():
     mesh.ngmesh.SetBCName(1, 'left_membrane')
     mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-    return ecsim.GeometryDescription(mesh)
+    return ecsim.SimulationGeometry(mesh)
 
 
 def test_geometry_contains_everything(geometry_description):
     """Test geometry should contain all regions compartments, and membranes.
     """
     assert set(geometry_description.regions) == {'ecm:left', 'ecm:right', 'cell'}
-    assert set(geometry_description.compartments) == {'ecm', 'cell'}
-    assert set(geometry_description.membranes) == {'right_membrane', 'clamped', 'reflective'}
+    assert set(geometry_description.compartment_names) == {'ecm', 'cell'}
+    assert set(geometry_description.membrane_names) == {'right_membrane', 'clamped', 'reflective'}
 
 
 def test_geometry_identifies_full_subregions_correctly(geometry_description):

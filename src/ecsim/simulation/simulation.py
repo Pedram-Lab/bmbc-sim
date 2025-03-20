@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import astropy.units as u
 import ngsolve as ngs
 
-from ecsim.simulation.geometry_description import GeometryDescription, full_name
+from ecsim.simulation.geometry.geometry_description import SimulationGeometry, full_name
 from ecsim.units import to_simulation_units
 from .simulation_agents import ChemicalSpecies
 
@@ -17,7 +17,7 @@ class Simulation:
     """
     def __init__(
             self,
-            geometry_description: GeometryDescription,
+            geometry_description: SimulationGeometry,
     ):
         self.geometry_description = geometry_description
         self.species: list[ChemicalSpecies] = []
@@ -26,7 +26,7 @@ class Simulation:
         logger.info("Setting up finite element spaces...")
         mesh = geometry_description.mesh
         self._compartment_fes = {}
-        for compartment in self.geometry_description.compartments:
+        for compartment in self.geometry_description.compartment_names:
             regions = '|'.join(self.geometry_description.get_regions(compartment, full_names=True))
             fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=regions))
             self._compartment_fes[compartment] = fes
@@ -34,7 +34,7 @@ class Simulation:
 
         # Note that the order of the compartment spaces is the same as the order of compartments
         self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
-                                    for compartment in self.geometry_description.compartments])
+                                    for compartment in self.geometry_description.compartment_names])
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
                     self._rd_fes.ndof)
 
@@ -60,7 +60,7 @@ class Simulation:
         logger.debug("Add species %s to simulation.", species)
 
         # Set up finite element structures for the species
-        self._fem_setup[species] = FemSetup(self._rd_fes, self.geometry_description.compartments)
+        self._fem_setup[species] = FemSetup(self._rd_fes, self.geometry_description.compartment_names)
 
         return species
 
@@ -85,7 +85,7 @@ class Simulation:
         """
         if species not in self.species:
             raise ValueError(f"Species {species.name} does not exist.")
-        if compartment not in self.geometry_description.compartments:
+        if compartment not in self.geometry_description.compartment_names:
             raise ValueError(f"Compartment {compartment} does not exist.")
 
         if isinstance(diffusivity, u.Quantity):
@@ -174,7 +174,7 @@ class FemSetup():
     def assemble(
             self,
             dt: float,
-            geometry_description: GeometryDescription
+            geometry_description: SimulationGeometry
     ) -> 'FemMatrices':
         """Assemble the bilinear and linear forms for the simulation.
         """
@@ -186,7 +186,7 @@ class FemSetup():
 
         # Set up the mass matrix
         mass = ngs.BilinearForm(fes)
-        for compartment in geometry_description.compartments:
+        for compartment in geometry_description.compartment_names:
             test, trial = self.test_and_trial[compartment]
             mass += test * trial * ngs.dx
         mass.Assemble()

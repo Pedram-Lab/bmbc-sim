@@ -22,7 +22,7 @@ def geometry_description():
     mesh.ngmesh.SetBCName(1, 'left_membrane')
     mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-    return ecsim.GeometryDescription(mesh)
+    return ecsim.SimulationGeometry(mesh)
 
 
 def test_added_species_are_present(geometry_description):

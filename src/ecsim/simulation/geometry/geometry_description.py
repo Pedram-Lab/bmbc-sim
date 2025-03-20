@@ -10,7 +10,7 @@ NO_DOMAIN = 'exterior'
 logger = logging.getLogger(__name__)
 
 
-class GeometryDescription:
+class SimulationGeometry:
     """TODO
     """
     def __init__(self, mesh: ngs.Mesh) -> None:
@@ -38,7 +38,7 @@ class GeometryDescription:
         # Cluster regions into compartments
         self._compartments: dict[str, str] = {}
         for region in self.regions:
-            compartment_name = _extract_compartment(region)
+            compartment_name = _split_compartment_and_region(region)[0]
             compartment_regions = self._compartments.get(compartment_name, [])
             compartment_regions.append(region)
             self._compartments[compartment_name] = compartment_regions
@@ -65,8 +65,8 @@ class GeometryDescription:
         # Store membrane names
         self._membranes = {}
         for left, right, name in self._full_membrane_connectivity:
-            left_compartment = _extract_compartment(left)
-            right_compartment = _extract_compartment(right)
+            left_compartment = _split_compartment_and_region(left)[0]
+            right_compartment = _split_compartment_and_region(right)[0]
 
             if left_compartment == right_compartment:
                 # A membrane connects different compartments
@@ -80,14 +80,14 @@ class GeometryDescription:
 
 
     @property
-    def compartments(self) -> list[str]:
-        """The list of compartments.
+    def compartment_names(self) -> list[str]:
+        """The names of all compartments in the geometry.
         """
         return list(self._compartments.keys())
 
 
     @property
-    def membranes(self) -> list[str]:
+    def membrane_names(self) -> list[str]:
         """The list of membranes.
         """
         return list(self._membranes.keys())
@@ -102,7 +102,7 @@ class GeometryDescription:
         :returns regions: The regions of the given compartment.
         """
         return self._compartments[compartment] if full_names \
-            else [_strip_compartment(region)
+            else [_split_compartment_and_region(region)[1]
                   for region in self._compartments[compartment]]
 
 
@@ -150,11 +150,11 @@ class GeometryDescription:
             for left, right, name in self._full_membrane_connectivity:
                 graph.add_edge(left, right, name=name)
         else:
-            graph.add_nodes_from(self.compartments)
+            graph.add_nodes_from(self.compartment_names)
             for left, right, name in self._full_membrane_connectivity:
                 graph.add_edge(
-                    _extract_compartment(left),
-                    _extract_compartment(right),
+                    _split_compartment_and_region(left)[0],
+                    _split_compartment_and_region(right)[0],
                     name=name,
                 )
 
@@ -186,23 +186,17 @@ class GeometryDescription:
         plt.show()
 
 
-def _extract_compartment(region: str) -> str:
-    """Extract the compartment name from a region name.
+def _split_compartment_and_region(domain: str) -> tuple[str, str]:
+    """Split a compartment:region string into its components. If the region is
+    the sole region within a compartment, return the full name for both.
     
-    :param region: The region name.
-    :returns: The compartment name.
+    :param domain: The domain name.
+    :returns: A tuple with the compartment and region names.
     """
-    return region.split(':')[0] if ':' in region else region
-
-
-def _strip_compartment(region: str) -> str:
-    """Strip the compartment name from a region name. If the region is the sole
-    region within a compartment, return the full name.
-    
-    :param region: The region name.
-    :returns: The region name without the compartment.
-    """
-    return region.split(':')[1] if ':' in region else region
+    if ':' in domain:
+        return domain.split(':')
+    else:
+        return domain, domain
 
 
 def full_name(compartment: str, region: str) -> str:

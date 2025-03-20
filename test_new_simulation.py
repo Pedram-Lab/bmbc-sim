@@ -25,7 +25,7 @@ mesh.ngmesh.SetBCName(5, 'clamped')
 mesh.ngmesh.SetBCName(1, 'left_membrane')
 mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-geometry_description = ecsim.GeometryDescription(mesh)
+geometry_description = ecsim.SimulationGeometry(mesh)
 # geometry_description.visualize(resolve_regions=True)
 
 simulation = ecsim.Simulation(geometry_description)
