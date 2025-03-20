@@ -7,7 +7,7 @@ import ecsim
 
 
 @pytest.fixture(scope="module")
-def geometry_description():
+def simulation_geometry():
     """Create a simple test geometry with three regions that are sorted into two
     compartments."
     """
@@ -25,41 +25,41 @@ def geometry_description():
     return ecsim.SimulationGeometry(mesh)
 
 
-def test_geometry_contains_everything(geometry_description):
+def test_geometry_contains_everything(simulation_geometry):
     """Test geometry should contain all regions compartments, and membranes.
     """
-    assert set(geometry_description.regions) == {'ecm:left', 'ecm:right', 'cell'}
-    assert set(geometry_description.compartment_names) == {'ecm', 'cell'}
-    assert set(geometry_description.membrane_names) == {'right_membrane', 'clamped', 'reflective'}
+    assert set(simulation_geometry.regions) == {'ecm:left', 'ecm:right', 'cell'}
+    assert set(simulation_geometry.compartment_names) == {'ecm', 'cell'}
+    assert set(simulation_geometry.membrane_names) == {'right_membrane', 'clamped', 'reflective'}
 
 
-def test_geometry_identifies_full_subregions_correctly(geometry_description):
+def test_geometry_identifies_full_subregions_correctly(simulation_geometry):
     """Test that the geometry identifies regions that make up compartments
     correctly.
     """
-    ecm_regions = geometry_description.get_regions('ecm', full_names=True)
-    cell_regions = geometry_description.get_regions('cell', full_names=True)
+    ecm_regions = simulation_geometry.get_regions('ecm', full_names=True)
+    cell_regions = simulation_geometry.get_regions('cell', full_names=True)
 
     assert set(ecm_regions) == {'ecm:left', 'ecm:right'}
     assert set(cell_regions) == {'cell'}
 
 
-def test_geometry_identifies_subregions_correctly(geometry_description):
+def test_geometry_identifies_subregions_correctly(simulation_geometry):
     """Test that the geometry identifies regions that make up compartments
     correctly.
     """
-    ecm_regions = geometry_description.get_regions('ecm')
-    cell_regions = geometry_description.get_regions('cell')
+    ecm_regions = simulation_geometry.get_regions('ecm')
+    cell_regions = simulation_geometry.get_regions('cell')
 
     assert set(ecm_regions) == {'left', 'right'}
     assert set(cell_regions) == {'cell'}
 
 
-def test_geometry_identifies_membrane_neighbors_correctly(geometry_description):
+def test_geometry_identifies_membrane_neighbors_correctly(simulation_geometry):
     """Test that the geometry identifies membrane neighbors correctly.
     """
-    assert 'ecm' in geometry_description.get_membrane_neighbors('right_membrane')
-    assert 'cell' in geometry_description.get_membrane_neighbors('right_membrane')
-    assert 'ecm' in geometry_description.get_membrane_neighbors('clamped')
-    assert 'cell' in geometry_description.get_membrane_neighbors('reflective')
-    assert 'ecm' in geometry_description.get_membrane_neighbors('reflective')
+    assert 'ecm' in simulation_geometry.get_membrane_neighbors('right_membrane')
+    assert 'cell' in simulation_geometry.get_membrane_neighbors('right_membrane')
+    assert 'ecm' in simulation_geometry.get_membrane_neighbors('clamped')
+    assert 'cell' in simulation_geometry.get_membrane_neighbors('reflective')
+    assert 'ecm' in simulation_geometry.get_membrane_neighbors('reflective')
