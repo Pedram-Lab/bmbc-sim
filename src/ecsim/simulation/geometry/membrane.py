@@ -1,0 +1,85 @@
+import astropy.units as u
+import ngsolve as ngs
+
+from ecsim.simulation.geometry.compartment import Compartment
+from ecsim.simulation.geometry.transport import Transport
+from ecsim.simulation.simulation_agents import ChemicalSpecies
+
+
+class Membrane:
+    """A membrane is a boundary between two compartments in the simulation
+    geometry. It can have different properties on the two sides and can be
+    used to model diffusion and reactions that occur at the boundary.
+    """
+    def __init__(
+            self,
+            name: str,
+            mesh: ngs.Mesh,
+            connects: set[tuple[Compartment, Compartment]],
+            area: u.Quantity
+    ):
+        """Create a new membrane.
+
+        :param mesh: NGSolve mesh object that represents the geometry.
+        :param name: Name of the membrane.
+        :param connects: List of tuples containing the compartments that this membrane connects.
+        :param area: Area of the membrane.
+        """
+        self._mesh = mesh
+        self.name = name
+        self.connects = connects
+        self.area = area
+        self._transport = {}
+
+
+    def add_transport(
+            self,
+            species: ChemicalSpecies,
+            transport: Transport,
+            source: Compartment,
+            target: Compartment
+    ) -> None:
+        """Add a transport mechanism to the membrane.
+
+        :param species: The chemical species to which the transport applies.
+        :param transport: The transport mechanism to apply.
+        :param source: The compartment from which the species is transported.
+        :param target: The compartment to which the species is transported.
+        """
+        if not ((source, target) in self.connects or (target, source) in self.connects):
+            raise ValueError(f"Membrane {self.name} does not connect {source.name} and {target.name}.")
+
+        # Add the transport to the respective compartments
+        self._transport[(species, source, target)] = transport
+
+
+    def neighbor(self, compartment: Compartment) -> Compartment:
+        """Get the compartment on the opposite side of the membrane.
+
+        :param compartment: The compartment on one side of the membrane.
+        :return: The compartment on the opposite side of the membrane.
+        """
+        for left, right in self.connects:
+            if compartment == left:
+                return right
+            elif compartment == right:
+                return left
+        raise ValueError(f"Compartment {compartment.name} is not connected to this membrane.")
+
+
+    def __str__(self) -> str:
+        return f"Membrane {self.name} connecting {[comp.name for comp in self.connects]}"
+
+
+    def __repr__(self) -> str:
+        return f"Membrane(name={self.name}, connects={self.connects}, area={self.area})"
+
+
+    def __eq__(self, value):
+        if not isinstance(value, Membrane):
+            return False
+        return self.name == value.name and self.connects == value.connects
+
+
+    def __hash__(self):
+        return hash((self.name, tuple(self.connects)))
