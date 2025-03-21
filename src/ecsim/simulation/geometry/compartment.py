@@ -120,7 +120,7 @@ class Compartment:
         """
         # Check that all given regions exist in the compartment
         regions = set(region_to_value.keys())
-        all_regions = set(self.region_names)
+        all_regions = set(self.get_region_names())
         if not regions.issubset(all_regions):
             raise ValueError(f"Regions {regions - set(all_regions)} do not exist")
 
@@ -131,7 +131,7 @@ class Compartment:
 
 
     def __str__(self) -> str:
-        return f"Compartment {self.name} with regions {self.region_names}"
+        return f"Compartment {self.name} with regions {self.get_region_names()}"
 
 
     def __repr__(self) -> str:
