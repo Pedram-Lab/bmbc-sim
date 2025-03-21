@@ -25,16 +25,17 @@ class Simulation:
         # Set up the finite element spaces
         logger.info("Setting up finite element spaces...")
         mesh = simulation_geometry.mesh
+        compartments = simulation_geometry.compartments.values()
         self._compartment_fes = {}
-        for compartment in self.simulation_geometry.compartment_names:
-            regions = '|'.join(self.simulation_geometry.get_regions(compartment, full_names=True))
+        for compartment in compartments:
+            regions = '|'.join(compartment.get_region_names(full_names=True))
             fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=regions))
             self._compartment_fes[compartment] = fes
-            logger.info("Compartment %s has %d degrees of freedom.", compartment, fes.ndof)
+            logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
 
         # Note that the order of the compartment spaces is the same as the order of compartments
         self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
-                                    for compartment in self.simulation_geometry.compartment_names])
+                                    for compartment in compartments])
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
                     self._rd_fes.ndof)
 
@@ -45,24 +46,46 @@ class Simulation:
 
     def add_species(
             self,
-            species: ChemicalSpecies,
+            name: str,
+            *,
+            valence: int = 0,
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
         
-        :param species: The :class:`ChemicalSpecies` to add.
+        :param name: The name of the species.
+        :param valence: The valence (i.e., unit charge) of the species (default is 0).
         :returns: The added :class:`ChemicalSpecies`.
         :raises ValueError: If the species already exists in the simulation.
         """
+        species = ChemicalSpecies(name, valence=valence)
         if species in self.species:
             raise ValueError(f"Species {species.name} already exists.") from None
+
         self.species.append(species)
         logger.debug("Add species %s to simulation.", species)
 
         # Set up finite element structures for the species
-        self._fem_setup[species] = FemSetup(self._rd_fes, self.simulation_geometry.compartment_names)
+        self._fem_setup[species] = FemSetup(self._rd_fes,
+                                            self.simulation_geometry.compartment_names)
 
         return species
+
+
+    def setup(self) -> None:
+        """Set up the simulation by initializing the finite element matrices."""
+        logger.info("Setting up simulation...")
+        logger.debug("Initializing concentrations for species %s.", self.species)
+        compartments = self.simulation_geometry.compartments.values()
+
+        # Initialize the concentrations for each species in each compartment
+        for i, compartment in enumerate(compartments):
+            coefficients = compartment.coefficients
+
+            for species in self.species:
+                if species in coefficients.initial_conditions:
+                    concentration = self._fem_setup[species].concentration.components[i]
+                    concentration.Set(coefficients.initial_conditions[species])
 
 
     def add_diffusion(
@@ -182,6 +205,7 @@ class FemSetup():
             compartments[i]: (test, trial)
             for i, (test, trial) in enumerate(zip(*fes.TnT()))
         }
+        self.concentration = ngs.GridFunction(fes)
 
 
     def assemble(

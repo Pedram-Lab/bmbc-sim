@@ -1,10 +1,15 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import astropy.units as u
 import ngsolve as ngs
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
+
+
+# Define type aliases to shorten type annotations
+S = ChemicalSpecies
+C = ngs.CoefficientFunction
 
 
 @dataclass(frozen=True)
@@ -36,8 +41,7 @@ class Compartment:
         self._mesh = mesh
         self.name = name
         self.regions = regions
-        self._diffusion = {}
-        self._reactions = {}
+        self.coefficients = SimulationDetails()
 
 
     @property
@@ -62,9 +66,29 @@ class Compartment:
             return [region.name for region in self.regions]
 
 
+    def initialize_species(
+            self,
+            species: S,
+            value: u.Quantity | dict[str, u.Quantity]
+    ) -> None:
+        """Set the initial concentration of a species in the compartment.
+
+        :param species: Chemical species to initialize.
+        :param value: Initial concentration value. It can be given as a single
+            scalar, in which case it is assumed to be the same in all regions, or
+            as a dictionary mapping region names to initial concentrations.
+        :raises ValueError: If the species is already initialized or if the
+            specified regions do not exist in the compartment.
+        """
+        if species in self.coefficients.initial_conditions:
+            raise ValueError(f"Species {species} already initialized")
+        self.coefficients.initial_conditions[species] = \
+            self._to_coefficient_function(value, 'molar concentration')
+
+
     def add_diffusion(
             self,
-            species: ChemicalSpecies,
+            species: S,
             diffusivity: u.Quantity | dict[str, u.Quantity]
     ) -> None:
         """Add a diffusion event to the compartment.
@@ -76,20 +100,16 @@ class Compartment:
         :raises ValueError: If diffusion for the species is already defined or if
             the specified regions do not exist in the compartment.
         """
-        if species in self._diffusion:
+        if species in self.coefficients.diffusion:
             raise ValueError(f"Diffusion for {species} already defined")
-
-        if isinstance(diffusivity, u.Quantity):
-            coeff = to_simulation_units(diffusivity, 'diffusivity')
-            self._diffusion[species] = ngs.CoefficientFunction(coeff)
-        else:
-            self._diffusion[species] = self._create_piecewise_constant(diffusivity, 'diffusivity')
+        self.coefficients.diffusion[species] = \
+            self._to_coefficient_function(diffusivity, 'diffusivity')
 
 
     def add_reaction(
             self,
-            reactants: list[ChemicalSpecies],
-            products: list[ChemicalSpecies],
+            reactants: list[S],
+            products: list[S],
             k_on: u.Quantity | dict[str, u.Quantity],
             k_off: u.Quantity | dict[str, u.Quantity]
     ) -> None:
@@ -98,16 +118,26 @@ class Compartment:
         :param reaction: Reaction term for use in the symbolic NGSolve
             reaction-diffusion equation
         """
-        if (reactants, products) in self._reactions:
+        if (reactants, products) in self.coefficients.reactions:
             raise ValueError(f"Reaction {reactants} -> {products} already defined")
 
-        k_on = to_simulation_units(k_on, 'reaction rate') if isinstance(k_on, u.Quantity) \
-            else self._create_piecewise_constant(k_on, 'reaction rate')
+        k_on = self._to_coefficient_function(k_on, 'reaction rate')
+        k_off = self._to_coefficient_function(k_off, 'reaction rate')
 
-        k_off = to_simulation_units(k_off, 'reaction rate') if isinstance(k_off, u.Quantity) \
-            else self._create_piecewise_constant(k_off, 'reaction rate')
+        self.coefficients.reactions[(reactants, products)] = (k_on, k_off)
 
-        self._reactions[(reactants, products)] = (k_on, k_off)
+
+    def _to_coefficient_function(
+            self,
+            value: u.Quantity | dict[str, u.Quantity],
+            unit_name: str
+    ) -> ngs.CoefficientFunction:
+        """Convert a value or a dictionary of values to a NGSolve CoefficientFunction.
+        """
+        if isinstance(value, u.Quantity):
+            return ngs.CoefficientFunction(to_simulation_units(value, unit_name))
+        else:
+            return self._create_piecewise_constant(value, unit_name)
 
 
     def _create_piecewise_constant(
@@ -122,16 +152,16 @@ class Compartment:
         regions = set(region_to_value.keys())
         all_regions = set(self.get_region_names())
         if not regions.issubset(all_regions):
-            raise ValueError(f"Regions {regions - set(all_regions)} do not exist")
+            raise ValueError(f"Regions {regions - all_regions} do not exist")
 
         # Create a piecewise constant coefficient function
-        coeff = {region: to_simulation_units(value, unit_name)
+        coeff = {full_names[region]: to_simulation_units(value, unit_name)
                     for region, value in region_to_value.items()}
         return self._mesh.MaterialCF(coeff)
 
 
     def __str__(self) -> str:
-        return f"Compartment {self.name} with regions {self.get_region_names()}"
+        return f"Compartment '{self.name}' with regions {self.get_region_names()}"
 
 
     def __repr__(self) -> str:
@@ -156,3 +186,11 @@ def full_name(compartment: str, region: str) -> str:
     :returns: The full name of the region.
     """
     return f'{compartment}:{region}'
+
+
+@dataclass
+class SimulationDetails:
+    """A container for simulation details about a compartment."""
+    initial_conditions: dict[S, C] = field(default_factory=dict)
+    diffusion: dict[S, C] = field(default_factory=dict)
+    reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
