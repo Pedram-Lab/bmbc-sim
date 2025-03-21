@@ -19,7 +19,7 @@ import astropy.units as u
 # These are all SI units, but with different prefixes. They are chosen such
 # that, e.g., concentration is measured in millimolar (mM), length is measured
 # in micrometers (um), etc.
-BASES = {
+BASE_UNITS = {
     'length': u.um,
     'time': u.ms,
     'mass': u.ng,
@@ -47,5 +47,5 @@ def to_simulation_units(value: u.Quantity, physical_name: str = None) -> float:
                 f"Actual physical quantity is {actual_names}, but expected {physical_name}.")
 
     # Convert the value to simulation units
-    conversion_factor = value.unit.decompose(bases=BASES.values()).scale
+    conversion_factor = value.unit.decompose(bases=BASE_UNITS.values()).scale
     return float(value.value * conversion_factor)

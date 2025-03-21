@@ -5,14 +5,25 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import ngsolve as ngs
 
+from ecsim.simulation.geometry.compartment import Compartment, Region
+from ecsim.simulation.geometry.membrane import Membrane
+from ecsim.units import BASE_UNITS
 
-NO_DOMAIN = 'exterior'
+
 logger = logging.getLogger(__name__)
 
 
 class SimulationGeometry:
-    """TODO
+    """A high-level description of the simulation geometry. The description is
+    based on the following concepts:
+    - :class:`Region`: A part of the simulation geometry that is resolved and
+        labeled in the mesh.
+    - :class:`Compartment`: A collection of regions that share the same
+        bio-chemical agents. A compartment can be made up of one or more
+        regions.
+    - :class:`Membrane`: A mesh boundary that separates two compartments.
     """
+
     def __init__(self, mesh: ngs.Mesh) -> None:
         """Create a new geometry description. Regions and interfaces are
         inferred from the mesh. Regions can either be compartments or part of a
@@ -25,113 +36,90 @@ class SimulationGeometry:
         logger.info('Creating geometry description from mesh.')
         self.mesh = mesh
 
-        # Add all other compartments as nodes (with special node for 'outside of
-        # computational domain')
-        regions = {
-            region: name
-            for name in set(mesh.GetMaterials())
-            for region in mesh.Materials(name).Split()
-        }
-        self.regions: list[str] = list(set(regions.values()))
-        logger.info('Found %d regions: %s', len(self.regions), self.regions)
+        # Names can refer to multiple mesh_regions, so check if they're unique
+        mesh_region_to_name = {}
+        for name in set(mesh.GetMaterials()):
+            mesh_region = mesh.Materials(name)
+            if len(mesh_region.Split()) != 1:
+                raise ValueError(f'Region name "{name}" is not unique.')
+            mesh_region_to_name[mesh_region] = name
 
-        # Cluster regions into compartments
-        self._compartments: dict[str, str] = {}
-        for region in self.regions:
-            compartment_name = _split_compartment_and_region(region)[0]
-            compartment_regions = self._compartments.get(compartment_name, [])
-            compartment_regions.append(region)
-            self._compartments[compartment_name] = compartment_regions
-            logger.debug('Inferred compartment %s from region %s', compartment_name, region)
-        logger.info('Found %d compartments: %s',
-                    len(self._compartments), list(self._compartments.keys()))
+        # Sort regions into compartments
+        compartment_to_regions: dict[str, list[Region]] = {}
+        for mesh_region, name in mesh_region_to_name.items():
+            compartment_name, region_name = _split_compartment_and_region(name)
+            logger.debug('Inferred compartment %s from region %s', compartment_name, name)
 
-        # Store all boundaries as (left, right, name)
+            volume = ngs.Integrate(1, mesh_region, ngs.VOL) * BASE_UNITS['length']**3
+            regions = compartment_to_regions.get(compartment_name, [])
+            regions.append(Region(name=region_name, volume=volume))
+            compartment_to_regions[compartment_name] = regions
+
+        self.compartments = {name: Compartment(name, mesh, regions)
+                             for name, regions in compartment_to_regions.items()}
+        logger.info('Found %d compartments:', len(self.compartments))
+        for compartment in self.compartments.values():
+            logger.info(" - '%s' with regions %s", compartment.name, compartment.regions)
+
+        # Process interfaces
         boundaries = {
             bnd: name
             for name in set(mesh.GetBoundaries())
             for bnd in mesh.Boundaries(name).Split()
         }
-        self._full_membrane_connectivity = set()
+        self._full_interface_info = []
         for bnd, name in boundaries.items():
+            # Record detailed information about the interfaces
             neighbors = bnd.Neighbours(ngs.VOL).Split()
 
-            n1 = regions[neighbors[0]]
-            n2 = regions[neighbors[1]] if len(neighbors) > 1 else NO_DOMAIN
+            left = mesh_region_to_name[neighbors[0]]
+            right = mesh_region_to_name[neighbors[1]] if len(neighbors) > 1 else None
+            area = ngs.Integrate(1, bnd, ngs.BND) * BASE_UNITS['length']**2
 
-            self._full_membrane_connectivity.add((n1, n2, name))
-            logger.debug('Connected %s to %s via membrane %s', n1, n2, name)
+            self._full_interface_info.append((left, right, name, area))
+            logger.debug('Connected regions %s and %s via membrane %s', left, right, name)
 
-        # Store membrane names
-        self._membranes = {}
-        for left, right, name in self._full_membrane_connectivity:
-            left_compartment = _split_compartment_and_region(left)[0]
-            right_compartment = _split_compartment_and_region(right)[0]
+        membranes_to_neighbors = {}
+        for left, right, name, area in self._full_interface_info:
+            # Find the interfaces that connect compartments (= membranes)
+            left, _ = _split_compartment_and_region(left)
+            right, _ = _split_compartment_and_region(right)
 
-            if left_compartment == right_compartment:
+            if left == right:
                 # A membrane connects different compartments
                 continue
 
-            membrane_neighbors = self._membranes.get(name, (set(), set()))
-            membrane_neighbors[0].add(left_compartment)
-            membrane_neighbors[1].add(right_compartment)
-            self._membranes[name] = membrane_neighbors
-        logger.info('Found %d membranes: %s', len(self._membranes), list(self._membranes.keys()))
+            neighbors, total_area = membranes_to_neighbors.get(name, (set(), 0))
+            neighbors.add((self.compartments[left], self.compartments[right] if right else None))
+            total_area += area
+            membranes_to_neighbors[name] = (neighbors, total_area)
+
+        self.membranes = {name: Membrane(name, mesh, neighbors, total_area)
+                          for name, (neighbors, total_area) in membranes_to_neighbors.items()}
+
+        logger.info('Found %d membranes: %s', len(self.membranes), self.membranes)
 
 
     @property
     def compartment_names(self) -> list[str]:
         """The names of all compartments in the geometry.
         """
-        return list(self._compartments.keys())
+        return list(self.compartments.keys())
 
 
     @property
     def membrane_names(self) -> list[str]:
-        """The list of membranes.
+        """The names of all membranes in the geometry.
         """
-        return list(self._membranes.keys())
+        return list(self.membranes.keys())
 
-
-    def get_regions(self, compartment: str, *, full_names=False) -> list[str]:
-        """Get all regions of a compartment.
-
-        :param compartment: The compartment to get the regions of.
-        :param full_names: Whether to return the full names of the regions or
-            the names without the compartments.
-        :returns regions: The regions of the given compartment.
+    @property
+    def region_names(self) -> list[str]:
+        """The full names of all regions in the geometry. This includes the
+        compartment name as a prefix, e.g. 'compartment:region'.
         """
-        return self._compartments[compartment] if full_names \
-            else [_split_compartment_and_region(region)[1]
-                  for region in self._compartments[compartment]]
-
-
-    def get_membrane_neighbors_left(self, membrane: str) -> set[str]:
-        """Get all compartments on the left side of a membrane.
-        
-        :param membrane: The membrane to get the neighbors of.
-        :returns neighbors: The compartments on the left side of the membrane.
-        """
-        return self._membranes[membrane][0]
-
-
-    def get_membrane_neighbors_right(self, membrane: str) -> set[str]:
-        """Get all compartments on the right side of a membrane.
-        
-        :param membrane: The membrane to get the neighbors of.
-        :returns neighbors: The compartments on the right side of the membrane.
-        """
-        return self._membranes[membrane][1]
-
-
-    def get_membrane_neighbors(self, membrane: str) -> set[str]:
-        """Get all compartments on both sides of a membrane.
-        
-        :param membrane: The membrane to get the neighbors of.
-        :returns neighbors: The compartments on both sides of the membrane.
-        """
-        return self.get_membrane_neighbors_left(membrane) \
-            | self.get_membrane_neighbors_right(membrane)
+        return [name for compartment in self.compartments.values()
+                for name in compartment.get_region_names(full_names=True)]
 
 
     def visualize(self, resolve_regions: bool = True) -> None:
@@ -144,19 +132,22 @@ class SimulationGeometry:
         """
         # Create a graph with compartments as nodes and membranes as edges
         graph = nx.MultiGraph()
-        graph.add_node(NO_DOMAIN)
+        graph.add_node('<outside>')
         if resolve_regions:
-            graph.add_nodes_from(self.regions)
-            for left, right, name in self._full_membrane_connectivity:
-                graph.add_edge(left, right, name=name)
+            graph.add_nodes_from(self.region_names)
+            for left, right, name, _ in self._full_interface_info:
+                # Add edges between regions for each membrane
+                graph.add_edge(left, right if right else '<outside>', name=name)
         else:
             graph.add_nodes_from(self.compartment_names)
-            for left, right, name in self._full_membrane_connectivity:
-                graph.add_edge(
-                    _split_compartment_and_region(left)[0],
-                    _split_compartment_and_region(right)[0],
-                    name=name,
-                )
+            for membrane in self.membranes.values():
+                for left, right in membrane.connects:
+                    name = membrane.name
+                    right_name = right.name if right else '<outside>'
+                    # Add edges between compartments for each membrane
+                    # Note: this may create multiple edges if a membrane connects
+                    # the same compartments in both directions
+                    graph.add_edge(left.name, right_name, name=name)
 
         # Draw the graph
         pos = nx.spring_layout(graph)
@@ -193,17 +184,7 @@ def _split_compartment_and_region(domain: str) -> tuple[str, str]:
     :param domain: The domain name.
     :returns: A tuple with the compartment and region names.
     """
-    if ':' in domain:
+    if domain and ':' in domain:
         return domain.split(':')
     else:
         return domain, domain
-
-
-def full_name(compartment: str, region: str) -> str:
-    """Get the full name of a region within a compartment.
-    
-    :param compartment: The compartment name.
-    :param region: The region name.
-    :returns: The full name of the region.
-    """
-    return f'{compartment}:{region}'

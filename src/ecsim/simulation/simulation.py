@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import astropy.units as u
 import ngsolve as ngs
 
-from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry, full_name
+from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from .simulation_agents import ChemicalSpecies
 
