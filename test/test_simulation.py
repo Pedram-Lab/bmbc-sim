@@ -16,7 +16,7 @@ def geometry():
     right = occ.Box((2, 0, 0), (3, 1, 1)).mat('cell').bc('reflective')
 
     geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
-    mesh = ngs.Mesh(geo.GenerateMesh(maxh=1.0))
+    mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.5))
 
     mesh.ngmesh.SetBCName(5, 'clamped')
     mesh.ngmesh.SetBCName(1, 'left_membrane')

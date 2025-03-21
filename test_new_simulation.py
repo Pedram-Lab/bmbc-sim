@@ -9,7 +9,7 @@ import astropy.units as u
 import ecsim
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     datefmt="%Y-%m-%d %H:%M:%S",
     format="%(asctime)s %(levelname)s %(message)s"
 )
@@ -19,32 +19,40 @@ middle = occ.Box((1, 0, 0), (2, 1, 1)).mat('ecm:right').bc('reflective')
 right = occ.Box((2, 0, 0), (3, 1, 1)).mat('cell').bc('reflective')
 
 geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
-mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.1))
+mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.5))
 
 mesh.ngmesh.SetBCName(5, 'clamped')
 mesh.ngmesh.SetBCName(1, 'left_membrane')
 mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-geometry_description = ecsim.SimulationGeometry(mesh)
+print("mesh materials: ", mesh.GetMaterials())
+print("mesh boundaries: ", mesh.GetBoundaries())
+
+Draw(mesh)
+
+geometry = ecsim.SimulationGeometry(mesh)
+ecm = geometry.compartments['ecm']
+cell = geometry.compartments['cell']
 # geometry_description.visualize(resolve_regions=True)
 
-simulation = ecsim.Simulation(geometry_description)
+simulation = ecsim.Simulation(geometry)
+ca = simulation.add_species('Ca', valence=2)
 
-ca = simulation.add_species(ecsim.ChemicalSpecies('Ca', valence=2))
+ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})
+cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
 
-simulation.add_diffusion(
+
+cell.add_diffusion(
     species=ca,
-    compartment='cell',
     diffusivity=600 * u.nm**2 / u.ms,
 )
-
-simulation.add_diffusion(
+ecm.add_diffusion(
     species=ca,
-    compartment='ecm',
     diffusivity={'left': 1000 * u.nm**2 / u.ms, 'right': 500 * u.nm**2 / u.ms},
 )
 
+simulation.setup(time_step=10 * u.us)
+
 simulation.simulate_for(
-    time_step=0.1 * u.ms,
     n_steps=100,
 )
