@@ -7,7 +7,7 @@ import ecsim
 
 
 @pytest.fixture(scope="module")
-def geometry_description():
+def geometry():
     """Create a simple test geometry with three regions that are sorted into two
     compartments."
     """
@@ -25,20 +25,20 @@ def geometry_description():
     return ecsim.SimulationGeometry(mesh)
 
 
-def test_added_species_are_present(geometry_description):
+def test_added_species_are_present(geometry):
     """Test that the added species are present in the geometry description.
     """
-    simulation = ecsim.Simulation(geometry_description)
-    species = simulation.add_species(ecsim.ChemicalSpecies('test_species', valence=1))
+    simulation = ecsim.Simulation(geometry)
+    species = simulation.add_species('test_species', valence=1)
 
     assert species in simulation.species
 
 
-def test_add_species_twice_raises_error(geometry_description):
+def test_add_species_twice_raises_error(geometry):
     """Test that adding the same species twice raises an error.
     """
-    simulation = ecsim.Simulation(geometry_description)
-    species = simulation.add_species(ecsim.ChemicalSpecies('test_species', valence=1))
+    simulation = ecsim.Simulation(geometry)
+    _ = simulation.add_species('test_species', valence=1)
 
     with pytest.raises(ValueError):
-        simulation.add_species(species)
+        simulation.add_species('test_species', valence=1)

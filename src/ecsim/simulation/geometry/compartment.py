@@ -154,6 +154,8 @@ class Compartment:
         if not regions.issubset(all_regions):
             raise ValueError(f"Regions {regions - all_regions} do not exist")
 
+        full_names = {name: full_name for name, full_name in
+                      zip(self.get_region_names(), self.get_region_names(full_names=True))}
         # Create a piecewise constant coefficient function
         coeff = {full_names[region]: to_simulation_units(value, unit_name)
                     for region, value in region_to_value.items()}
