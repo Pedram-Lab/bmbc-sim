@@ -1,16 +1,13 @@
 from itertools import accumulate
-import logging
 
 import networkx as nx
 import matplotlib.pyplot as plt
 import ngsolve as ngs
 
+from ecsim.logging import logger
 from ecsim.simulation.geometry.compartment import Compartment, Region
 from ecsim.simulation.geometry.membrane import Membrane
 from ecsim.units import BASE_UNITS
-
-
-logger = logging.getLogger(__name__)
 
 
 class SimulationGeometry:

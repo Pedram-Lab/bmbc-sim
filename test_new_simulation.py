@@ -1,13 +1,10 @@
-import logging
-import os
-
 import ngsolve as ngs
 from netgen import occ
 from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
-from ecsim.evaluation.vtk_recorder import Snapshot
+from ecsim.evaluation.vtk_recorder import FullSnapshot
 
 
 left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
@@ -31,7 +28,7 @@ cell = geometry.compartments['cell']
 
 ca = simulation.add_species('Ca', valence=2)
 
-simulation.add_recorder(Snapshot(100 * u.us))
+simulation.add_recorder(FullSnapshot(100 * u.us))
 
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
 cell.add_diffusion(

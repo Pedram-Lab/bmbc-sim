@@ -1,12 +1,14 @@
+import os
 import astropy.units as u
 import ngsolve as ngs
 
+from ecsim.logging import logger
 from ecsim.evaluation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.units import to_simulation_units
 
 
-class Snapshot(Recorder):
+class FullSnapshot(Recorder):
     """Record the full mesh with all concentrations during simulation.
     This saves a snapshot of the entire mesh at specified intervals in
     VTK format, allowing for visualization and analysis in pyvista or
@@ -36,9 +38,13 @@ class Snapshot(Recorder):
                     species_coeff[region] = concentration.components[i]
             coeff[species] = mesh.MaterialCF(species_coeff)
 
+        file_template = os.path.join(directory, "snapshots", "snapshot")
+        os.makedirs(os.path.dirname(file_template), exist_ok=True)
+        logger.info("Writing VTK output to %s*.vtu", file_template)
+
         self._vtk_output = ngs.VTKOutput(
             mesh,
-            filename=directory + "/snapshot",
+            filename=file_template,
             coefs=list(coeff.values()),
             names=list(coeff.keys()),
             floatsize='single'
@@ -49,6 +55,7 @@ class Snapshot(Recorder):
             self,
             current_time: u.Quantity
     ) -> None:
+        logger.debug("Recording VTK output at time %s", current_time)
         self._vtk_output.Do(to_simulation_units(current_time, 'time'))
 
 

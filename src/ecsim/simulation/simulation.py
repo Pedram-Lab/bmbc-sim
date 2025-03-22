@@ -6,15 +6,12 @@ import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
 
+from ecsim.logging import logger
 from ecsim.evaluation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from .simulation_agents import ChemicalSpecies
-
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class Simulation:
