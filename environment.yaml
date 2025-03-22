@@ -14,6 +14,8 @@ dependencies:
   - pyvista
   - scipy
   - tqdm
+  - xarray
+  - zarr
   - pip:
     - ngsolve==6.2.2406
     - webgui_jupyter_widgets
