@@ -4,6 +4,7 @@ import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
 
+from ecsim.evaluation.recorder import Recorder
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from .simulation_agents import ChemicalSpecies
@@ -18,9 +19,18 @@ class Simulation:
     def __init__(
             self,
             simulation_geometry: SimulationGeometry,
+            result_directory: str,
     ):
+        """Initialize a new simulation.
+
+        :param simulation_geometry: The geometry of the simulation, including
+            the mesh and compartments.
+        :param result_directory: The directory where simulation results will be
+            stored.
+        """
         self.simulation_geometry = simulation_geometry
         self.species: list[ChemicalSpecies] = []
+        self.result_directory = result_directory
 
         # Set up the finite element spaces
         logger.info("Setting up finite element spaces...")
@@ -44,6 +54,9 @@ class Simulation:
         self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
+
+        self._recorders: list[Recorder] = []
+        self._time_step = None
 
 
     def add_species(
@@ -70,6 +83,19 @@ class Simulation:
         return species
 
 
+    def add_recorder(
+            self,
+            recorder: Recorder,
+    ) -> None:
+        """Add a recorder to the simulation to record data during the simulation.
+
+        :param recorder: An instance of a subclass of :class:`Recorder`.
+        """
+        if not isinstance(recorder, Recorder):
+            raise TypeError("Recorder must be an instance of a subclass of Recorder")
+        self._recorders.append(recorder)
+
+
     def setup(self, time_step: u.Quantity) -> None:
         """Set up the simulation by initializing the finite element matrices.
         
@@ -79,6 +105,7 @@ class Simulation:
             raise ValueError(f"Time step must be positive, not {time_step}.")
         logger.info("Setting up simulation with time step %s.", time_step)
         self._dt = to_simulation_units(time_step, 'time')
+        self._time_step = time_step
 
         for species in self.species:
             concentration, stiffness, time_stepping_matrix = self._setup_lhs(species)
@@ -160,10 +187,20 @@ class Simulation:
             raise ValueError("Number of steps must be at least 1.")
         logger.info("Running simulation for %d steps.", n_steps)
 
+        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
+        for recorder in self._recorders:
+            recorder.setup(
+                mesh=self.simulation_geometry.mesh,
+                directory=self.result_directory,
+                concentrations=name_to_concentration,
+                start_time=start_time
+            )
+
         # TODO: replace this dummy linear form with a proper one
         f = ngs.LinearForm(self._rd_fes)
         f.Assemble()
 
+        t = start_time
         for _ in trange(n_steps):
             residual = {}
 
@@ -175,6 +212,13 @@ class Simulation:
 
             for species, c in self._concentrations.items():
                 c.vec.data += self._time_stepping_matrix[species] * residual[species]
+
+            t += self._time_step
+            for recorder in self._recorders:
+                recorder.record(current_time=t)
+
+        for recorder in self._recorders:
+            recorder.finalize(end_time=t)
 
 
 def set_dofs(space, dof_array, region, value):

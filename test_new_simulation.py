@@ -7,6 +7,7 @@ from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
+from ecsim.evaluation.vtk_recorder import Snapshot
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -35,8 +36,10 @@ ecm = geometry.compartments['ecm']
 cell = geometry.compartments['cell']
 # geometry_description.visualize(resolve_regions=True)
 
-simulation = ecsim.Simulation(geometry)
+simulation = ecsim.Simulation(geometry, 'results')
 ca = simulation.add_species('Ca', valence=2)
+
+simulation.add_recorder(Snapshot(100 * u.us))
 
 ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
