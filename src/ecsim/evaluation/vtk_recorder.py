@@ -17,13 +17,12 @@ class Snapshot(Recorder):
         self._vtk_output = None
 
 
-    def setup(
+    def _setup(
             self,
             mesh: ngs.Mesh,
             compartments: list[Compartment],
             directory: str,
             concentrations: dict[str, ngs.GridFunction],
-            start_time: u.Quantity,
     ) -> None:
         """Set up the recorder with the necessary parameters.
         
@@ -51,7 +50,6 @@ class Snapshot(Recorder):
             names=list(coeff.keys()),
             floatsize='single'
         )
-        super().setup(start_time)
 
 
     def _record(
@@ -64,3 +62,7 @@ class Snapshot(Recorder):
         :param kwargs: Keyword arguments for recording.
         """
         self._vtk_output.Do(to_simulation_units(current_time, 'time'))
+
+
+    def _finalize(self):
+        pass

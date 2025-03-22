@@ -1,6 +1,9 @@
 import abc
 
+import ngsolve as ngs
 import astropy.units as u
+
+from ecsim.simulation.geometry.compartment import Compartment
 
 
 class Recorder(abc.ABC):
@@ -13,13 +16,38 @@ class Recorder(abc.ABC):
         self._last_recorded_time = float("-inf") * u.s
 
 
-    def setup(self, start_time: u.Quantity):
+    def setup(
+            self,
+            mesh: ngs.Mesh,
+            compartments: list[Compartment],
+            directory: str,
+            concentrations: dict[str, ngs.GridFunction],
+            start_time: u.Quantity,
+    ) -> None:
         """Set up the recorder with the necessary parameters.
         
         :param start_time: The start time of the simulation.
         """
         # Record the initial state
+        self._setup(mesh, compartments, directory, concentrations)
         self.record(start_time)
+
+
+    @abc.abstractmethod
+    def _setup(
+            self,
+            mesh: ngs.Mesh,
+            compartments: list[Compartment],
+            directory: str,
+            concentrations: dict[str, ngs.GridFunction]
+    ) -> None:
+        """Internal method to set up the recorder with the necessary parameters.
+
+        :param mesh: NGSolve mesh object that represents the geometry.
+        :param directory: Directory where the recorded data will be saved.
+        :param concentrations: Dictionary mapping species names to their
+            respective NGSolve GridFunctions representing concentrations.
+        """
 
 
     def record(self, current_time: u.Quantity):
@@ -52,3 +80,10 @@ class Recorder(abc.ABC):
         if time_since_last_record > self.recording_interval / 2:
             # If we haven't recorded near the end time, do one last recording
             self._record(end_time)
+        self._finalize()
+
+
+    @abc.abstractmethod
+    def _finalize(self) -> None:
+        """Internal method to finalize the recorder, e.g., close files or clean up resources.
+        """
