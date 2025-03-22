@@ -5,6 +5,7 @@ import ngsolve as ngs
 from tqdm import trange
 
 from ecsim.evaluation.recorder import Recorder
+from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from .simulation_agents import ChemicalSpecies
@@ -32,24 +33,9 @@ class Simulation:
         self.species: list[ChemicalSpecies] = []
         self.result_directory = result_directory
 
-        # Set up the finite element spaces
-        logger.info("Setting up finite element spaces...")
-        mesh = simulation_geometry.mesh
-        compartments = simulation_geometry.compartments.values()
-        self._compartment_fes = {}
-        for compartment in compartments:
-            regions = '|'.join(compartment.get_region_names(full_names=True))
-            fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=regions))
-            self._compartment_fes[compartment] = fes
-            logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
-
-        # Note that the order of the compartment spaces is the same as the order of compartments
-        self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
-                                    for compartment in compartments])
-        logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
-                    self._rd_fes.ndof)
-
         # Set up empty containers for simulation data
+        self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
+        self ._rd_fes: ngs.FESpace = None
         self._stiffness: dict[ChemicalSpecies, ngs.BilinearForm] = {}
         self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
@@ -57,6 +43,22 @@ class Simulation:
 
         self._recorders: list[Recorder] = []
         self._time_step = None
+
+
+    def add_geometry(
+            self,
+            mesh: ngs.Mesh,
+    ) -> SimulationGeometry:
+        """Add a mesh to the simulation geometry.
+
+        :param mesh: The mesh representing the geometry of the simulation.
+        :returns: The :class:`SimulationGeometry` obtained from the mesh.
+        :raises ValueError: If the geometry has already been set.
+        """
+        if self.simulation_geometry is not None:
+            raise ValueError("Geometry has already been set.")
+        self.simulation_geometry = SimulationGeometry(mesh)
+        return self.simulation_geometry
 
 
     def add_species(
@@ -181,6 +183,22 @@ class Simulation:
         
         :param time_step: The time step to use for the simulation.
         """
+        # Set up the finite element spaces
+        logger.info("Setting up finite element spaces...")
+        mesh = self.simulation_geometry.mesh
+        compartments = self.simulation_geometry.compartments.values()
+        for compartment in compartments:
+            regions = '|'.join(compartment.get_region_names(full_names=True))
+            fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=regions))
+            self._compartment_fes[compartment] = fes
+            logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
+
+        # Note that the order of the compartment spaces is the same as the order of compartments
+        self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
+                                    for compartment in compartments])
+        logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
+                    self._rd_fes.ndof)
+
 
         for species in self.species:
             concentration, stiffness, time_stepping_matrix = self._setup_lhs(species)
