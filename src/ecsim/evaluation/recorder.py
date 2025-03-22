@@ -18,7 +18,8 @@ class Recorder(abc.ABC):
         
         :param start_time: The start time of the simulation.
         """
-        self._record(start_time)
+        # Record the initial state
+        self.record(start_time)
 
 
     def record(self, current_time: u.Quantity):
@@ -27,10 +28,11 @@ class Recorder(abc.ABC):
         
         :param current_time: The current time of the simulation.
         """
+        # Check if last recording is sufficiently long ago
         time_since_last_record = current_time - self._last_recorded_time
         if time_since_last_record >= self.recording_interval:
             self._record(current_time)
-            self._last_recorded_time = current_time
+            self._last_recorded_time = current_time.copy()
 
 
     @abc.abstractmethod
@@ -46,4 +48,7 @@ class Recorder(abc.ABC):
 
         :param end_time: The end time of the simulation.
         """
-        self._record(end_time)
+        time_since_last_record = end_time - self._last_recorded_time
+        if time_since_last_record > self.recording_interval / 2:
+            # If we haven't recorded near the end time, do one last recording
+            self._record(end_time)
