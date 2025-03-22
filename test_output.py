@@ -7,7 +7,7 @@ import ngsolve as ngs
 
 if os.path.exists('test.vtu'):
     pv_mesh = pv.read('test_step00002.vtu')
-    pv_mesh['blub'] = pv_mesh['blub1'] + pv_mesh['blub2']
+    # pv_mesh['blub'] = pv_mesh['blub1'] + pv_mesh['blub2']
     print(f"arrays: {pv_mesh.array_names}")
     plotter = pv.Plotter()
     plotter.add_mesh(pv_mesh, scalars='blub', show_edges=True)
@@ -16,17 +16,18 @@ if os.path.exists('test.vtu'):
 else:
     cube1 = occ.Box((0, 0, 0), (1, 1, 1)).mat('left')
     cube2 = occ.Box((1, 0, 0), (2, 1, 1)).mat('right')
+    cube3 = occ.Box((2, 0, 0), (3, 1, 1)).mat('cell')
 
-    geo = occ.OCCGeometry(occ.Glue([cube1, cube2]))
-    mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.1))
+    geo = occ.OCCGeometry(occ.Glue([cube1, cube2, cube3]))
+    mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
     # fes = ngs.H1(mesh, order=1, definedon='left|right')
     # u = ngs.GridFunction(fes)
     # u.Set(ngs.x * ngs.y)
     # ngs.VTKOutput(mesh, coefs=[u], names=['blub'], filename='test').Do()
 
-    fes_left = ngs.Compress(ngs.H1(mesh, order=1, definedon='left'))
-    fes_right = ngs.Compress(ngs.H1(mesh, order=1, definedon='right'))
+    fes_left = ngs.Compress(ngs.H1(mesh, order=1, definedon='left|right'))
+    fes_right = ngs.Compress(ngs.H1(mesh, order=1, definedon='cell'))
     fes = fes_left * fes_right
 
     u = ngs.GridFunction(fes)
@@ -37,13 +38,18 @@ else:
     # print(f"fes_left grid function: {u_md.components[0].vec.FV().NumPy().shape}")
     # print(f"fes_right grid function: {u_md.components[1].vec.FV().NumPy().shape}")
 
-    vtk = ngs.VTKOutput(mesh, coefs=[u.components[0], u.components[1]], names=['blub1', 'blub2'], filename='test')
+    coeff = mesh.MaterialCF({
+        'left': u.components[0],
+        'right': u.components[0],
+        'cell': u.components[1]
+    })
+    vtk = ngs.VTKOutput(mesh, coefs=[coeff], names=['blub'], filename='test')
     vtk.Do()
 
     u.components[0].Set(ngs.x * ngs.y)
     u.components[1].Set(1)
     vtk.Do()
 
-    u.components[0].Set(ngs.x * ngs.z)
-    u.components[1].Set(2)
+    u.components[0].Set(0)
+    u.components[1].Set(1)
     vtk.Do()
