@@ -4,6 +4,7 @@ from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
+from ecsim.evaluation.total_substance_recorder import CompartmentSubstance
 from ecsim.evaluation.vtk_recorder import FullSnapshot
 
 
@@ -29,6 +30,7 @@ cell = geometry.compartments['cell']
 ca = simulation.add_species('Ca', valence=2)
 
 simulation.add_recorder(FullSnapshot(100 * u.us))
+simulation.add_recorder(CompartmentSubstance(100 * u.us))
 
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
 cell.add_diffusion(
