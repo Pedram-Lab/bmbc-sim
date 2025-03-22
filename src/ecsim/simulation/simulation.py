@@ -158,9 +158,10 @@ class Simulation:
         name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
         for recorder in self._recorders:
             recorder.setup(
-                mesh=self.simulation_geometry.mesh,
-                compartments=self.simulation_geometry.compartments.values(),
                 directory=self.result_directory,
+                mesh=self.simulation_geometry.mesh,
+                n_steps=n_steps,
+                compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
                 start_time=start_time
             )

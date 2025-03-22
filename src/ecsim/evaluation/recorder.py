@@ -18,33 +18,42 @@ class Recorder(abc.ABC):
 
     def setup(
             self,
-            mesh: ngs.Mesh,
-            compartments: list[Compartment],
             directory: str,
+            mesh: ngs.Mesh,
+            n_steps: int,
+            compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
-            start_time: u.Quantity,
+            start_time: u.Quantity
     ) -> None:
         """Set up the recorder with the necessary parameters.
         
-        :param start_time: The start time of the simulation.
+        :param directory: Directory where the recorded data will be saved.
+        :param mesh: NGSolve mesh object that represents the geometry.
+        :param n_steps: Number of simulation steps.
+        :param compartments: List of compartments in the simulation geometry.
+        :param concentrations: Dictionary mapping species names to their
+            respective NGSolve GridFunctions representing concentrations.
         """
         # Record the initial state
-        self._setup(mesh, compartments, directory, concentrations)
+        self._setup(directory, mesh, n_steps, compartments, concentrations)
         self.record(start_time)
 
 
     @abc.abstractmethod
     def _setup(
             self,
-            mesh: ngs.Mesh,
-            compartments: list[Compartment],
             directory: str,
+            mesh: ngs.Mesh,
+            n_steps: int,
+            compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction]
     ) -> None:
         """Internal method to set up the recorder with the necessary parameters.
 
-        :param mesh: NGSolve mesh object that represents the geometry.
         :param directory: Directory where the recorded data will be saved.
+        :param mesh: NGSolve mesh object that represents the geometry.
+        :param n_steps: Number of simulation steps.
+        :param compartments: List of compartments in the simulation geometry.
         :param concentrations: Dictionary mapping species names to their
             respective NGSolve GridFunctions representing concentrations.
         """
