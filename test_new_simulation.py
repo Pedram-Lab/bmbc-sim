@@ -54,8 +54,7 @@ ecm.add_diffusion(
     diffusivity={'left': 1000 * u.nm**2 / u.ms, 'right': 500 * u.nm**2 / u.ms},
 )
 
-simulation.setup(time_step=10 * u.us)
-
 simulation.simulate_for(
     n_steps=100,
+    time_step=10 * u.us
 )

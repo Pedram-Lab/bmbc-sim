@@ -96,16 +96,91 @@ class Simulation:
         self._recorders.append(recorder)
 
 
-    def setup(self, time_step: u.Quantity) -> None:
+    def simulate_until(
+            self,
+            *,
+            end_time: u.Quantity,
+            time_step: u.Quantity,
+            start_time: u.Quantity = 0 * u.s,
+    ) -> None:
+        """Run the simulation until a given end time.
+
+        :param end_time: The end time of the simulation.
+        :param time_step: The time step to use for the simulation.
+        :param start_time: The start time of the simulation.
+        :raises ValueError: If the end time is not greater than the start time.
+        """
+        if end_time <= start_time:
+            raise ValueError("End time must be greater than start time.")
+
+        n_steps = int(to_simulation_units(end_time - start_time, 'time') / self._dt)
+        self.simulate_for(n_steps=n_steps, time_step=time_step, start_time=start_time)
+
+
+    def simulate_for(
+            self,
+            *,
+            n_steps: int,
+            time_step: u.Quantity,
+            start_time: u.Quantity = 0 * u.s,
+    ) -> None:
+        """Run the simulation for a given number of time steps.
+
+        :param n_steps: The number of time steps to run the simulation for.
+        :param time_step: The time step to use for the simulation.
+        :param start_time: The start time of the simulation.
+        :raises ValueError: If the number of steps is less than 1 or time step is not positive.
+        """
+        if n_steps < 1:
+            raise ValueError("Number of steps must be at least 1.")
+        if time_step <= 0 * u.s:
+            raise ValueError(f"Time step must be positive, not {time_step}.")
+        logger.info("Running simulation for %d steps of size %s.", n_steps, time_step)
+
+        self._dt = to_simulation_units(time_step, 'time')
+        self._time_step = time_step
+
+        self._setup()
+
+        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
+        for recorder in self._recorders:
+            recorder.setup(
+                mesh=self.simulation_geometry.mesh,
+                directory=self.result_directory,
+                concentrations=name_to_concentration,
+                start_time=start_time
+            )
+
+        # TODO: replace this dummy linear form with a proper one
+        f = ngs.LinearForm(self._rd_fes)
+        f.Assemble()
+
+        t = start_time
+        for _ in trange(n_steps):
+            residual = {}
+
+            # Solve the potential equation
+            for species in self.species:
+                a = self._stiffness[species]
+                c = self._concentrations[species]
+                residual[species] = self._dt * (f.vec - a.mat * c.vec)
+
+            for species, c in self._concentrations.items():
+                c.vec.data += self._time_stepping_matrix[species] * residual[species]
+
+            t += self._time_step
+            for recorder in self._recorders:
+                recorder.record(current_time=t)
+
+        for recorder in self._recorders:
+            recorder.finalize(end_time=t)
+
+
+    def _setup(self) -> None:
         """Set up the simulation by initializing the finite element matrices.
         
         :param time_step: The time step to use for the simulation.
         """
-        if time_step <= 0 * u.s:
-            raise ValueError(f"Time step must be positive, not {time_step}.")
-        logger.info("Setting up simulation with time step %s.", time_step)
-        self._dt = to_simulation_units(time_step, 'time')
-        self._time_step = time_step
 
         for species in self.species:
             concentration, stiffness, time_stepping_matrix = self._setup_lhs(species)
@@ -150,75 +225,6 @@ class Simulation:
         time_stepping_matrix = mass.mat.Inverse(active_dofs)
 
         return concentration, stiffness, time_stepping_matrix
-
-
-    def simulate_until(
-            self,
-            *,
-            end_time: u.Quantity,
-            start_time: u.Quantity = 0 * u.s,
-    ) -> None:
-        """Run the simulation until a given end time.
-
-        :param end_time: The end time of the simulation.
-        :param start_time: The start time of the simulation.
-        :raises ValueError: If the end time is not greater than the start time.
-        """
-        if end_time <= start_time:
-            raise ValueError("End time must be greater than start time.")
-
-        n_steps = int(to_simulation_units(end_time - start_time, 'time') / self._dt)
-        self.simulate_for(n_steps=n_steps, start_time=start_time)
-
-
-    def simulate_for(
-            self,
-            *,
-            n_steps: int,
-            start_time: u.Quantity = 0 * u.s,
-    ) -> None:
-        """Run the simulation for a given number of time steps.
-
-        :param n_steps: The number of time steps to run the simulation for.
-        :param start_time: The start time of the simulation.
-        :raises ValueError: If the number of steps is less than 1 or time step is not positive.
-        """
-        if n_steps < 1:
-            raise ValueError("Number of steps must be at least 1.")
-        logger.info("Running simulation for %d steps.", n_steps)
-
-        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
-        for recorder in self._recorders:
-            recorder.setup(
-                mesh=self.simulation_geometry.mesh,
-                directory=self.result_directory,
-                concentrations=name_to_concentration,
-                start_time=start_time
-            )
-
-        # TODO: replace this dummy linear form with a proper one
-        f = ngs.LinearForm(self._rd_fes)
-        f.Assemble()
-
-        t = start_time
-        for _ in trange(n_steps):
-            residual = {}
-
-            # Solve the potential equation
-            for species in self.species:
-                a = self._stiffness[species]
-                c = self._concentrations[species]
-                residual[species] = self._dt * (f.vec - a.mat * c.vec)
-
-            for species, c in self._concentrations.items():
-                c.vec.data += self._time_stepping_matrix[species] * residual[species]
-
-            t += self._time_step
-            for recorder in self._recorders:
-                recorder.record(current_time=t)
-
-        for recorder in self._recorders:
-            recorder.finalize(end_time=t)
 
 
 def set_dofs(space, dof_array, region, value):
