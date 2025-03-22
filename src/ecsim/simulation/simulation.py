@@ -1,4 +1,6 @@
 import logging
+import os
+from datetime import datetime
 
 import astropy.units as u
 import ngsolve as ngs
@@ -12,6 +14,7 @@ from .simulation_agents import ChemicalSpecies
 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class Simulation:
@@ -19,19 +22,30 @@ class Simulation:
     """
     def __init__(
             self,
-            simulation_geometry: SimulationGeometry,
-            result_directory: str,
+            name: str,
+            *,
+            result_root: str,
     ):
         """Initialize a new simulation.
 
-        :param simulation_geometry: The geometry of the simulation, including
-            the mesh and compartments.
-        :param result_directory: The directory where simulation results will be
+        :param name: The name of the simulation (used for naming the result directory).
+        :param result_root: The directory under which simulation results will be
             stored.
         """
-        self.simulation_geometry = simulation_geometry
+        self.simulation_geometry = None
         self.species: list[ChemicalSpecies] = []
-        self.result_directory = result_directory
+
+        # Set up result directory and logging
+        time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        self.result_directory = os.path.join(result_root, f"{name}_{time_stamp}")
+        if not os.path.exists(self.result_directory):
+            os.makedirs(self.result_directory)
+
+        file_handler = logging.FileHandler(os.path.join(self.result_directory, "simulation.log"))
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.DEBUG)
+        logger.addHandler(file_handler)
 
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}

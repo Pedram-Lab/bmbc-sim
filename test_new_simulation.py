@@ -9,11 +9,6 @@ import astropy.units as u
 import ecsim
 from ecsim.evaluation.vtk_recorder import Snapshot
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    datefmt="%Y-%m-%d %H:%M:%S",
-    format="%(asctime)s %(levelname)s %(message)s"
-)
 
 left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
 middle = occ.Box((1, 0, 0), (2, 1, 1)).mat('ecm:right').bc('reflective')
@@ -26,17 +21,14 @@ mesh.ngmesh.SetBCName(5, 'clamped')
 mesh.ngmesh.SetBCName(1, 'left_membrane')
 mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-print("mesh materials: ", mesh.GetMaterials())
-print("mesh boundaries: ", mesh.GetBoundaries())
-
 Draw(mesh)
 
-geometry = ecsim.SimulationGeometry(mesh)
+simulation = ecsim.Simulation('debug', result_root='results')
+geometry = simulation.add_geometry(mesh)
 ecm = geometry.compartments['ecm']
 cell = geometry.compartments['cell']
 # geometry_description.visualize(resolve_regions=True)
 
-simulation = ecsim.Simulation(geometry, 'results')
 ca = simulation.add_species('Ca', valence=2)
 
 simulation.add_recorder(Snapshot(100 * u.us))
