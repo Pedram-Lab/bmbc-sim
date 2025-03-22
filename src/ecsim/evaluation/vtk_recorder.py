@@ -23,12 +23,9 @@ class FullSnapshot(Recorder):
             self,
             directory: str,
             mesh: ngs.Mesh,
-            n_steps: int,
             compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
     ) -> None:
-        del n_steps  # unused
-
         # GridFunctions in multi-component spaces cannot automatically be converted
         # to values on the mesh, so we need to set up MaterialCFs manually by a mapping
         #   mesh material -> concentration (i.e., the component of the compartment that

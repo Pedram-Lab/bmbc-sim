@@ -160,7 +160,6 @@ class Simulation:
             recorder.setup(
                 directory=self.result_directory,
                 mesh=self.simulation_geometry.mesh,
-                n_steps=n_steps,
                 compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
                 start_time=start_time
