@@ -33,17 +33,16 @@ ca = simulation.add_species('Ca', valence=2)
 
 simulation.add_recorder(Snapshot(100 * u.us))
 
-ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
-
-
 cell.add_diffusion(
     species=ca,
-    diffusivity=600 * u.nm**2 / u.ms,
+    diffusivity=1000 * u.nm**2 / u.ms,
 )
+
+ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})
 ecm.add_diffusion(
     species=ca,
-    diffusivity={'left': 1000 * u.nm**2 / u.ms, 'right': 500 * u.nm**2 / u.ms},
+    diffusivity={'left': 0 * u.nm**2 / u.ms, 'right': 10 * u.um**2 / u.ms},
 )
 
 simulation.simulate_for(

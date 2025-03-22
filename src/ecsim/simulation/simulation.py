@@ -229,7 +229,8 @@ class Simulation:
         mass = ngs.BilinearForm(self._rd_fes, check_unused=False)
         stiffness = ngs.BilinearForm(self._rd_fes, check_unused=False)
         active_dofs = ngs.BitArray(self._rd_fes.ndof)
-        test_and_trial = [(test, trial) for test, trial in zip(*self._rd_fes.TnT())]
+        active_dofs[:] = True
+        test_and_trial = list(zip(*self._rd_fes.TnT()))
         concentration = ngs.GridFunction(self._rd_fes)
 
         for i, compartment in enumerate(compartments):
