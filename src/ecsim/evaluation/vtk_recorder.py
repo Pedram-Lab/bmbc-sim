@@ -7,12 +7,12 @@ from ecsim.units import to_simulation_units
 
 
 class Snapshot(Recorder):
-    """Record the full mesh with the specified quantities during simulation.
-    This 
+    """Record the full mesh with all concentrations during simulation.
+    This saves a snapshot of the entire mesh at specified intervals in
+    VTK format, allowing for visualization and analysis in pyvista or
+    paraview.
     """
     def __init__(self, recording_interval: u.Quantity):
-        """Initialize the FullMesh recorder.
-        """
         super().__init__(recording_interval)
         self._vtk_output = None
 
@@ -24,13 +24,6 @@ class Snapshot(Recorder):
             directory: str,
             concentrations: dict[str, ngs.GridFunction],
     ) -> None:
-        """Set up the recorder with the necessary parameters.
-        
-        :param mesh: NGSolve mesh object that represents the geometry.
-        :param directory: Directory where the recorded data will be saved.
-        :param concentrations: Dictionary mapping species names to their
-            respective NGSolve GridFunctions representing concentrations.
-        """
         # GridFunctions in multi-component spaces cannot automatically be converted
         # to values on the mesh, so we need to set up MaterialCFs manually by a mapping
         #   mesh material -> concentration (i.e., the component of the compartment that
@@ -56,11 +49,6 @@ class Snapshot(Recorder):
             self,
             current_time: u.Quantity
     ) -> None:
-        """Record the specified quantities during simulation.
-        
-        :param args: Positional arguments for recording.
-        :param kwargs: Keyword arguments for recording.
-        """
         self._vtk_output.Do(to_simulation_units(current_time, 'time'))
 
 
