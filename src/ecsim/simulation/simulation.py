@@ -174,18 +174,23 @@ class Simulation:
 
         t = start_time
         for _ in trange(n_steps):
-            residual = {}
-
-            # Solve the potential equation
-            for species in self.species:
-                a = self._stiffness[species]
-                c = self._concentrations[species]
-                residual[species] = self._dt * (f.vec - a.mat * c.vec)
-
+            # Update the concentrations via Strang splitting
+            # Half-step for diffusion
             for species, c in self._concentrations.items():
-                c.vec.data += self._time_stepping_matrix[species] * residual[species]
+                a = self._stiffness[species]
+                m_star = self._time_stepping_matrix[species]
+                residual = self._dt / 2 * (f.vec - a.mat * c.vec)
+                c.vec.data += m_star * residual
+            t += self._time_step / 2
 
-            t += self._time_step
+            # Half-step for diffusion
+            for species, c in self._concentrations.items():
+                a = self._stiffness[species]
+                m_star = self._time_stepping_matrix[species]
+                residual = self._dt / 2 * (f.vec - a.mat * c.vec)
+                c.vec.data += m_star * residual
+            t += self._time_step / 2
+
             for recorder in self._recorders:
                 recorder.record(current_time=t)
 
@@ -213,7 +218,6 @@ class Simulation:
                                     for compartment in compartments])
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
                     self._rd_fes.ndof)
-
 
         for species in self.species:
             concentration, mass, stiffness, time_stepping_matrix = self._setup_lhs(species)
@@ -260,7 +264,7 @@ class Simulation:
         stiffness.Assemble()
 
         m_star = mass.mat.CreateMatrix()
-        m_star.AsVector().data = mass.mat.AsVector() + self._dt * stiffness.mat.AsVector()
+        m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
         time_stepping_matrix = m_star.Inverse(active_dofs)
 
         return concentration, mass, stiffness, time_stepping_matrix
@@ -270,7 +274,7 @@ class Simulation:
         """Set up the right-hand side of the finite element equations for all species.
         """
         test_functions = self._rd_fes.TestFunction()
-        source_terms = {s: ngs.LinearForm(self._rd_fes, check_unused=False) for s in self.species}
+        source_terms = {s: ngs.LinearForm(self._rd_fes) for s in self.species}
 
         for i, compartment in enumerate(self.simulation_geometry.compartments.values()):
             coefficients = compartment.coefficients
@@ -283,18 +287,18 @@ class Simulation:
                     all_reactants *= self._concentrations[reactant].components[i]
                 all_reactants = all_reactants.Compile()
                 for reactant in reactants:
-                    source_terms[reactant.name] += -k_f * all_reactants * test * ngs.dx
+                    source_terms[reactant] += -k_f * all_reactants * test * ngs.dx
                 for product in products:
-                    source_terms[product.name] += k_f * all_reactants * test * ngs.dx
+                    source_terms[product] += k_f * all_reactants * test * ngs.dx
 
                 all_products = ngs.CoefficientFunction(1.0)
                 for product in products:
                     all_products *= self._concentrations[product].components[i]
                 all_products = all_products.Compile()
                 for reactant in reactants:
-                    source_terms[reactant.name] += k_r * all_products * test * ngs.dx
+                    source_terms[reactant] += k_r * all_products * test * ngs.dx
                 for product in products:
-                    source_terms[product.name] += -k_r * all_products * test * ngs.dx
+                    source_terms[product] += -k_r * all_products * test * ngs.dx
 
         return source_terms
 
