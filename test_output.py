@@ -46,12 +46,17 @@ else:
     vtk = ngs.VTKOutput(mesh, coefs=[coeff], names=['blub'], filename='test')
     vtk.Do()
     vec_cf = ngs.CoefficientFunction((u.components[0], u.components[1]))
+    sum_cf = u.components[0] + u.components[1]
+    mip_ecs = mesh(1, 0.5, 0.5)
+    mip_cell = mesh(2.5, 0.5, 0.5)
 
     u.components[0].Set(ngs.x * ngs.y)
     u.components[1].Set(1)
     mass_ecm_and_cell = ngs.Integrate(vec_cf, mesh, ngs.VOL)
     print(f"mass in ecs: {mass_ecm_and_cell[0]:.2f}")
     print(f"mass in cell: {mass_ecm_and_cell[1]:.2f}")
+    print(f"concentration in ecs: {sum_cf(mip_ecs):.2f}")
+    print(f"concentration in ecs: {sum_cf(mip_cell):.2f}")
     vtk.Do()
 
     u.components[0].Set(0)
@@ -59,4 +64,6 @@ else:
     mass_ecm_and_cell = ngs.Integrate(vec_cf, mesh, ngs.VOL)
     print(f"mass in ecs: {mass_ecm_and_cell[0]:.2f}")
     print(f"mass in cell: {mass_ecm_and_cell[1]:.2f}")
+    print(f"concentration in ecs: {sum_cf(mip_ecs):.2f}")
+    print(f"concentration in ecs: {sum_cf(mip_cell):.2f}")
     vtk.Do()

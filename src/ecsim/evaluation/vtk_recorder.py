@@ -12,7 +12,8 @@ class FullSnapshot(Recorder):
     """Record the full mesh with all concentrations during simulation.
     This saves a snapshot of the entire mesh at specified intervals in
     VTK format, allowing for visualization and analysis in pyvista or
-    paraview.
+    paraview. Only a single :class:`FullSnapshot` recorder instance
+    is allowed per simulation
     """
     def __init__(self, recording_interval: u.Quantity):
         super().__init__(recording_interval)

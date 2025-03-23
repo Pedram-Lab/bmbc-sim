@@ -1,3 +1,5 @@
+import os
+
 import astropy.units as u
 import ngsolve as ngs
 import numpy as np
@@ -11,13 +13,15 @@ from ecsim.units import to_simulation_units
 
 class CompartmentSubstance(Recorder):
     """Record the total substance of all species in the simulation per
-    compartment. The output is saved as xarray datasets.
+    compartment. The output is saved as xarray datasets. Only one
+    :class:`CompartmentSubstance` recorder is allowed per simulation.
     """
     def __init__(self, recording_interval: u.Quantity):
         super().__init__(recording_interval)
         self._xarray = None
         self._data_list = []
         self._time_list = []
+        self._volumes = None
         self._mesh = None
         self._coords = None
         self._concentration_cf = None
@@ -33,8 +37,9 @@ class CompartmentSubstance(Recorder):
     ) -> None:
         self._mesh = mesh
         self._directory = directory
+        self._volumes = [to_simulation_units(comp.volume, 'volume') for comp in compartments]
 
-        # Store the spatial coordinates for later use.
+        # Store the labels for later use
         species = list(concentrations.keys())
         comp_names = [comp.name for comp in compartments]
         self._coords = {
@@ -43,7 +48,7 @@ class CompartmentSubstance(Recorder):
         }
 
         # Create a vector-valued CoefficientFunction to hold the concentrations
-        # for all compartments and species.
+        # for all compartments and species
         cs = []
         for i, _ in enumerate(compartments):
             for spec in species:
@@ -76,6 +81,12 @@ class CompartmentSubstance(Recorder):
                 "compartment": self._coords["compartment"],
                 "species": self._coords["species"],
             },
+            attrs = {
+                "time_unit": "ms",
+                "substance_unit": "amol",
+                "volume_unit": "um^3",
+                "compartment_volume": self._volumes,
+            }
         )
-        output_path = f"{self._directory}/substance_data.zarr"
+        output_path = os.path.join(self._directory, "substance_data.zarr")
         ds.to_zarr(output_path, mode="w", zarr_format=2)
