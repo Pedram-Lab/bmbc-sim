@@ -51,6 +51,7 @@ class Simulation:
         self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
+        self._mass: ngs.BilinearForm = None
 
         self._recorders: list[Recorder] = []
         self._time_step = None
@@ -130,6 +131,7 @@ class Simulation:
         self.simulate_for(n_steps=n_steps, time_step=time_step, start_time=start_time)
 
 
+    # TODO: consider collapsing simulate_until and simulate_for into a single method
     def simulate_for(
             self,
             *,
@@ -213,10 +215,11 @@ class Simulation:
 
 
         for species in self.species:
-            concentration, stiffness, time_stepping_matrix = self._setup_lhs(species)
+            concentration, mass, stiffness, time_stepping_matrix = self._setup_lhs(species)
             self._concentrations[species] = concentration
             self._stiffness[species] = stiffness
             self._time_stepping_matrix[species] = time_stepping_matrix
+            self._mass = mass
 
 
     def _setup_lhs(self, species):
@@ -252,10 +255,12 @@ class Simulation:
         # Assemble the mass and stiffness matrices and invert the time-stepping matrix
         mass.Assemble()
         stiffness.Assemble()
-        mass.mat.AsVector().data += self._dt * stiffness.mat.AsVector()
-        time_stepping_matrix = mass.mat.Inverse(active_dofs)
 
-        return concentration, stiffness, time_stepping_matrix
+        m_star = mass.mat.CreateMatrix()
+        m_star.AsVector().data = mass.mat.AsVector() + self._dt * stiffness.mat.AsVector()
+        time_stepping_matrix = m_star.Inverse(active_dofs)
+
+        return concentration, mass, stiffness, time_stepping_matrix
 
 
 def set_dofs(space, dof_array, region, value):
