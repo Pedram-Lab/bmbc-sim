@@ -110,21 +110,22 @@ class Compartment:
             self,
             reactants: list[S],
             products: list[S],
-            k_on: u.Quantity | dict[str, u.Quantity],
-            k_off: u.Quantity | dict[str, u.Quantity]
+            k_f: u.Quantity | dict[str, u.Quantity],
+            k_r: u.Quantity | dict[str, u.Quantity]
     ) -> None:
         """Add a reaction event to the compartment.
 
         :param reaction: Reaction term for use in the symbolic NGSolve
             reaction-diffusion equation
         """
-        if (reactants, products) in self.coefficients.reactions:
+        reaction_key = (*reactants, '->', *products)
+        if reaction_key in self.coefficients.reactions:
             raise ValueError(f"Reaction {reactants} -> {products} already defined")
 
-        k_on = self._to_coefficient_function(k_on, 'reaction rate')
-        k_off = self._to_coefficient_function(k_off, 'reaction rate')
+        k_f = self._to_coefficient_function(k_f, 'reaction rate')
+        k_r = self._to_coefficient_function(k_r, 'frequency')
 
-        self.coefficients.reactions[(reactants, products)] = (k_on, k_off)
+        self.coefficients.reactions[reaction_key] = (k_f, k_r)
 
 
     def _to_coefficient_function(

@@ -54,7 +54,7 @@ for species in species_list:
     ts = point_data.sel(species=species)
     for t in time:
         ts_array = ts.sel(time=t).to_array()
-        plt.plot(x_coords, ts_array.values.T, label=f"t={t} ms")
+        plt.plot(x_coords, ts_array.values.T, label=f"t={t:.1f} ms")
     plt.xlabel("X Coordinate [um]")
     plt.ylabel("Concentration [mM]")
     plt.title(f"Species: {species}")

@@ -29,22 +29,33 @@ cell = geometry.compartments['cell']
 # geometry_description.visualize(resolve_regions=True)
 
 ca = simulation.add_species('Ca', valence=2)
+buf = simulation.add_species('Buffer', valence=-2)
+ca_buf = simulation.add_species('Ca_Buffer', valence=0)
 
 line = [[i / 10, 0.5, 0.5] for i in range(31)]
 simulation.add_recorder(FullSnapshot(100 * u.us))
 simulation.add_recorder(CompartmentSubstance(100 * u.us))
-simulation.add_recorder(PointValues(100 * u.us, line))
+simulation.add_recorder(PointValues(0.5 * u.ms, line))
 
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
-cell.add_diffusion(
-    species=ca,
-    diffusivity=1000 * u.nm**2 / u.ms,
+cell.initialize_species(buf, value=0.5 * u.mmol / u.L)
+for species in [ca, buf, ca_buf]:
+    cell.add_diffusion(
+        species=species,
+        diffusivity=1 * u.um**2 / u.ms,
+    )
+
+cell.add_reaction(
+    reactants=[ca, buf],
+    products=[ca_buf],
+    k_f=100 * u.umol / (u.L * u.ms),
+    k_r=10 / u.ms
 )
 
 ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})
 ecm.add_diffusion(
     species=ca,
-    diffusivity={'left': 0 * u.nm**2 / u.ms, 'right': 10 * u.um**2 / u.ms},
+    diffusivity={'left': 1 * u.nm**2 / u.ms, 'right': 10 * u.um**2 / u.ms},
 )
 
 simulation.simulate_for(
