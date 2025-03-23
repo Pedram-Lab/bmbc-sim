@@ -52,6 +52,7 @@ class Simulation:
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
         self._mass: ngs.BilinearForm = None
+        self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
 
         self._recorders: list[Recorder] = []
         self._time_step = None
@@ -221,6 +222,8 @@ class Simulation:
             self._time_stepping_matrix[species] = time_stepping_matrix
             self._mass = mass
 
+        self._source_terms = self._setup_rhs()
+
 
     def _setup_lhs(self, species):
         """Set up the left-hand side of the finite element equations for a given species.
@@ -261,6 +264,39 @@ class Simulation:
         time_stepping_matrix = m_star.Inverse(active_dofs)
 
         return concentration, mass, stiffness, time_stepping_matrix
+
+
+    def _setup_rhs(self):
+        """Set up the right-hand side of the finite element equations for all species.
+        """
+        test_functions = self._rd_fes.TestFunction()
+        source_terms = {s: ngs.LinearForm(self._rd_fes, check_unused=False) for s in self.species}
+
+        for i, compartment in enumerate(self.simulation_geometry.compartments.values()):
+            coefficients = compartment.coefficients
+            test = test_functions[i]
+
+            for (reactants, products), (k_f, k_r) in coefficients.reactions.items():
+                # TODO: find a better default value
+                all_reactants = ngs.CoefficientFunction(1.0)
+                for reactant in reactants:
+                    all_reactants *= self._concentrations[reactant].components[i]
+                all_reactants = all_reactants.Compile()
+                for reactant in reactants:
+                    source_terms[reactant.name] += -k_f * all_reactants * test * ngs.dx
+                for product in products:
+                    source_terms[product.name] += k_f * all_reactants * test * ngs.dx
+
+                all_products = ngs.CoefficientFunction(1.0)
+                for product in products:
+                    all_products *= self._concentrations[product].components[i]
+                all_products = all_products.Compile()
+                for reactant in reactants:
+                    source_terms[reactant.name] += k_r * all_products * test * ngs.dx
+                for product in products:
+                    source_terms[product.name] += -k_r * all_products * test * ngs.dx
+
+        return source_terms
 
 
 def set_dofs(space, dof_array, region, value):

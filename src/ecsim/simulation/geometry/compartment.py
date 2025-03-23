@@ -118,7 +118,7 @@ class Compartment:
         :param reaction: Reaction term for use in the symbolic NGSolve
             reaction-diffusion equation
         """
-        reaction_key = (*reactants, '->', *products)
+        reaction_key = (tuple(reactants), tuple(products))
         if reaction_key in self.coefficients.reactions:
             raise ValueError(f"Reaction {reactants} -> {products} already defined")
 
