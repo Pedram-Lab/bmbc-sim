@@ -331,3 +331,21 @@ def set_dofs(space, dof_array, region, value):
     for el in region.Elements():
         for dof in space.GetDofNrs(el):
             dof_array[dof] = value
+
+
+def find_latest_results(name: str, results_root: str) -> str:
+    """Find the latest results folder with a given name in a directory."
+
+    :param name: The name of the simulation of interest.
+    :param results_root: The directory in which to search for results folders.
+    :returns: The full path of the latest results folder for the given simulation.
+    """
+    result_folders = [
+        d for d in os.listdir(results_root)
+        if d.startswith(name) and os.path.isdir(os.path.join(results_root, d))
+    ]
+    if not result_folders:
+        raise RuntimeError(f"No folders with name {name} found in {results_root}.")
+
+    latest = max(result_folders, key=lambda d: os.path.getctime(os.path.join(results_root, d)))
+    return os.path.join(results_root, latest)

@@ -4,26 +4,19 @@ import pyvista as pv
 import xarray as xr
 import matplotlib.pyplot as plt
 
-# Find the latest folder with test data
-results_dir = "results"
-all_folders = [
-    d for d in os.listdir(results_dir)
-    if d.startswith("sala_") and os.path.isdir(os.path.join(results_dir, d))
-]
-if not all_folders:
-    raise RuntimeError("No debug folders found in the results directory.")
+from ecsim import find_latest_results
 
-latest_folder = max(all_folders, key=lambda d: os.path.getctime(os.path.join(results_dir, d)))
-print("Using folder:", latest_folder)
+# Find the latest folder with test data
+latest_folder = find_latest_results("sala", "results")
 
 ### Full snapshots
-snapshot_file = os.path.join(results_dir, latest_folder, "snapshots", "snapshot_step00010.vtu")
+snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
 data = pv.read(snapshot_file)
 data.plot(scalars='Ca', show_edges=True)
 
 
 ### Compartment substances
-zarr_path = os.path.join(results_dir, latest_folder, "substance_data.zarr")
+zarr_path = os.path.join(latest_folder, "substance_data.zarr")
 point_data = xr.open_zarr(zarr_path)
 
 species_list = point_data.coords['species'].values
@@ -42,7 +35,7 @@ for species in species_list:
 plt.show()
 
 ### Point values
-zarr_path = os.path.join(results_dir, latest_folder, "point_data_0.zarr")
+zarr_path = os.path.join(latest_folder, "point_data_0.zarr")
 point_data = xr.open_zarr(zarr_path)
 
 species_list = point_data.coords['species'].values
