@@ -6,9 +6,9 @@ from netgen import occ
 import ecsim
 
 
-@pytest.fixture(scope="module")
-def geometry():
-    """Create a simple test geometry with three regions that are sorted into two
+@pytest.fixture(scope="function")
+def simulation(tmp_path_factory):
+    """Create a simple test simulation with three regions that are sorted into two
     compartments."
     """
     left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
@@ -22,22 +22,23 @@ def geometry():
     mesh.ngmesh.SetBCName(1, 'left_membrane')
     mesh.ngmesh.SetBCName(6, 'right_membrane')
 
-    return ecsim.SimulationGeometry(mesh)
+    tmp_path = tmp_path_factory.mktemp("results")
+    simulation = ecsim.Simulation('test_simulation', result_root=tmp_path)
+    simulation.add_geometry(mesh)
+    return simulation
 
 
-def test_added_species_are_present(geometry):
+def test_added_species_are_present(simulation):
     """Test that the added species are present in the geometry description.
     """
-    simulation = ecsim.Simulation(geometry)
     species = simulation.add_species('test_species', valence=1)
 
     assert species in simulation.species
 
 
-def test_add_species_twice_raises_error(geometry):
+def test_add_species_twice_raises_error(simulation):
     """Test that adding the same species twice raises an error.
     """
-    simulation = ecsim.Simulation(geometry)
     _ = simulation.add_species('test_species', valence=1)
 
     with pytest.raises(ValueError):
