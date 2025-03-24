@@ -111,7 +111,7 @@ class Simulation:
         self._recorders.append(recorder)
 
 
-    def simulate_until(
+    def run(
             self,
             *,
             end_time: u.Quantity,
@@ -127,30 +127,12 @@ class Simulation:
         """
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
-
-        n_steps = int((end_time - start_time) / time_step)
-        self.simulate_for(n_steps=n_steps, time_step=time_step, start_time=start_time)
-
-
-    # TODO: consider collapsing simulate_until and simulate_for into a single method
-    def simulate_for(
-            self,
-            *,
-            n_steps: int,
-            time_step: u.Quantity,
-            start_time: u.Quantity = 0 * u.s,
-    ) -> None:
-        """Run the simulation for a given number of time steps.
-
-        :param n_steps: The number of time steps to run the simulation for.
-        :param time_step: The time step to use for the simulation.
-        :param start_time: The start time of the simulation.
-        :raises ValueError: If the number of steps is less than 1 or time step is not positive.
-        """
-        if n_steps < 1:
-            raise ValueError("Number of steps must be at least 1.")
         if time_step <= 0 * u.s:
             raise ValueError(f"Time step must be positive, not {time_step}.")
+
+        n_steps = int((end_time - start_time) / time_step)
+        if n_steps < 1:
+            raise ValueError("Number of steps must be at least 1.")
         logger.info("Running simulation for %d steps of size %s.", n_steps, time_step)
 
         self._dt = to_simulation_units(time_step, 'time')

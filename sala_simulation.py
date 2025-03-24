@@ -116,4 +116,4 @@ simulation.add_recorder(recorder.CompartmentSubstance(100 * u.ms))
 simulation.add_recorder(recorder.PointValues(0.1 * u.ms, points))
 
 # Run the simulation
-simulation.simulate_until(end_time=2 * u.s, time_step=0.01 * u.ms)
+simulation.run(end_time=2 * u.s, time_step=0.01 * u.ms)

@@ -71,7 +71,4 @@ cell_ecs_membrane.add_transport(
     target=ecm
 )
 
-simulation.simulate_for(
-    n_steps=100,
-    time_step=10 * u.us
-)
+simulation.run(end_time=1 * u.ms, time_step=10 * u.us)
