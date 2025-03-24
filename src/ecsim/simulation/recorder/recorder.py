@@ -63,7 +63,7 @@ class Recorder(abc.ABC):
         """
         # Check if last recording is sufficiently long ago
         time_since_last_record = current_time - self._last_recorded_time
-        if time_since_last_record >= self.recording_interval:
+        if (time_since_last_record / self.recording_interval) >= 1 - 1e-6:
             self._record(current_time)
             self._last_recorded_time = current_time.copy()
 
