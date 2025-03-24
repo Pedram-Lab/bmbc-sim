@@ -55,7 +55,7 @@ for species in species_list:
     for point in points:
         ts = point_data.sel(species=species, point=point)
         ts_array = ts.to_array().values
-        plt.plot(time, ts_array.T, label=f"Point {point}")
+        plt.semilogy(time, ts_array.T, label=f"Point {point}")
     plt.xlabel("Time [ms]")
     plt.ylabel("Concentration [mM]")
     plt.title(f"Species: {species}")

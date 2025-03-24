@@ -122,8 +122,9 @@ class Compartment:
         if reaction_key in self.coefficients.reactions:
             raise ValueError(f"Reaction {reactants} -> {products} already defined")
 
-        k_f = self._to_coefficient_function(k_f, 'reaction rate')
-        k_r = self._to_coefficient_function(k_r, 'frequency')
+        # TODO: find correct units for reaction rates and enforce them
+        k_f = self._to_coefficient_function(k_f, None) #, 'reaction rate')
+        k_r = self._to_coefficient_function(k_r, None) #, 'frequency')
 
         self.coefficients.reactions[reaction_key] = (k_f, k_r)
 

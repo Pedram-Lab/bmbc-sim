@@ -128,7 +128,7 @@ class Simulation:
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
 
-        n_steps = int(to_simulation_units(end_time - start_time, 'time') / self._dt)
+        n_steps = int((end_time - start_time) / time_step)
         self.simulate_for(n_steps=n_steps, time_step=time_step, start_time=start_time)
 
 
@@ -155,6 +155,10 @@ class Simulation:
 
         self._dt = to_simulation_units(time_step, 'time')
         self._time_step = time_step
+
+        ngs.SetNumThreads(4)
+        task_manager = ngs.TaskManager()
+        task_manager.__enter__()
 
         self._setup()
 
@@ -199,6 +203,7 @@ class Simulation:
         for recorder in self._recorders:
             recorder.finalize(end_time=t)
 
+        task_manager.__exit__(None, None, None)
 
     def _setup(self) -> None:
         """Set up the simulation by initializing the finite element matrices.

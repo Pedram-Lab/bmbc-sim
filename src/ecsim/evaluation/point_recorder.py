@@ -87,6 +87,7 @@ class PointValues(Recorder):
             coords={
                 "time": self._time_list,
                 "species": self._species_names,
+                "point": np.arange(len(self._mips))
             },
             attrs={
                 "time_unit": "ms",
