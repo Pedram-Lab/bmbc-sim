@@ -7,6 +7,7 @@ import ecsim
 from ecsim.evaluation.point_recorder import PointValues
 from ecsim.evaluation.total_substance_recorder import CompartmentSubstance
 from ecsim.evaluation.vtk_recorder import FullSnapshot
+from ecsim.simulation.geometry import transport
 
 
 left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
@@ -26,7 +27,9 @@ simulation = ecsim.Simulation('debug', result_root='results')
 geometry = simulation.add_geometry(mesh)
 ecm = geometry.compartments['ecm']
 cell = geometry.compartments['cell']
-# geometry_description.visualize(resolve_regions=True)
+clamped_membrane = geometry.membranes['clamped']
+cell_ecs_membrane = geometry.membranes['right_membrane']
+# geometry.visualize(resolve_regions=False)
 
 ca = simulation.add_species('Ca', valence=2)
 buf = simulation.add_species('Buffer', valence=-2)
@@ -56,6 +59,19 @@ ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.m
 ecm.add_diffusion(
     species=ca,
     diffusivity={'left': 1 * u.nm**2 / u.ms, 'right': 10 * u.um**2 / u.ms},
+)
+
+clamped_membrane.add_transport(
+    species=ca,
+    transport=transport.Linear(permeability=1 * u.mmol / (u.L * u.ms)),
+    source=ecm,
+    target=3 * u.mmol / u.L
+)
+cell_ecs_membrane.add_transport(
+    species=buf,
+    transport=transport.Linear(permeability=10 * u.mmol / (u.L * u.ms)),
+    source=cell,
+    target=ecm
 )
 
 simulation.simulate_for(

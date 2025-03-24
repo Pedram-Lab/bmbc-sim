@@ -37,17 +37,24 @@ class Membrane:
             species: ChemicalSpecies,
             transport: Transport,
             source: Compartment,
-            target: Compartment
+            target: Compartment | u.Quantity
     ) -> None:
         """Add a transport mechanism to the membrane.
 
         :param species: The chemical species to which the transport applies.
         :param transport: The transport mechanism to apply.
         :param source: The compartment from which the species is transported.
-        :param target: The compartment to which the species is transported.
+        :param target: The compartment to which the species is transported, or a
+            quantity representing concentration value on the other side if the membrane
+            is connected to the outside of the domain (i.e., for a boundary condition).
         """
-        if not ((source, target) in self.connects or (target, source) in self.connects):
-            raise ValueError(f"Membrane {self.name} does not connect {source.name} and {target.name}.")
+        other = self.neighbor(source)
+        is_boundary = isinstance(target, u.Quantity)
+        if other is None and not is_boundary:
+            raise ValueError("Target must be a concentration value if the membrane is a boundary.")
+        if not is_boundary and target != other:
+            raise ValueError(f"Membrane {self.name} does not connect "
+                             f"{source.name} and {target.name}.")
 
         # Add the transport to the respective compartments
         self._transport[(species, source, target)] = transport
@@ -64,8 +71,18 @@ class Membrane:
                 return right
             elif compartment == right:
                 return left
-        raise ValueError(f"Compartment {compartment.name} is not connected to this membrane.")
+        raise ValueError(f"Compartment '{compartment.name}' "
+                         f"is not connected to membrane '{self.name}'.")
 
+
+    def get_transport(self) -> dict[tuple[ChemicalSpecies, Compartment, Compartment | u.Quantity],
+                                    Transport]:
+        """Get the transport mechanisms associated with this membrane.
+
+        :return: A dictionary mapping tuples of (species, source compartment, target compartment)
+            to their corresponding transport mechanisms.
+        """
+        return self._transport
 
     def __str__(self) -> str:
         return f"Membrane {self.name} connecting {[comp.name for comp in self.connects]}"

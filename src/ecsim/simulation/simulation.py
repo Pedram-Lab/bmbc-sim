@@ -278,8 +278,11 @@ class Simulation:
         """
         test_functions = self._rd_fes.TestFunction()
         source_terms = {s: ngs.LinearForm(self._rd_fes) for s in self.species}
+        compartments = list(self.simulation_geometry.compartments.values())
+        compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
 
-        for i, compartment in enumerate(self.simulation_geometry.compartments.values()):
+        # Handle reaction terms
+        for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
             test = test_functions[i]
 
@@ -302,6 +305,28 @@ class Simulation:
                     source_terms[reactant] += k_r * all_products * test * ngs.dx
                 for product in products:
                     source_terms[product] += -k_r * all_products * test * ngs.dx
+
+        # Handle transport terms
+        for membrane in self.simulation_geometry.membranes.values():
+            for (species, source, target), transport in membrane.get_transport().items():
+                i = compartment_to_index[source]
+                source_concentration = self._concentrations[species].components[i]
+                source_test = test_functions[i]
+
+                is_boundary_condition = isinstance(target, u.Quantity)
+                if is_boundary_condition:
+                    target_concentration = to_simulation_units(target, 'molar concentration')
+                else:
+                    j = compartment_to_index[target]
+                    target_concentration = self._concentrations[species].components[j]
+
+                flux = transport.flux(source_concentration, target_concentration)
+                flux = flux.Compile()
+
+                source_terms[species] += -flux * source_test * ngs.ds(membrane.name)
+                if not is_boundary_condition:
+                    target_test = test_functions[j]
+                    source_terms[species] += flux * target_test * ngs.ds(membrane.name)
 
         return source_terms
 
