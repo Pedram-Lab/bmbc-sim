@@ -48,8 +48,8 @@ for species in [ca, buf, ca_buf]:
 cell.add_reaction(
     reactants=[ca, buf],
     products=[ca_buf],
-    k_f=100 * u.umol / (u.L * u.ms),
-    k_r=10 / u.ms
+    k_f=1 * u.mmol / (u.L * u.ms),
+    k_r=1 / u.ms
 )
 
 ecm.initialize_species(ca, value={'left': 2.0 * u.mmol / u.L, 'right': 3.0 * u.mmol / u.L})

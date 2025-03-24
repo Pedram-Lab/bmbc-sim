@@ -51,7 +51,7 @@ class Simulation:
         self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
-        self._mass: ngs.BilinearForm = None
+        self._mass_inv: ngs.BaseMatrix = None
         self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
 
         self._recorders: list[Recorder] = []
@@ -168,10 +168,6 @@ class Simulation:
                 start_time=start_time
             )
 
-        # TODO: replace this dummy linear form with a proper one
-        f = ngs.LinearForm(self._rd_fes)
-        f.Assemble()
-
         t = start_time
         for _ in trange(n_steps):
             # Update the concentrations via Strang splitting
@@ -179,15 +175,21 @@ class Simulation:
             for species, c in self._concentrations.items():
                 a = self._stiffness[species]
                 m_star = self._time_stepping_matrix[species]
-                residual = self._dt / 2 * (f.vec - a.mat * c.vec)
+                residual = -self._dt / 2 * (a.mat * c.vec)
                 c.vec.data += m_star * residual
             t += self._time_step / 2
+
+            # Full-step for reaction and transport
+            for species, c in self._concentrations.items():
+                f = self._source_terms[species]
+                f.Assemble()
+                c.vec.data += self._dt * (self._mass_inv * f.vec)
 
             # Half-step for diffusion
             for species, c in self._concentrations.items():
                 a = self._stiffness[species]
                 m_star = self._time_stepping_matrix[species]
-                residual = self._dt / 2 * (f.vec - a.mat * c.vec)
+                residual = -self._dt / 2 * (a.mat * c.vec)
                 c.vec.data += m_star * residual
             t += self._time_step / 2
 
@@ -220,11 +222,11 @@ class Simulation:
                     self._rd_fes.ndof)
 
         for species in self.species:
-            concentration, mass, stiffness, time_stepping_matrix = self._setup_lhs(species)
+            concentration, mass_inv, stiffness, time_stepping_matrix = self._setup_lhs(species)
             self._concentrations[species] = concentration
             self._stiffness[species] = stiffness
             self._time_stepping_matrix[species] = time_stepping_matrix
-            self._mass = mass
+            self._mass_inv = mass_inv
 
         self._source_terms = self._setup_rhs()
 
@@ -266,8 +268,9 @@ class Simulation:
         m_star = mass.mat.CreateMatrix()
         m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
         time_stepping_matrix = m_star.Inverse(active_dofs)
+        m_inv = mass.mat.Inverse()
 
-        return concentration, mass, stiffness, time_stepping_matrix
+        return concentration, m_inv, stiffness, time_stepping_matrix
 
 
     def _setup_rhs(self):
