@@ -6,7 +6,7 @@ import astropy.units as u
 from ecsim.units import to_simulation_units
 
 
-class Transport(abc.ABC):
+class AbstractTransport(abc.ABC):
     """Abstract base class for transport mechanisms in a membrane.
     """
     @abc.abstractmethod
@@ -19,7 +19,7 @@ class Transport(abc.ABC):
         """
 
 
-class Linear(Transport):
+class Linear(AbstractTransport):
     """Linear transport mechanism that computes the flux as a linear function
     of the concentration difference across the membrane.
     """

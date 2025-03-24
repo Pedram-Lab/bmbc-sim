@@ -5,10 +5,7 @@ from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
-from ecsim.evaluation.point_recorder import PointValues
-from ecsim.evaluation.total_substance_recorder import CompartmentSubstance
-from ecsim.evaluation.vtk_recorder import FullSnapshot
-from ecsim.simulation.geometry import transport
+from ecsim.simulation import recorder, transport
 
 
 # Create a spherical cell
@@ -114,9 +111,9 @@ k_m = 0.83 * u.umol / u.L
 
 # Add recorders to capture simulation data
 points = [[x, 0, 0] for x in [0.25, 5.25, 10.25, 19.75]]
-simulation.add_recorder(FullSnapshot(100 * u.ms))
-simulation.add_recorder(CompartmentSubstance(100 * u.ms))
-simulation.add_recorder(PointValues(0.1 * u.ms, points))
+simulation.add_recorder(recorder.FullSnapshot(100 * u.ms))
+simulation.add_recorder(recorder.CompartmentSubstance(100 * u.ms))
+simulation.add_recorder(recorder.PointValues(0.1 * u.ms, points))
 
 # Run the simulation
 simulation.simulate_until(end_time=2 * u.s, time_step=0.01 * u.ms)

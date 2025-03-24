@@ -5,7 +5,7 @@ import numpy as np
 import xarray as xr
 
 from ecsim.logging import logger
-from ecsim.evaluation.recorder import Recorder
+from ecsim.simulation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.units import to_simulation_units
 
@@ -16,7 +16,8 @@ class PointValues(Recorder):
     :class:`PointValues` can be used in a single simulation.
     """
     def __init__(self, recording_interval: u.Quantity, points: np.ndarray | list[list[float]]):
-        """Initialize the recorder with a specified recording interval and points.The points are given as (N, 3) array of coordinates in the mesh.
+        """Initialize the recorder with a specified recording interval and
+        points.The points are given as (N, 3) array of coordinates in the mesh.
 
         :param recording_interval: The interval at which to record data.
         :param points: An (N, 3) array of coordinates (in micrometer) in the

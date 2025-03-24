@@ -7,7 +7,7 @@ import ngsolve as ngs
 from tqdm import trange
 
 from ecsim.logging import logger
-from ecsim.evaluation.recorder import Recorder
+from ecsim.simulation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
@@ -156,6 +156,7 @@ class Simulation:
         self._dt = to_simulation_units(time_step, 'time')
         self._time_step = time_step
 
+        # TODO: make number of threads configurable
         ngs.SetNumThreads(4)
         task_manager = ngs.TaskManager()
         task_manager.__enter__()

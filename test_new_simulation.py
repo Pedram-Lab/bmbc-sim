@@ -4,10 +4,7 @@ from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
-from ecsim.evaluation.point_recorder import PointValues
-from ecsim.evaluation.total_substance_recorder import CompartmentSubstance
-from ecsim.evaluation.vtk_recorder import FullSnapshot
-from ecsim.simulation.geometry import transport
+from ecsim.simulation import recorder, transport
 
 
 left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
@@ -36,9 +33,9 @@ buf = simulation.add_species('Buffer', valence=-2)
 ca_buf = simulation.add_species('Ca_Buffer', valence=0)
 
 line = [[i / 10, 0.5, 0.5] for i in range(31)]
-simulation.add_recorder(FullSnapshot(100 * u.us))
-simulation.add_recorder(CompartmentSubstance(100 * u.us))
-simulation.add_recorder(PointValues(0.5 * u.ms, line))
+simulation.add_recorder(recorder.FullSnapshot(100 * u.us))
+simulation.add_recorder(recorder.CompartmentSubstance(100 * u.us))
+simulation.add_recorder(recorder.PointValues(0.5 * u.ms, line))
 
 cell.initialize_species(ca, value=0.5 * u.mmol / u.L)
 cell.initialize_species(buf, value=0.5 * u.mmol / u.L)

@@ -9,6 +9,7 @@ except NameError:
     from tqdm import tqdm
 
 
+# TODO: remove
 class SimulationClock:
     """Simple simulation clock that keeps track of the current time and advances
     it by a fixed time step size. The clock also keeps track of events that

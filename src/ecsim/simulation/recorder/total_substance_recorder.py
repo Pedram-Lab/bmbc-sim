@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 
 from ecsim.logging import logger
-from ecsim.evaluation.recorder import Recorder
+from ecsim.simulation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.units import to_simulation_units
 

@@ -2,7 +2,7 @@ import astropy.units as u
 import ngsolve as ngs
 
 from ecsim.simulation.geometry.compartment import Compartment
-from ecsim.simulation.geometry.transport import Transport
+from ecsim.simulation.transport.transport import AbstractTransport
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 
 
@@ -35,7 +35,7 @@ class Membrane:
     def add_transport(
             self,
             species: ChemicalSpecies,
-            transport: Transport,
+            transport: AbstractTransport,
             source: Compartment,
             target: Compartment | u.Quantity
     ) -> None:
@@ -76,7 +76,7 @@ class Membrane:
 
 
     def get_transport(self) -> dict[tuple[ChemicalSpecies, Compartment, Compartment | u.Quantity],
-                                    Transport]:
+                                    AbstractTransport]:
         """Get the transport mechanisms associated with this membrane.
 
         :return: A dictionary mapping tuples of (species, source compartment, target compartment)
