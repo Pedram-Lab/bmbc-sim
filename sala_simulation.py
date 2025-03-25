@@ -23,6 +23,8 @@ geometry = simulation.add_geometry(mesh)
 # Get the compartments and membranes
 cell = geometry.compartments['cell']
 membrane = geometry.membranes['membrane']
+M = u.mol / u.L
+uM = u.umol / u.L
 
 # Add species to the simulation
 ca = simulation.add_species('Ca', valence=2)
@@ -34,10 +36,10 @@ ca_b_2 = simulation.add_species('Ca_Buffer_2', valence=0)
 ca_b_3 = simulation.add_species('Ca_Buffer_3', valence=0)
 
 # Initial conditions
-cell.initialize_species(ca, value=0.05 * u.umol / u.L)
-cell.initialize_species(b_1, value=100 * u.umol / u.L)
-cell.initialize_species(b_2, value=600 * u.umol / u.L)
-cell.initialize_species(b_3, value=100 * u.umol / u.L)
+cell.initialize_species(ca, value=0.05 * uM)
+cell.initialize_species(b_1, value=100 * uM)
+cell.initialize_species(b_2, value=600 * uM)
+cell.initialize_species(b_3, value=100 * uM)
 
 # Add diffusion to the species (B2 is not diffusing)
 cell.add_diffusion(species=ca, diffusivity=6e-6 * u.cm**2 / u.s)
@@ -47,16 +49,16 @@ cell.add_diffusion(species=b_3, diffusivity=2.5e-6 * u.cm**2 / u.s)
 cell.add_diffusion(species=ca_b_3, diffusivity=2.5e-6 * u.cm**2 / u.s)
 
 # Compute forward and reverse reaction rates for the buffers
-k_f_1 = 1e8 * u.L / (u.mol * u.s)
-k_d_1 = 1 * u.umol / u.L
+k_f_1 = 1e8 / (M * u.s)
+k_d_1 = 1 * uM
 k_r_1 = k_f_1 * k_d_1
 
-k_f_2 = 5e5 * u.L / (u.mol * u.s)
-k_d_2 = 0.4 * u.umol / u.L
+k_f_2 = 5e5 / (M * u.s)
+k_d_2 = 0.4 * uM
 k_r_2 = k_f_2 * k_d_2
 
-k_f_3 = 1e8 * u.L / (u.mol * u.s)
-k_d_3 = 0.2 * u.umol / u.L
+k_f_3 = 1e8 / (M * u.s)
+k_d_3 = 0.2 * uM
 k_r_3 = k_f_3 * k_d_3
 
 # Add reactions
@@ -74,12 +76,10 @@ cell.add_reaction(
 )
 
 # Compute transport coefficients
-cell.volume
-membrane.area
 u_max = 2 * u.pmol / (u.cm**2 * u.s)
 # TODO: only divide by volume because area comes from integration anyway?
 v_max = u_max * membrane.area / cell.volume
-k_m = 0.83 * u.umol / u.L
+k_m = 0.83 * uM
 
 
 # # Add transport mechanisms to the membranes
