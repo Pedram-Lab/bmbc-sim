@@ -20,18 +20,18 @@ zarr_path = os.path.join(latest_folder, "substance_data.zarr")
 point_data = xr.open_zarr(zarr_path)
 
 species_list = point_data.coords['species'].values
-compartment_list = point_data.coords['compartment'].values
+compartment = point_data.coords['compartment'].values[0]
+volume = point_data.attrs['compartment_volume'][0]
 
+plt.figure()
 for species in species_list:
-    plt.figure()
-    for compartment in compartment_list:
-        ts = point_data.sel(species=species, compartment=compartment)
-        ts_array = ts.to_array().values  # convert the Dataset to a DataArray
-        plt.plot(ts['time'].values, ts_array.T, label=f"Compartment: {compartment}")
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Substance [amol]")
-    plt.title(f"Species: {species}")
-    plt.legend()
+    ts = point_data.sel(species=species, compartment=compartment)
+    ts_array = ts.to_array().values / volume
+    plt.semilogy(ts['time'].values, ts_array.T, label=species)
+plt.xlabel("Time [ms]")
+plt.ylabel("Average concentration [mM]")
+plt.title("Total substance in cell")
+plt.legend()
 plt.show()
 
 ### Point values
