@@ -58,11 +58,11 @@ class Simulation:
         self._time_step = None
 
 
-    def add_geometry(
+    def setup_geometry(
             self,
             mesh: ngs.Mesh,
     ) -> SimulationGeometry:
-        """Add a mesh to the simulation geometry.
+        """Add a mesh and set up the simulation geometry.
 
         :param mesh: The mesh representing the geometry of the simulation.
         :returns: The :class:`SimulationGeometry` obtained from the mesh.

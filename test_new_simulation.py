@@ -21,7 +21,7 @@ mesh.ngmesh.SetBCName(6, 'right_membrane')
 Draw(mesh)
 
 simulation = ecsim.Simulation('debug', result_root='results')
-geometry = simulation.add_geometry(mesh)
+geometry = simulation.setup_geometry(mesh)
 ecm = geometry.compartments['ecm']
 cell = geometry.compartments['cell']
 clamped_membrane = geometry.membranes['clamped']

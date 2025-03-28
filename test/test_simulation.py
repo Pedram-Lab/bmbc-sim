@@ -24,7 +24,7 @@ def simulation(tmp_path_factory):
 
     tmp_path = tmp_path_factory.mktemp("results")
     simulation = ecsim.Simulation('test_simulation', result_root=tmp_path)
-    simulation.add_geometry(mesh)
+    simulation.setup_geometry(mesh)
     return simulation
 
 
