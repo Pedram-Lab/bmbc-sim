@@ -1,4 +1,3 @@
-import os
 import tempfile
 import pytest
 
@@ -6,44 +5,10 @@ import ngsolve as ngs
 from netgen import occ
 from matplotlib import pyplot as plt
 import astropy.units as u
-import xarray as xr
 
 import ecsim
 from ecsim.simulation import recorder
-
-
-def get_point_values(dir):
-    """Read the point values from a simulation."""
-    zarr_path = os.path.join(dir, "point_data_0.zarr")
-    point_data = xr.open_zarr(zarr_path)
-
-    species_list = point_data.coords['species'].values
-    time = point_data.coords['time'].values
-    point = point_data.coords['point'].values[0]
-
-    values = {}
-    for species in species_list:
-        ts = point_data.sel(species=species, point=point)
-        values[species] = ts.to_array().values.squeeze()
-
-    return values, time
-
-
-def get_substance_values(dir):
-    """Read the substance values from a simulation."""
-    zarr_path = os.path.join(dir, "substance_data.zarr")
-    substance_data = xr.open_zarr(zarr_path)
-
-    species_list = substance_data.coords['species'].values
-    time = substance_data.coords['time'].values
-    compartment = substance_data.coords['compartment'].values[0]
-
-    values = {}
-    for species in species_list:
-        ts = substance_data.sel(species=species, compartment=compartment)
-        values[species] = ts.to_array().values.squeeze()
-
-    return values, time
+from conftest import get_point_values, get_substance_values
 
 
 def create_simulation(tmp_path):
@@ -66,17 +31,14 @@ def create_simulation(tmp_path):
     return simulation
 
 
-@pytest.fixture(scope="function")
-def simulation(tmp_path):
-    """Wrap the creation of a simulation in a fixture.
+def test_single_compartment_dynamics(tmp_path, visualize=False):
+    """Test that, in a single compartment:
+    - a single species can stay constant
+    - reactions can be used to simulate exponential decay
+    - reactions can be used to simulate linear growth
+    - two species can correctly react with each other
     """
-    return create_simulation(tmp_path)
-
-
-def test_single_species_stays_constant(simulation, visualize=False):
-    """Test that a the concentration of a single species stays constant with
-    only diffusion.
-    """
+    simulation = create_simulation(tmp_path)
     cell = simulation.simulation_geometry.compartments['cell']
 
     # Species that should stay constant
@@ -192,5 +154,4 @@ def test_single_species_stays_constant(simulation, visualize=False):
 
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as tmpdir:
-        sim = create_simulation(tmpdir)
-        test_single_species_stays_constant(sim, visualize=True)
+        test_single_compartment_dynamics(tmpdir, visualize=True)
