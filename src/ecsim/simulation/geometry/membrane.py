@@ -2,7 +2,7 @@ import astropy.units as u
 import ngsolve as ngs
 
 from ecsim.simulation.geometry.compartment import Compartment
-from ecsim.simulation.transport.transport import AbstractTransport
+from ecsim.simulation.transport.transport import Transport
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 
 
@@ -35,26 +35,30 @@ class Membrane:
     def add_transport(
             self,
             species: ChemicalSpecies,
-            transport: AbstractTransport,
-            source: Compartment,
-            target: Compartment | u.Quantity
+            transport: Transport,
+            source: Compartment | None,
+            target: Compartment | None
     ) -> None:
-        """Add a transport mechanism to the membrane.
+        """Add a transport mechanism to the membrane, transporting material from
+        the source to the target compartment. Either of the compartments can be
+        None if the membrane is a boundary.
 
         :param species: The chemical species to which the transport applies.
         :param transport: The transport mechanism to apply.
         :param source: The compartment from which the species is transported.
-        :param target: The compartment to which the species is transported, or a
-            quantity representing concentration value on the other side if the membrane
-            is connected to the outside of the domain (i.e., for a boundary condition).
+        :param target: The compartment to which the species is transported.
         """
-        other = self.neighbor(source)
-        is_boundary = isinstance(target, u.Quantity)
-        if other is None and not is_boundary:
-            raise ValueError("Target must be a concentration value if the membrane is a boundary.")
-        if not is_boundary and target != other:
-            raise ValueError(f"Membrane {self.name} does not connect "
-                             f"{source.name} and {target.name}.")
+        if source is None and target is None:
+            raise ValueError("At least one of source or target must be a compartment.")
+        elif source is None and self.neighbor(target) is not None:
+            raise ValueError("'{target}' is not a boundary compartment.")
+        elif target is None and self.neighbor(source) is not None:
+            raise ValueError("'{source}' is not a boundary compartment.")
+        elif source is not None and target is not None:
+            other = self.neighbor(source)
+            if target != other:
+                raise ValueError(f"Membrane {self.name} does not connect "
+                                 f"{source.name} and {target.name}.")
 
         # Add the transport to the respective compartments
         self._transport[(species, source, target)] = transport
@@ -76,7 +80,7 @@ class Membrane:
 
 
     def get_transport(self) -> dict[tuple[ChemicalSpecies, Compartment, Compartment | u.Quantity],
-                                    AbstractTransport]:
+                                    Transport]:
         """Get the transport mechanisms associated with this membrane.
 
         :return: A dictionary mapping tuples of (species, source compartment, target compartment)

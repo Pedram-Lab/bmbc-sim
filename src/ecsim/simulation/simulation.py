@@ -297,24 +297,23 @@ class Simulation:
         # Handle transport terms
         for membrane in self.simulation_geometry.membranes.values():
             for (species, source, target), transport in membrane.get_transport().items():
-                i = compartment_to_index[source]
-                source_concentration = self._concentrations[species].components[i]
-                source_test = test_functions[i]
+                concentration = self._concentrations[species]
 
-                is_boundary_condition = isinstance(target, u.Quantity)
-                if is_boundary_condition:
-                    target_concentration = to_simulation_units(target, 'molar concentration')
-                else:
-                    j = compartment_to_index[target]
-                    target_concentration = self._concentrations[species].components[j]
+                def get_index_and_concentration(compartment):
+                    if compartment is None:
+                        return None, None
+                    idx = compartment_to_index[compartment]
+                    return idx, concentration.components[idx]
 
-                flux = transport.flux(source_concentration, target_concentration)
-                flux = flux.Compile()
+                src_idx, src_concentration = get_index_and_concentration(source)
+                trg_idx, trg_concentration = get_index_and_concentration(target)
 
-                source_terms[species] += -flux * source_test * ngs.ds(membrane.name)
-                if not is_boundary_condition:
-                    target_test = test_functions[j]
-                    source_terms[species] += flux * target_test * ngs.ds(membrane.name)
+                flux = transport.flux(src_concentration, trg_concentration)
+
+                if src_idx is not None:
+                    source_terms[species] += -flux * test_functions[src_idx] * ngs.ds(membrane.name)
+                if trg_idx is not None:
+                    source_terms[species] += flux * test_functions[trg_idx] * ngs.ds(membrane.name)
 
         return source_terms
 

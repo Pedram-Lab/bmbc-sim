@@ -1,7 +1,7 @@
-from .transport import AbstractTransport, Linear
+from .transport import Transport, Linear
 
 
 __all__ = [
-    'AbstractTransport',
+    'Transport',
     'Linear',
 ]
