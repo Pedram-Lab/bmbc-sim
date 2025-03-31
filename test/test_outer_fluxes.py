@@ -41,6 +41,7 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     simulation = create_simulation(tmp_path)
     cell = simulation.simulation_geometry.compartments['cell']
     left_membrane = simulation.simulation_geometry.membranes['left']
+    right_membrane = simulation.simulation_geometry.membranes['right']
 
     # Species that should stay increase to the outside value
     too_low = simulation.add_species('too-low', valence=0)
@@ -62,6 +63,20 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     t = transport.MichaelisMenten(v_max=10 * u.amol / (u.um**2 * u.s), km=1 * u.mmol / u.L)
     left_membrane.add_transport(species=deplete, transport=t, source=cell, target=None)
 
+    # Constant influx that increases the species linearly
+    influx = simulation.add_species('influx', valence=0)
+    cell.initialize_species(influx, 0.1 * u.mmol / u.L)
+    cell.add_diffusion(influx, 1 * u.um**2 / u.ms)
+    t = transport.Channel(1 * u.amol / (u.s))
+    right_membrane.add_transport(species=influx, transport=t, source=None, target=cell)
+
+    # Time-dependent influx that adds a defined amount of substance
+    limited_influx = simulation.add_species('limited-influx', valence=0)
+    cell.initialize_species(limited_influx, 0.2 * u.mmol / u.L)
+    cell.add_diffusion(limited_influx, 1 * u.um**2 / u.ms)
+    t = transport.Channel(lambda t: t * (1 * u.s - t) * 6 * u.amol / u.s**3)
+    right_membrane.add_transport(species=limited_influx, transport=t, source=None, target=cell)
+
     # Run the simulation
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
 
@@ -79,6 +94,14 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     assert deplete_results[0] == pytest.approx(0.4)
     assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
 
+    influx_results = values['influx']
+    assert influx_results[0] == pytest.approx(0.1)
+    assert influx_results[-1] == pytest.approx(1.1, rel=1e-4)
+
+    limited_influx_results = values['limited-influx']
+    assert limited_influx_results[0] == pytest.approx(0.2)
+    assert limited_influx_results[-1] == pytest.approx(1.2, rel=1e-4)
+
     # Test substance values
     values, time = get_substance_values(simulation.result_directory)
     too_low_results = values['too-low']
@@ -93,8 +116,16 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     assert deplete_results[0] == pytest.approx(0.4)
     assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
 
+    influx_results = values['influx']
+    assert influx_results[0] == pytest.approx(0.1)
+    assert influx_results[-1] == pytest.approx(1.1, rel=1e-4)
+
+    limited_influx_results = values['limited-influx']
+    assert limited_influx_results[0] == pytest.approx(0.2)
+    assert limited_influx_results[-1] == pytest.approx(1.2, rel=1e-4)
+
     if visualize:
-        species = ['too-low', 'too-high', 'deplete']
+        species = ['too-low', 'too-high', 'deplete', 'influx', 'limited-influx']
         plt.figure()
         for s in species:
             plt.plot(time / 1000, values[s].T, label=s)

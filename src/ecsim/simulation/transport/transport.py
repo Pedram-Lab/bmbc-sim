@@ -148,3 +148,28 @@ class MichaelisMenten(Transport):
 
         # Compute the flux using the Michaelis-Menten equation
         return self.v_max * source / (self.km + source)
+
+
+class Channel(Transport):
+    """Channel transport mechanism that allows for a constant flux across the
+    membrane, independent of the concentration difference.
+    """
+    def __init__(
+            self,
+            flux: Coefficient
+    ):
+        """Create a new channel transport mechanism.
+
+        :param flux: The constant flux across the membrane (units: amount/time).
+        """
+        super().__init__()
+        self.flux_value = self._register_coefficient(flux, 'catalytic activity')
+
+
+    def flux(
+            self,
+            source: ngs.CoefficientFunction,
+            target: ngs.CoefficientFunction
+    ) -> ngs.CoefficientFunction:
+        # Channel flux is independent of the concentrations
+        return self.flux_value
