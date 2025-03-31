@@ -1,7 +1,8 @@
-from .transport import Transport, Linear
+from .transport import Transport, Linear, MichaelisMenten
 
 
 __all__ = [
     'Transport',
     'Linear',
+    'MichaelisMenten',
 ]

@@ -55,6 +55,13 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     cell.add_diffusion(too_high, 1 * u.um**2 / u.ms)
     left_membrane.add_transport(species=too_high, transport=t, source=cell, target=None)
 
+    # Michaelis-Menten transport that depletes the species
+    deplete = simulation.add_species('deplete', valence=0)
+    cell.initialize_species(deplete, 0.4 * u.mmol / u.L)
+    cell.add_diffusion(deplete, 1 * u.um**2 / u.ms)
+    t = transport.MichaelisMenten(v_max=10 * u.amol / (u.um**2 * u.s), km=1 * u.mmol / u.L)
+    left_membrane.add_transport(species=deplete, transport=t, source=cell, target=None)
+
     # Run the simulation
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
 
@@ -68,6 +75,10 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     assert too_high_results[0] == pytest.approx(0.8)
     assert too_high_results[-1] == pytest.approx(0.7, rel=1e-4)
 
+    deplete_results = values['deplete']
+    assert deplete_results[0] == pytest.approx(0.4)
+    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
+
     # Test substance values
     values, time = get_substance_values(simulation.result_directory)
     too_low_results = values['too-low']
@@ -78,8 +89,12 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     assert too_high_results[0] == pytest.approx(0.8)
     assert too_high_results[-1] == pytest.approx(0.7, rel=1e-4)
 
+    deplete_results = values['deplete']
+    assert deplete_results[0] == pytest.approx(0.4)
+    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
+
     if visualize:
-        species = ['too-low', 'too-high']
+        species = ['too-low', 'too-high', 'deplete']
         plt.figure()
         for s in species:
             plt.plot(time / 1000, values[s].T, label=s)

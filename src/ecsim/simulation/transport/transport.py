@@ -57,3 +57,32 @@ class Linear(Transport):
                                                         'molar concentration')
             return ngs.CoefficientFunction(outside_concentration)
         return cf
+
+
+class MichaelisMenten(Transport):
+    """Michaelis-Menten transport mechanism that computes the flux based on
+    the source concentration and a maximum rate.
+    """
+    def __init__(self, v_max: u.Quantity, km: u.Quantity):
+        """Create a new Michaelis-Menten transport mechanism.
+
+        :param v_max: Maximum rate of the transport (units: concentration/time).
+        :param km: Michaelis constant (units: concentration).
+        """
+        self.max_rate = v_max
+        self.km = km
+
+
+    def flux(
+            self,
+            source: ngs.CoefficientFunction,
+            target: ngs.CoefficientFunction
+    ) -> ngs.CoefficientFunction:
+        # Only the source concentration contributes to the flux
+        del target
+
+        # Compute the flux using the Michaelis-Menten equation
+        max_rate = to_simulation_units(self.max_rate)
+        km = to_simulation_units(self.km, 'molar concentration')
+
+        return max_rate * source / (km + source)
