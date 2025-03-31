@@ -167,6 +167,7 @@ class Simulation:
             t += self._time_step / 2
 
             # Full-step for reaction and transport
+            self._update_transport(t)
             for species, c in self._concentrations.items():
                 f = self._source_terms[species]
                 f.Assemble()
@@ -187,6 +188,18 @@ class Simulation:
             recorder.finalize(end_time=t)
 
         task_manager.__exit__(None, None, None)
+
+
+    def _update_transport(self, t: u.Quantity) -> None:
+        """Update the transport mechanisms based on the current time.
+
+        :param t: The current time in the simulation.
+        """
+        # Update all transport mechanisms
+        for membrane in self.simulation_geometry.membranes.values():
+            for transport in membrane.get_transport().values():
+                transport.update_flux(t)
+
 
     def _setup(self) -> None:
         """Set up the simulation by initializing the finite element matrices.
