@@ -23,7 +23,9 @@ class Transport(abc.ABC):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction,
     ) -> ngs.CoefficientFunction:
-        """Compute the boundary flux of the transport mechanism.
+        """Compute the boundary flux of the transport mechanism. The flux is
+        assumed to be the total flux across the membrane. In case a flux
+        density is readily available, it should be multiplied by :code:`membrane.area`.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.

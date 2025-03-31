@@ -321,12 +321,15 @@ class Simulation:
                 src_idx, src_concentration = get_index_and_concentration(source)
                 trg_idx, trg_concentration = get_index_and_concentration(target)
 
-                flux = transport.flux(src_concentration, trg_concentration)
+                # Calculate the flux density through the membrane
+                area = to_simulation_units(membrane.area, 'area')
+                flux_density = transport.flux(src_concentration, trg_concentration) / area
 
+                ds = ngs.ds(membrane.name)
                 if src_idx is not None:
-                    source_terms[species] += -flux * test_functions[src_idx] * ngs.ds(membrane.name)
+                    source_terms[species] += -flux_density * test_functions[src_idx] * ds
                 if trg_idx is not None:
-                    source_terms[species] += flux * test_functions[trg_idx] * ngs.ds(membrane.name)
+                    source_terms[species] += flux_density * test_functions[trg_idx] * ds
 
         return source_terms
 
