@@ -285,20 +285,20 @@ class Simulation:
                 all_reactants = ngs.CoefficientFunction(1.0)
                 for reactant in reactants:
                     all_reactants *= self._concentrations[reactant].components[i]
-                all_reactants = all_reactants.Compile()
+                forward_reaction = (k_f * all_reactants * test).Compile()
                 for reactant in reactants:
-                    source_terms[reactant] += -k_f * all_reactants * test * ngs.dx
+                    source_terms[reactant] += -forward_reaction * ngs.dx
                 for product in products:
-                    source_terms[product] += k_f * all_reactants * test * ngs.dx
+                    source_terms[product] += forward_reaction * ngs.dx
 
                 all_products = ngs.CoefficientFunction(1.0)
                 for product in products:
                     all_products *= self._concentrations[product].components[i]
-                all_products = all_products.Compile()
+                reverse_reaction = (k_r * all_products * test).Compile()
                 for reactant in reactants:
-                    source_terms[reactant] += k_r * all_products * test * ngs.dx
+                    source_terms[reactant] += reverse_reaction * ngs.dx
                 for product in products:
-                    source_terms[product] += -k_r * all_products * test * ngs.dx
+                    source_terms[product] += -reverse_reaction * ngs.dx
 
         # Handle transport terms
         for membrane in self.simulation_geometry.membranes.values():
@@ -311,12 +311,12 @@ class Simulation:
                     idx = compartment_to_index[compartment]
                     return idx, concentration.components[idx]
 
-                src_idx, src_concentration = get_index_and_concentration(source)
-                trg_idx, trg_concentration = get_index_and_concentration(target)
+                src_idx, src_c = get_index_and_concentration(source)
+                trg_idx, trg_c = get_index_and_concentration(target)
 
                 # Calculate the flux density through the membrane
                 area = to_simulation_units(membrane.area, 'area')
-                flux_density = transport.flux(src_concentration, trg_concentration) / area
+                flux_density = (transport.flux(src_c, trg_c) / area).Compile()
 
                 ds = ngs.ds(membrane.name)
                 if src_idx is not None:
