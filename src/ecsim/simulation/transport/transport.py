@@ -89,12 +89,12 @@ class Linear(Transport):
     ):
         """Create a new linear transport mechanism with the given permeability.
 
-        :param permeability: Permeability of the membrane (units: area/time).
+        :param permeability: Permeability of the membrane (units: area * length/time).
         :param outside_concentration: Concentration of the substance outside of
             the domain if one of the compartments is a boundary.
         """
         super().__init__()
-        self.permeability = self._register_coefficient(permeability, 'velocity')
+        self.permeability = self._register_coefficient(permeability, 'volumetric flow rate')
         self.outside_concentration = None if outside_concentration is None else \
             self._register_coefficient(outside_concentration, 'molar concentration')
 
@@ -132,11 +132,11 @@ class MichaelisMenten(Transport):
     ):
         """Create a new Michaelis-Menten transport mechanism.
 
-        :param v_max: Maximum rate of the transport (units: concentration/time).
+        :param v_max: Maximum rate of the transport (units: substance/time).
         :param km: Michaelis constant (units: concentration).
         """
         super().__init__()
-        self.v_max = self._register_coefficient(v_max)
+        self.v_max = self._register_coefficient(v_max, 'catalytic activity')
         self.km = self._register_coefficient(km, 'molar concentration')
 
 
@@ -162,7 +162,7 @@ class Channel(Transport):
     ):
         """Create a new channel transport mechanism.
 
-        :param flux: The constant flux across the membrane (units: amount/time).
+        :param flux: The constant flux across the membrane (units: substance/time).
         """
         super().__init__()
         self.flux_value = self._register_coefficient(flux, 'catalytic activity')

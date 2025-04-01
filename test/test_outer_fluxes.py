@@ -11,11 +11,11 @@ from ecsim.simulation import recorder, transport
 from conftest import get_point_values, get_substance_values
 
 
-def create_simulation(tmp_path):
+def create_simulation(tmp_path, width):
     """Create a simple test simulation with three regions that are sorted into two
     compartments."
     """
-    box = occ.Box((0, 0, 0), (1, 1, 1)).mat('cell').bc('reflective')
+    box = occ.Box((0, 0, 0), (1, 1, width)).mat('cell').bc('reflective')
 
     geo = occ.OCCGeometry(box)
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
@@ -31,14 +31,15 @@ def create_simulation(tmp_path):
     return simulation
 
 
-def test_single_compartment_fluxes(tmp_path, visualize=False):
+@pytest.mark.parametrize('width', [1, 2])
+def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     """Test that, in a single compartment:
     - linear flux drives a species to a constant value (from above and below)
     - Michaelis-Menten efflux depletes a species
     - constant influx increases a species linearly
     - time dependent influx adds a defined amount of substance
     """
-    simulation = create_simulation(tmp_path)
+    simulation = create_simulation(tmp_path, width)
     cell = simulation.simulation_geometry.compartments['cell']
     left_membrane = simulation.simulation_geometry.membranes['left']
     right_membrane = simulation.simulation_geometry.membranes['right']
@@ -47,7 +48,8 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     too_low = simulation.add_species('too-low', valence=0)
     cell.initialize_species(too_low, 0.5 * u.mmol / u.L)
     cell.add_diffusion(too_low, 1 * u.um**2 / u.ms)
-    t = transport.Linear(permeability=10 * u.nm / u.ms, outside_concentration=0.7 * u.mmol / u.L)
+    permeability = 10 * u.nm / u.ms * left_membrane.area
+    t = transport.Linear(permeability=permeability, outside_concentration=0.7 * u.mmol / u.L)
     left_membrane.add_transport(species=too_low, transport=t, source=cell, target=None)
 
     # Species that should stay decrease to the outside value
@@ -60,7 +62,7 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     deplete = simulation.add_species('deplete', valence=0)
     cell.initialize_species(deplete, 0.4 * u.mmol / u.L)
     cell.add_diffusion(deplete, 1 * u.um**2 / u.ms)
-    t = transport.MichaelisMenten(v_max=10 * u.amol / (u.um**2 * u.s), km=1 * u.mmol / u.L)
+    t = transport.MichaelisMenten(v_max=50 * u.amol / u.s, km=1 * u.mmol / u.L)
     left_membrane.add_transport(species=deplete, transport=t, source=cell, target=None)
 
     # Constant influx that increases the species linearly
@@ -76,7 +78,6 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
     cell.add_diffusion(variable_influx, 1 * u.um**2 / u.ms)
     t = transport.Channel(lambda t: t * (1 * u.s - t) * 6 * u.amol / u.s**3)
     right_membrane.add_transport(species=variable_influx, transport=t, source=None, target=cell)
-    right_membrane.area
 
     # Run the simulation
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
@@ -97,33 +98,33 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
 
     influx_results = values['constant-influx']
     assert influx_results[0] == pytest.approx(0.1)
-    assert influx_results[-1] == pytest.approx(1.1, rel=1e-4)
+    assert influx_results[-1] == pytest.approx(1 / width + 0.1, rel=1e-4)
 
     limited_influx_results = values['variable-influx']
     assert limited_influx_results[0] == pytest.approx(0.2)
-    assert limited_influx_results[-1] == pytest.approx(1.2, rel=1e-4)
+    assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-4)
 
     # Test substance values
     values, time = get_substance_values(simulation.result_directory)
     too_low_results = values['too-low']
-    assert too_low_results[0] == pytest.approx(0.5)
-    assert too_low_results[-1] == pytest.approx(0.7, rel=1e-4)
+    assert too_low_results[0] == pytest.approx(0.5 * width)
+    assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-4)
 
     too_high_results = values['too-high']
-    assert too_high_results[0] == pytest.approx(0.8)
-    assert too_high_results[-1] == pytest.approx(0.7, rel=1e-4)
+    assert too_high_results[0] == pytest.approx(0.8 * width)
+    assert too_high_results[-1] == pytest.approx(0.7 * width, rel=1e-4)
 
     deplete_results = values['deplete']
-    assert deplete_results[0] == pytest.approx(0.4)
+    assert deplete_results[0] == pytest.approx(0.4 * width)
     assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
 
     influx_results = values['constant-influx']
-    assert influx_results[0] == pytest.approx(0.1)
-    assert influx_results[-1] == pytest.approx(1.1, rel=1e-4)
+    assert influx_results[0] == pytest.approx(0.1 * width)
+    assert influx_results[-1] == pytest.approx(1 + 0.1 * width, rel=1e-4)
 
     limited_influx_results = values['variable-influx']
-    assert limited_influx_results[0] == pytest.approx(0.2)
-    assert limited_influx_results[-1] == pytest.approx(1.2, rel=1e-4)
+    assert limited_influx_results[0] == pytest.approx(0.2 * width)
+    assert limited_influx_results[-1] == pytest.approx(1 + 0.2 * width, rel=1e-4)
 
     if visualize:
         species = ['too-low', 'too-high', 'deplete', 'constant-influx', 'variable-influx']
@@ -148,4 +149,4 @@ def test_single_compartment_fluxes(tmp_path, visualize=False):
 
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as tmpdir:
-        test_single_compartment_fluxes(tmpdir, visualize=True)
+        test_single_compartment_fluxes(tmpdir, 2, visualize=True)
