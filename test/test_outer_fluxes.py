@@ -86,45 +86,45 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     values, time = get_point_values(simulation.result_directory)
     too_low_results = values['too-low']
     assert too_low_results[0] == pytest.approx(0.5)
-    assert too_low_results[-1] == pytest.approx(0.7, rel=1e-4)
+    assert too_low_results[-1] == pytest.approx(0.7, rel=1e-3)
 
     too_high_results = values['too-high']
     assert too_high_results[0] == pytest.approx(0.8)
-    assert too_high_results[-1] == pytest.approx(0.7, rel=1e-4)
+    assert too_high_results[-1] == pytest.approx(0.7, rel=1e-3)
 
     deplete_results = values['deplete']
     assert deplete_results[0] == pytest.approx(0.4)
-    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
+    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
 
     influx_results = values['constant-influx']
     assert influx_results[0] == pytest.approx(0.1)
-    assert influx_results[-1] == pytest.approx(1 / width + 0.1, rel=1e-4)
+    assert influx_results[-1] == pytest.approx(1 / width + 0.1, rel=1e-3)
 
     limited_influx_results = values['variable-influx']
     assert limited_influx_results[0] == pytest.approx(0.2)
-    assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-4)
+    assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-3)
 
     # Test substance values
     values, time = get_substance_values(simulation.result_directory)
     too_low_results = values['too-low']
     assert too_low_results[0] == pytest.approx(0.5 * width)
-    assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-4)
+    assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
 
     too_high_results = values['too-high']
     assert too_high_results[0] == pytest.approx(0.8 * width)
-    assert too_high_results[-1] == pytest.approx(0.7 * width, rel=1e-4)
+    assert too_high_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
 
     deplete_results = values['deplete']
     assert deplete_results[0] == pytest.approx(0.4 * width)
-    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-4)
+    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
 
     influx_results = values['constant-influx']
     assert influx_results[0] == pytest.approx(0.1 * width)
-    assert influx_results[-1] == pytest.approx(1 + 0.1 * width, rel=1e-4)
+    assert influx_results[-1] == pytest.approx(1 + 0.1 * width, rel=1e-3)
 
     limited_influx_results = values['variable-influx']
     assert limited_influx_results[0] == pytest.approx(0.2 * width)
-    assert limited_influx_results[-1] == pytest.approx(1 + 0.2 * width, rel=1e-4)
+    assert limited_influx_results[-1] == pytest.approx(1 + 0.2 * width, rel=1e-3)
 
     if visualize:
         species = ['too-low', 'too-high', 'deplete', 'constant-influx', 'variable-influx']

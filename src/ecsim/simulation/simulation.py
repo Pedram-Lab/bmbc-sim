@@ -157,30 +157,22 @@ class Simulation:
 
         t = start_time.copy()
         for _ in trange(n_steps):
-            # Update the concentrations via Strang splitting
-            # Half-step for diffusion
-            for species, c in self._concentrations.items():
-                a = self._stiffness[species]
-                m_star = self._time_stepping_matrix[species]
-                residual = -self._dt / 2 * (a.mat * c.vec)
-                c.vec.data += m_star * residual
-            t += self._time_step / 2
-
-            # Full-step for reaction and transport
+            # Update the concentrations via first-order operator splitting
+            # Full step for reaction and transport
             self._update_transport(t)
             for species, c in self._concentrations.items():
                 f = self._source_terms[species]
                 f.Assemble()
                 c.vec.data += self._dt * (self._mass_inv * f.vec)
 
-            # Half-step for diffusion
+            # Full step for diffusion
             for species, c in self._concentrations.items():
                 a = self._stiffness[species]
                 m_star = self._time_stepping_matrix[species]
-                residual = -self._dt / 2 * (a.mat * c.vec)
+                residual = -self._dt * (a.mat * c.vec)
                 c.vec.data += m_star * residual
-            t += self._time_step / 2
 
+            t += self._time_step
             for recorder in self._recorders:
                 recorder.record(current_time=t)
 
@@ -262,10 +254,11 @@ class Simulation:
             # Set up the time-stepping matrix (inverted perturbed mass matrix)
             mass += test * trial * ngs.dx
 
-        # Assemble the mass and stiffness matrices and invert the time-stepping matrix
+        # Assemble the mass and stiffness matrices
         mass.Assemble()
         stiffness.Assemble()
 
+        # Invert the mass matrix and the matrix for the implicit mid-point rule
         m_star = mass.mat.CreateMatrix()
         m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
         time_stepping_matrix = m_star.Inverse(active_dofs)
