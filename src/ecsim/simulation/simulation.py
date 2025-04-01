@@ -189,7 +189,7 @@ class Simulation:
         """
         # Update all transport mechanisms
         for membrane in self.simulation_geometry.membranes.values():
-            for transport in membrane.get_transport().values():
+            for _, _, _, transport in membrane.get_transport():
                 transport.update_flux(t)
 
 
@@ -302,7 +302,7 @@ class Simulation:
 
         # Handle transport terms
         for membrane in self.simulation_geometry.membranes.values():
-            for (species, source, target), transport in membrane.get_transport().items():
+            for species, source, target, transport in membrane.get_transport():
                 concentration = self._concentrations[species]
 
                 def get_index_and_concentration(compartment):

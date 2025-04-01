@@ -29,7 +29,7 @@ class Membrane:
         self.name = name
         self.connects = connects
         self.area = area
-        self._transport = {}
+        self._transport = []
 
 
     def add_transport(
@@ -61,7 +61,7 @@ class Membrane:
                                  f"{source.name} and {target.name}.")
 
         # Add the transport to the respective compartments
-        self._transport[(species, source, target)] = transport
+        self._transport.append((species, source, target, transport))
 
 
     def neighbor(self, compartment: Compartment) -> Compartment:
@@ -79,12 +79,10 @@ class Membrane:
                          f"is not connected to membrane '{self.name}'.")
 
 
-    def get_transport(self) -> dict[tuple[ChemicalSpecies, Compartment, Compartment | u.Quantity],
-                                    Transport]:
+    def get_transport(self) -> tuple[ChemicalSpecies, Compartment, Compartment, Transport]:
         """Get the transport mechanisms associated with this membrane.
 
-        :return: A dictionary mapping tuples of (species, source compartment, target compartment)
-            to their corresponding transport mechanisms.
+        :return: A list of (species, source compartment, target compartment, transport).
         """
         return self._transport
 

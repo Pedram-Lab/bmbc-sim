@@ -65,12 +65,13 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     t = transport.MichaelisMenten(v_max=50 * u.amol / u.s, km=1 * u.mmol / u.L)
     left_membrane.add_transport(species=deplete, transport=t, source=cell, target=None)
 
-    # Constant influx that increases the species linearly
+    # Constant influx (x5) that increases the species linearly
     constant_influx = simulation.add_species('constant-influx', valence=0)
     cell.initialize_species(constant_influx, 0.1 * u.mmol / u.L)
     cell.add_diffusion(constant_influx, 1 * u.um**2 / u.ms)
-    t = transport.Channel(1 * u.amol / (u.s))
-    right_membrane.add_transport(species=constant_influx, transport=t, source=None, target=cell)
+    t = transport.Channel(0.2 * u.amol / (u.s))
+    for _ in range(5):
+        right_membrane.add_transport(species=constant_influx, transport=t, source=None, target=cell)
 
     # Time-dependent influx that adds a defined amount of substance
     variable_influx = simulation.add_species('variable-influx', valence=0)
