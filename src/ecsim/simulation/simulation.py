@@ -152,10 +152,10 @@ class Simulation:
                 mesh=self.simulation_geometry.mesh,
                 compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
-                start_time=start_time
+                start_time=start_time.copy()
             )
 
-        t = start_time
+        t = start_time.copy()
         for _ in trange(n_steps):
             # Update the concentrations via Strang splitting
             # Half-step for diffusion

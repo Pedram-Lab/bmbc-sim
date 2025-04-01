@@ -23,7 +23,7 @@ def create_simulation(tmp_path):
     mesh.ngmesh.SetBCName(0, 'left')
     mesh.ngmesh.SetBCName(1, 'right')
 
-    simulation = ecsim.Simulation('test_simulation', result_root=tmp_path)
+    simulation = ecsim.Simulation('single_compartment_test', result_root=tmp_path)
     simulation.setup_geometry(mesh)
     simulation.add_recorder(recorder.PointValues(10 * u.ms, points=[(0.5, 0.5, 0.5)]))
     simulation.add_recorder(recorder.CompartmentSubstance(10 * u.ms))
