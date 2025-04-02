@@ -84,67 +84,67 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
 
     # Test point values
-    values, time = get_point_values(simulation.result_directory)
-    too_low_results = values['too-low']
+    pnt_values, time = get_point_values(simulation.result_directory)
+    too_low_results = pnt_values['too-low']
     assert too_low_results[0] == pytest.approx(0.5)
     assert too_low_results[-1] == pytest.approx(0.7, rel=1e-3)
 
-    too_high_results = values['too-high']
+    too_high_results = pnt_values['too-high']
     assert too_high_results[0] == pytest.approx(0.8)
     assert too_high_results[-1] == pytest.approx(0.7, rel=1e-3)
 
-    deplete_results = values['deplete']
+    deplete_results = pnt_values['deplete']
     assert deplete_results[0] == pytest.approx(0.4)
     assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
 
-    influx_results = values['constant-influx']
+    influx_results = pnt_values['constant-influx']
     assert influx_results[0] == pytest.approx(0.1)
     assert influx_results[-1] == pytest.approx(1 / width + 0.1, rel=1e-3)
 
-    limited_influx_results = values['variable-influx']
+    limited_influx_results = pnt_values['variable-influx']
     assert limited_influx_results[0] == pytest.approx(0.2)
     assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-3)
 
     # Test substance values
-    values, time = get_substance_values(simulation.result_directory)
-    too_low_results = values['too-low']
+    sbst_values, _ = get_substance_values(simulation.result_directory)
+    too_low_results = sbst_values['too-low']
     assert too_low_results[0] == pytest.approx(0.5 * width)
     assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
 
-    too_high_results = values['too-high']
+    too_high_results = sbst_values['too-high']
     assert too_high_results[0] == pytest.approx(0.8 * width)
     assert too_high_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
 
-    deplete_results = values['deplete']
+    deplete_results = sbst_values['deplete']
     assert deplete_results[0] == pytest.approx(0.4 * width)
     assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
 
-    influx_results = values['constant-influx']
+    influx_results = sbst_values['constant-influx']
     assert influx_results[0] == pytest.approx(0.1 * width)
     assert influx_results[-1] == pytest.approx(1 + 0.1 * width, rel=1e-3)
 
-    limited_influx_results = values['variable-influx']
+    limited_influx_results = sbst_values['variable-influx']
     assert limited_influx_results[0] == pytest.approx(0.2 * width)
     assert limited_influx_results[-1] == pytest.approx(1 + 0.2 * width, rel=1e-3)
 
     if visualize:
         species = ['too-low', 'too-high', 'deplete', 'constant-influx', 'variable-influx']
-        plt.figure()
-        for s in species:
-            plt.plot(time / 1000, values[s].T, label=s)
-        plt.xlabel("Time [s]")
-        plt.ylabel("Concentration [mM]")
-        plt.title('Value in the center of the cell')
-        plt.legend()
-        plt.show()
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, gridspec_kw={'wspace': 0})
+        fig.suptitle(f"Volume: {cell.volume}")
 
-        plt.figure()
         for s in species:
-            plt.plot(time / 1000, values[s].T, label=s)
-        plt.xlabel("Time [s]")
-        plt.ylabel("Substance [amol]")
-        plt.title('Value over the whole cell')
-        plt.legend()
+            ax1.plot(time / 1000, pnt_values[s].T, label=s)
+        ax1.set_xlabel("Time [s]")
+        ax1.set_title('Concentration [mM]')
+        ax1.grid(True)
+        ax1.legend()
+
+        for s in species:
+            ax2.plot(time / 1000, sbst_values[s].T, label=s)
+        ax2.set_xlabel("Time [s]")
+        ax2.set_title('Substance [amol]')
+        ax2.grid(True)
+
         plt.show()
 
 

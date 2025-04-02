@@ -71,30 +71,30 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
 
     # Test point values
-    values, time = get_point_values(simulation.result_directory)
-    fixed_results = values['fixed']
+    pnt_values, time = get_point_values(simulation.result_directory)
+    fixed_results = pnt_values['fixed']
     assert len(fixed_results) == 101
     assert fixed_results[0] == pytest.approx(1.1)
     assert fixed_results[-1] == pytest.approx(1.1)
 
-    decay_results = values['decay']
+    decay_results = pnt_values['decay']
     assert decay_results[0] == pytest.approx(1.2)
     assert 0.2 < decay_results[-1] < 1.2
 
-    growth_results = values['growth']
+    growth_results = pnt_values['growth']
     assert growth_results[0] == pytest.approx(1.3)
     assert growth_results[-1] == pytest.approx(2.3)
 
-    reactant_1_results = values['reactant_1']
+    reactant_1_results = pnt_values['reactant_1']
     assert reactant_1_results[0] == pytest.approx(1.4)
     assert reactant_1_results[-1] < 1.4
 
-    reactant_2_results = values['reactant_2']
+    reactant_2_results = pnt_values['reactant_2']
     assert reactant_2_results[0] == pytest.approx(1.5)
     assert reactant_2_results[-1] < 1.5
     assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
 
-    product_results = values['product']
+    product_results = pnt_values['product']
     assert product_results[0] == pytest.approx(0)
     assert product_results[-1] > 0
     assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
@@ -102,53 +102,55 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
 
 
     # Test substance values
-    values, time = get_substance_values(simulation.result_directory)
-    fixed_results = values['fixed']
+    sbst_values, _ = get_substance_values(simulation.result_directory)
+    fixed_results = sbst_values['fixed']
     assert len(fixed_results) == 101
     assert fixed_results[0] == pytest.approx(1.1)
     assert fixed_results[-1] == pytest.approx(1.1)
 
-    decay_results = values['decay']
+    decay_results = sbst_values['decay']
     assert decay_results[0] == pytest.approx(1.2)
     assert 0.2 < decay_results[-1] < 1.2
 
-    growth_results = values['growth']
+    growth_results = sbst_values['growth']
     assert growth_results[0] == pytest.approx(1.3)
     assert growth_results[-1] == pytest.approx(2.3)
 
-    reactant_1_results = values['reactant_1']
+    reactant_1_results = sbst_values['reactant_1']
     assert reactant_1_results[0] == pytest.approx(1.4)
     assert reactant_1_results[-1] < 1.4
 
-    reactant_2_results = values['reactant_2']
+    reactant_2_results = sbst_values['reactant_2']
     assert reactant_2_results[0] == pytest.approx(1.5)
     assert reactant_2_results[-1] < 1.5
     assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
 
-    product_results = values['product']
+    product_results = sbst_values['product']
     assert product_results[0] == pytest.approx(0)
     assert product_results[-1] > 0
     assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
     assert all(p < r2 for p, r2 in zip(product_results, reactant_2_results))
 
     if visualize:
+        # Create a single figure with two side-by-side panels sharing the same y-axis.
         species = ['fixed', 'decay', 'growth', 'reactant_1', 'reactant_2', 'product']
-        plt.figure()
-        for s in species:
-            plt.plot(time / 1000, values[s].T, label=s)
-        plt.xlabel("Time [s]")
-        plt.ylabel("Concentration [mM]")
-        plt.title('Value in the center of the cell')
-        plt.legend()
-        plt.show()
+        _, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), sharey=True, gridspec_kw={'wspace': 0})
 
-        plt.figure()
+        # Left panel: Concentration [mM]
         for s in species:
-            plt.plot(time / 1000, values[s].T, label=s)
-        plt.xlabel("Time [s]")
-        plt.ylabel("Substance [amol]")
-        plt.title('Value over the whole cell')
-        plt.legend()
+            ax1.plot(time / 1000, pnt_values[s].T, label=s)
+        ax1.set_xlabel("Time [s]")
+        ax1.set_title('Concentration [mM]')
+        ax1.grid(True)
+        ax1.legend()
+
+        # Right panel: Substance [amol]
+        for s in species:
+            ax2.plot(time / 1000, sbst_values[s].T, label=s)
+        ax2.set_xlabel("Time [s]")
+        ax2.set_title('Substance [amol]')
+        ax2.grid(True)
+
         plt.show()
 
 
