@@ -10,9 +10,9 @@ from ecsim import find_latest_results
 latest_folder = find_latest_results("sala", "results")
 
 ### Full snapshots
-snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
-data = pv.read(snapshot_file)
-data.plot(scalars='Ca', show_edges=True)
+# snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
+# data = pv.read(snapshot_file)
+# data.plot(scalars='Ca', show_edges=True)
 
 
 ### Compartment substances
@@ -43,14 +43,17 @@ time = point_data.coords['time'].values
 points = point_data.coords['point'].values
 x_coords = [xyz[0] for xyz in point_data.attrs['point_coordinates']]
 
+dist = [0.25, 5.25, 10.25, 19.75]
 for species in species_list:
     plt.figure()
-    for point in points:
+    for d, point in zip(dist, points):
         ts = point_data.sel(species=species, point=point)
-        ts_array = ts.to_array().values
-        plt.semilogy(time, ts_array.T, label=f"Point {point}")
+        ts_array = ts.to_array().values * 1000
+        plt.semilogy(time, ts_array.T, label=f"Distance {d}")
     plt.xlabel("Time [ms]")
-    plt.ylabel("Concentration [mM]")
+    plt.ylabel("Concentration [µM]")
+    plt.ylim(4e-2, 3e1)
+    plt.xlim(0, 2000)
     plt.title(f"Species: {species}")
     plt.legend()
 plt.show()

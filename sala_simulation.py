@@ -1,7 +1,6 @@
 """This script recreates the simulation of [Sala, Hernández-Cruz; 1990]."""
 import ngsolve as ngs
 from netgen import occ
-from ngsolve.webgui import Draw
 import astropy.units as u
 
 import ecsim
@@ -12,7 +11,8 @@ from ecsim.simulation import recorder, transport
 cell = occ.Sphere((0, 0, 0), 20).mat('cell').bc('membrane')
 
 geo = occ.OCCGeometry(cell)
-mesh = ngs.Mesh(geo.GenerateMesh(maxh=5))
+mesh = ngs.Mesh(geo.GenerateMesh(maxh=2))
+# from ngsolve.webgui import Draw
 # Draw(mesh)
 
 # Initialize the simulation
@@ -89,36 +89,38 @@ cell.add_reaction(
 
 # Compute transport coefficients
 u_max = 2 * u.pmol / (u.cm**2 * u.s)
-# TODO: only divide by volume because area comes from integration anyway?
-v_max = u_max * membrane.area / cell.volume
-k_m = 0.83 * uM
+v_max = u_max * membrane.area
+km = 0.83 * uM
 
+I = 5 * u.nA
+t_off = 100 * u.ms
+F = 96485.3321 * u.s * u.A / u.mol
+channel_current = I / (2 * F)
 
-# # Add transport mechanisms to the membranes
-# # Time dependent influx
-# current = 5 * u.nA
-# pulse_duration = 100 * u.ms
-# membrane.add_transport(
-#     species=ca,
-#     transport=transport.Linear(permeability=1 * u.umol / (u.L * u.s)),
-#     source=cell,
-#     target=3 * u.umol / u.L
-# )
-# # MM-type pump out of the cell (dependent on inside concentration)
-# membrane.add_transport(
-#     species=ca,
-#     transport=transport.MichaelisMenten(v_max=v_max, k_m=k_m),
-#     source=cell,
-#     target=3 * u.umol / u.L
-# )
-# # MM-type leak into the cell (dependent on outside concentration)
-# ca_0 = 0.05 * u.umol / u.L  # outside concentration
-# membrane.add_transport(
-#     species=ca,
-#     transport=transport.MichaelisMenten(v_max=v_max, k_m=k_m),
-#     source=cell,
-#     target=3 * u.umol / u.L
-# )
+# Add transport mechanisms to the membranes
+# Time dependent influx
+membrane.add_transport(
+    species=ca,
+    transport=transport.Channel(lambda t: channel_current if t < t_off else 0 * u.mol / u.s),
+    source=None,
+    target=cell
+)
+# MM-type extrusion out of the cell (dependent on inside concentration)
+membrane.add_transport(
+    species=ca,
+    transport=transport.MichaelisMenten(v_max=v_max, km=km),
+    source=cell,
+    target=None
+)
+# MM-type leak into the cell (dependent on outside concentration)
+ca_0 = 0.05 * u.umol / u.L
+channel_flux = v_max * ca_0 / (km + ca_0)
+membrane.add_transport(
+    species=ca,
+    transport=transport.Channel(channel_flux),
+    source=None,
+    target=cell
+)
 
 
 # Add recorders to capture simulation data
