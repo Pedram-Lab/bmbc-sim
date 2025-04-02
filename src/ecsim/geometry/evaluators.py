@@ -2,6 +2,7 @@
 Classes for evaluating coefficient functions in regions of interest.
 """
 from typing import Sequence
+import warnings
 
 import numpy as np
 from ngsolve import Mesh, CoefficientFunction
@@ -18,6 +19,11 @@ class PointEvaluator:
         :param mesh: The NGSolve mesh object.
         :param points: A numpy array of shape (n, 3) representing the n points to evaluate.
         """
+        warnings.warn(
+            "PointEvaluator is deprecated and will be removed in future releases.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if points.shape[1] != 3:
             raise ValueError("Points must have shape (n, 3).")
 
@@ -55,6 +61,11 @@ class LineEvaluator(PointEvaluator):
         :param end: A numpy array of shape (3,) representing the ending point of the line.
         :param n: The number of points to evaluate along the line segment.
         """
+        warnings.warn(
+            "LineEvaluator is deprecated and will be removed in future releases.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         # Generate the coordinates for the line segment
         x_coords = np.linspace(start[0], end[0], n)
         y_coords = np.linspace(start[1], end[1], n)
