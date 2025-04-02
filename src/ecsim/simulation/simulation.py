@@ -1,269 +1,359 @@
-from math import ceil
-from typing import Dict, Iterable
+import logging
+import os
+from datetime import datetime
 
-import astropy.units as au
-import astropy.constants as const
-from ngsolve import Mesh, FESpace, H1, Compress, VOL, BND, BilinearForm, LinearForm, grad, dx, ds, GridFunction, CoefficientFunction, Integrate
-from pyngcore import BitArray
+import astropy.units as u
+import ngsolve as ngs
+from tqdm import trange
 
-from ecsim.units import *
-from .simulation_agents import ChemicalSpecies, Reaction, ChannelFlux
+from ecsim.logging import logger
+from ecsim.simulation.recorder import Recorder
+from ecsim.simulation.geometry.compartment import Compartment
+from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
+from ecsim.units import to_simulation_units
+from .simulation_agents import ChemicalSpecies
 
 
 class Simulation:
+    """Build and execute a simulation of a reaction-diffusion system.
+    """
     def __init__(
             self,
-            mesh: Mesh,
+            name: str,
             *,
-            time_step: au.Quantity,
-            t_end: au.Quantity,
-            order: int = 2
+            result_root: str,
     ):
-        self.mesh = mesh
-        self._time_step_size = convert(time_step, TIME)
-        self._t_end = convert(t_end, TIME)
-        self._compartments = {name: i for i, name in enumerate(mesh.GetMaterials())}
-        compartment_fes_list = [Compress(H1(mesh, order=order, definedon=mesh.Materials(name))) for name in mesh.GetMaterials()]
-        constraint_fes = FESpace("number", mesh)
-        self._fes = FESpace(compartment_fes_list + [constraint_fes])
-        self._species = {}
-        self._reactions = []
-        self._channels = []
-        self._diffusion_matrix = {}
-        self._time_stepping_matrix = {}
-        self._source_terms = {}
-        self.concentrations = {}
-        self._a_pot_inv = {}
-        self._f_pot = None
-        self._potential = GridFunction(self._fes)
+        """Initialize a new simulation.
 
-    @property
-    def n_time_steps(self) -> int:
-        return int(ceil(self._t_end / self._time_step_size))
+        :param name: The name of the simulation (used for naming the result directory).
+        :param result_root: The directory under which simulation results will be
+            stored.
+        """
+        self.simulation_geometry = None
+        self.species: list[ChemicalSpecies] = []
+
+        # Set up result directory and logging
+        time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        self.result_directory = os.path.join(result_root, f"{name}_{time_stamp}")
+        if not os.path.exists(self.result_directory):
+            os.makedirs(self.result_directory)
+
+        file_handler = logging.FileHandler(os.path.join(self.result_directory, "simulation.log"))
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.DEBUG)
+        logger.addHandler(file_handler)
+
+        # Set up empty containers for simulation data
+        self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
+        self ._rd_fes: ngs.FESpace = None
+        self._stiffness: dict[ChemicalSpecies, ngs.BilinearForm] = {}
+        self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
+        self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
+        self._dt = None
+        self._mass_inv: ngs.BaseMatrix = None
+        self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
+
+        self._recorders: list[Recorder] = []
+        self._time_step = None
+
+
+    def setup_geometry(
+            self,
+            mesh: ngs.Mesh,
+    ) -> SimulationGeometry:
+        """Add a mesh and set up the simulation geometry.
+
+        :param mesh: The mesh representing the geometry of the simulation.
+        :returns: The :class:`SimulationGeometry` obtained from the mesh.
+        :raises ValueError: If the geometry has already been set.
+        """
+        if self.simulation_geometry is not None:
+            raise ValueError("Geometry has already been set.")
+        self.simulation_geometry = SimulationGeometry(mesh)
+        return self.simulation_geometry
+
 
     def add_species(
             self,
             name: str,
             *,
-            diffusivity: Dict[str, au.Quantity],
             valence: int = 0,
-            clamp: Dict[str, au.Quantity] = None
     ) -> ChemicalSpecies:
         """
         Add a new :class:`ChemicalSpecies` to the simulation.
-        :param name: Name of the species.
-        :param diffusivity: Diffusivity in different compartments; if not given, the species is not present in the compartment.
-        :param valence: Valence (electrical charge) of the species.
-        :param clamp: Clamp concentration to initial value on the given boundaries.
-        :return:
+        
+        :param name: The name of the species.
+        :param valence: The valence (i.e., unit charge) of the species (default is 0).
+        :returns: The added :class:`ChemicalSpecies`.
+        :raises ValueError: If the species already exists in the simulation.
         """
-        if name in self._species:
-            raise ValueError(f"Species {name} already exists.") from None
-        for compartment in diffusivity:
-            if compartment not in self._compartments:
-                raise ValueError(f"Compartment {compartment} not found in the mesh.")
-        clamp = clamp or {}
-        for boundary in clamp:
-            if boundary not in self.mesh.GetBoundaries():
-                raise ValueError(f"Boundary {boundary} not found in the mesh.")
+        species = ChemicalSpecies(name, valence=valence)
+        if species in self.species:
+            raise ValueError(f"Species {species.name} already exists.") from None
 
-        self._species[name] = ChemicalSpecies(name, diffusivity, clamp, valence)
-        return self._species[name]
+        self.species.append(species)
+        logger.debug("Add species %s to simulation.", species)
 
-    def add_reaction(
+        return species
+
+
+    def add_recorder(
+            self,
+            recorder: Recorder,
+    ) -> None:
+        """Add a recorder to the simulation to record data during the simulation.
+
+        :param recorder: An instance of a subclass of :class:`Recorder`.
+        """
+        if not isinstance(recorder, Recorder):
+            raise TypeError("Recorder must be an instance of a subclass of Recorder")
+        self._recorders.append(recorder)
+
+
+    def run(
             self,
             *,
-            reactants: ChemicalSpecies | Iterable[ChemicalSpecies],
-            products: ChemicalSpecies | Iterable[ChemicalSpecies],
-            kf: Dict[str, au.Quantity],
-            kr: Dict[str, au.Quantity]
-    ):
+            end_time: u.Quantity,
+            time_step: u.Quantity,
+            start_time: u.Quantity = 0 * u.s,
+    ) -> None:
+        """Run the simulation until a given end time.
+
+        :param end_time: The end time of the simulation.
+        :param time_step: The time step to use for the simulation.
+        :param start_time: The start time of the simulation.
+        :raises ValueError: If the end time is not greater than the start time.
         """
-        Add a reaction r_1 + r_2 + ... <-> p_1 + p_2 + ... with forward and reverse rate constants.
-        :param reactants: Participating :class:`ChemicalSpecies` in the reaction.
-        :param products: Products of the reaction.
-        :param kf: Forward rate constant per compartment.
-        :param kr: Reverse rate constant per compartment.
+        if end_time <= start_time:
+            raise ValueError("End time must be greater than start time.")
+        if time_step <= 0 * u.s:
+            raise ValueError(f"Time step must be positive, not {time_step}.")
+
+        n_steps = int((end_time - start_time) / time_step)
+        if n_steps < 1:
+            raise ValueError("Number of steps must be at least 1.")
+        logger.info("Running simulation for %d steps of size %s.", n_steps, time_step)
+
+        self._dt = to_simulation_units(time_step, 'time')
+        self._time_step = time_step
+
+        # TODO: make number of threads configurable
+        ngs.SetNumThreads(4)
+        task_manager = ngs.TaskManager()
+        task_manager.__enter__()
+
+        self._setup()
+
+        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
+        for recorder in self._recorders:
+            recorder.setup(
+                directory=self.result_directory,
+                mesh=self.simulation_geometry.mesh,
+                compartments=self.simulation_geometry.compartments.values(),
+                concentrations=name_to_concentration,
+                start_time=start_time.copy()
+            )
+
+        t = start_time.copy()
+        for _ in trange(n_steps):
+            # Update the concentrations via first-order operator splitting
+            # Full step for reaction and transport
+            self._update_transport(t)
+            for species, c in self._concentrations.items():
+                f = self._source_terms[species]
+                f.Assemble()
+                c.vec.data += self._dt * (self._mass_inv * f.vec)
+
+            # Full step for diffusion
+            for species, c in self._concentrations.items():
+                a = self._stiffness[species]
+                m_star = self._time_stepping_matrix[species]
+                residual = -self._dt * (a.mat * c.vec)
+                c.vec.data += m_star * residual
+
+            t += self._time_step
+            for recorder in self._recorders:
+                recorder.record(current_time=t)
+
+        for recorder in self._recorders:
+            recorder.finalize(end_time=t)
+
+        task_manager.__exit__(None, None, None)
+
+
+    def _update_transport(self, t: u.Quantity) -> None:
+        """Update the transport mechanisms based on the current time.
+
+        :param t: The current time in the simulation.
         """
-        if not isinstance(reactants, Iterable):
-            reactants = [reactants]
-        if not isinstance(products, Iterable):
-            products = [products]
-        reaction = Reaction(reactants, products, kf, kr)
-        # TODO: check if compartments exist and all species are present in the compartments
-        self._reactions.append(reaction)
+        # Update all transport mechanisms
+        for membrane in self.simulation_geometry.membranes.values():
+            for _, _, _, transport in membrane.get_transport():
+                transport.update_flux(t)
 
-    def add_channel_flux(self, left: str, right: str, boundary: str, rate: au.Quantity):
+
+    def _setup(self) -> None:
+        """Set up the simulation by initializing the finite element matrices.
+        
+        :param time_step: The time step to use for the simulation.
         """
-        Add a channel flux between two compartments.
-        :param left: Name of the left compartment.
-        :param right: Name of the right compartment.
-        :param boundary: Name of the boundary where the flux occurs.
-        :param rate: Rate of the flux.
+        # Set up the finite element spaces
+        logger.info("Setting up finite element spaces...")
+        mesh = self.simulation_geometry.mesh
+        compartments = self.simulation_geometry.compartments.values()
+        for compartment in compartments:
+            regions = '|'.join(compartment.get_region_names(full_names=True))
+            fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=regions))
+            self._compartment_fes[compartment] = fes
+            logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
+
+        # Note that the order of the compartment spaces is the same as the order of compartments
+        self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
+                                    for compartment in compartments])
+        logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
+                    self._rd_fes.ndof)
+
+        for species in self.species:
+            concentration, mass_inv, stiffness, time_stepping_matrix = self._setup_lhs(species)
+            self._concentrations[species] = concentration
+            self._stiffness[species] = stiffness
+            self._time_stepping_matrix[species] = time_stepping_matrix
+            self._mass_inv = mass_inv
+
+        self._source_terms = self._setup_rhs()
+
+
+    def _setup_lhs(self, species):
+        """Set up the left-hand side of the finite element equations for a given species.
         """
-        if left not in self._compartments:
-            raise ValueError(f"Compartment {left} not found in the mesh.")
-        if right not in self._compartments:
-            raise ValueError(f"Compartment {right} not found in the mesh.")
-        if boundary not in self.mesh.GetBoundaries():
-            raise ValueError(f"Boundary {boundary} not found in the mesh.")
-        # TODO: check if the compartments are adjacent and the boundary is between them
+        compartments = self.simulation_geometry.compartments.values()
+        mass = ngs.BilinearForm(self._rd_fes, check_unused=False)
+        stiffness = ngs.BilinearForm(self._rd_fes, check_unused=False)
+        active_dofs = ngs.BitArray(self._rd_fes.ndof)
+        active_dofs[:] = True
+        test_and_trial = list(zip(*self._rd_fes.TnT()))
+        concentration = ngs.GridFunction(self._rd_fes)
 
-        self._channels.append(ChannelFlux(left, right, boundary, rate))
+        for i, compartment in enumerate(compartments):
+            # Initialize data structures for the species
+            logger.debug("Initializing concentrations for species %s.", species)
+            coefficients = compartment.coefficients
+            test, trial = test_and_trial[i]
 
-    def setup_problem(self):
-        self.concentrations = {name: GridFunction(self._fes) for name in self._species}
+            # Initialize the concentrations in the compartment
+            if species in coefficients.initial_conditions:
+                c = concentration.components[i]
+                c.Set(coefficients.initial_conditions[species])
 
-        for name, species in self._species.items():
-                a, m_star_inv = self._setup_matrices(species)
-                self._diffusion_matrix[name] = a
-                self._time_stepping_matrix[name] = m_star_inv
+            # Assemble the stiffness matrix (diffusion terms)
+            if species in coefficients.diffusion and \
+                    (diffusivity := coefficients.diffusion[species]) is not None:
+                stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
 
-        self._source_terms = {name: LinearForm(self._fes) for name in self._species}
-        for reaction in self._reactions:
-            self._add_reaction_to_source_terms(reaction)
+            # Set up the time-stepping matrix (inverted perturbed mass matrix)
+            mass += test * trial * ngs.dx
 
-        self._setup_potential_equation()
+        # Assemble the mass and stiffness matrices
+        mass.Assemble()
+        stiffness.Assemble()
 
-    def _setup_matrices(self, species):
-        relevant_dofs = BitArray(self._fes.ndof)
-        relevant_dofs[:] = True
+        # Invert the mass matrix and the matrix for the implicit mid-point rule
+        m_star = mass.mat.CreateMatrix()
+        m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
+        time_stepping_matrix = m_star.Inverse(active_dofs)
+        m_inv = mass.mat.Inverse()
 
-        for compartment in self._compartments:
-            if not compartment in species.compartments:
-                # If no diffusivity is given, the species is not present in this compartment (even if the concentration is zero)
-                self._set_dofs(relevant_dofs, self.mesh.Region(VOL, compartment), False)
-        for boundary in self.mesh.GetBoundaries():
-            if boundary in species.clamp:
-                self._set_dofs(relevant_dofs, self.mesh.Region(BND, boundary), False)
+        return concentration, m_inv, stiffness, time_stepping_matrix
 
-        # Set up diffusion and mass matrix (set check_unused=False to avoid warnings about unused DOFs)
-        a = BilinearForm(self._fes, check_unused=False)
-        m = BilinearForm(self._fes, check_unused=False)
-        u, v = self._fes.TnT()
-        for compartment, diffusivity in species.diffusivity.items():
-            i = self._compartments[compartment]
-            D = convert(diffusivity, DIFFUSIVITY)
-            a += D * grad(u[i]) * grad(v[i]) * dx(compartment)
-            m += u[i] * v[i] * dx(compartment)
 
-        for channel in self._channels:
-            i = self._compartments[channel.left]
-            j = self._compartments[channel.right]
-            # make sure the flux is as prescribed no matter the actual area of the channel in the mesh
-            channel_area = Integrate(1, self.mesh, BND, order=1, definedon=self.mesh.Boundaries(channel.boundary))
-            rate = convert(channel.rate, FLUX_RATE) / channel_area
-            a += rate * (u[i] - u[j]) * (v[i] - v[j]) * ds(channel.boundary)
+    def _setup_rhs(self):
+        """Set up the right-hand side of the finite element equations for all species.
+        """
+        test_functions = self._rd_fes.TestFunction()
+        source_terms = {s: ngs.LinearForm(self._rd_fes) for s in self.species}
+        compartments = list(self.simulation_geometry.compartments.values())
+        compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
 
-        a.Assemble()
-        m.Assemble()
+        # Handle reaction terms
+        for i, compartment in enumerate(compartments):
+            coefficients = compartment.coefficients
+            test = test_functions[i]
 
-        m.mat.AsVector().data += self._time_step_size * a.mat.AsVector()
+            for (reactants, products), (k_f, k_r) in coefficients.reactions.items():
+                # TODO: find a better default value
+                all_reactants = ngs.CoefficientFunction(1.0)
+                for reactant in reactants:
+                    all_reactants *= self._concentrations[reactant].components[i]
+                forward_reaction = (k_f * all_reactants * test).Compile()
+                for reactant in reactants:
+                    source_terms[reactant] += -forward_reaction * ngs.dx
+                for product in products:
+                    source_terms[product] += forward_reaction * ngs.dx
 
-        return a, m.mat.Inverse(relevant_dofs)
+                all_products = ngs.CoefficientFunction(1.0)
+                for product in products:
+                    all_products *= self._concentrations[product].components[i]
+                reverse_reaction = (k_r * all_products * test).Compile()
+                for reactant in reactants:
+                    source_terms[reactant] += reverse_reaction * ngs.dx
+                for product in products:
+                    source_terms[product] += -reverse_reaction * ngs.dx
 
-    def _set_dofs(self, dof_array, region, value):
-        for el in region.Elements():
-            for dof in self._fes.GetDofNrs(el):
-                dof_array[dof] = value
+        # Handle transport terms
+        for membrane in self.simulation_geometry.membranes.values():
+            for species, source, target, transport in membrane.get_transport():
+                concentration = self._concentrations[species]
 
-    def _add_reaction_to_source_terms(self, reaction):
-        _, v = self._fes.TnT()
-        for compartment in reaction.kf:
-            i = self._compartments[compartment]
-            kf = convert(reaction.kf[compartment], FORWARD_RATE)
+                def get_index_and_concentration(compartment):
+                    if compartment is None:
+                        return None, None
+                    idx = compartment_to_index[compartment]
+                    return idx, concentration.components[idx]
 
-            # TODO: find a better default value (or skip if reactants / products are not present in the compartment)
-            forward_reaction = CoefficientFunction(1.0)
-            for reactant in reaction.reactants:
-                forward_reaction *= self.concentrations[reactant.name].components[i]
-            for reactant in reaction.reactants:
-                self._source_terms[reactant.name] += -kf * forward_reaction.Compile() * v[i] * dx(compartment)
-            for product in reaction.products:
-                self._source_terms[product.name] += kf * forward_reaction.Compile() * v[i] * dx(compartment)
+                src_idx, src_c = get_index_and_concentration(source)
+                trg_idx, trg_c = get_index_and_concentration(target)
 
-        for compartment in reaction.kr:
-            i = self._compartments[compartment]
-            kr = convert(reaction.kr[compartment], REVERSE_RATE)
+                # Calculate the flux density through the membrane
+                area = to_simulation_units(membrane.area, 'area')
+                flux_density = (transport.flux(src_c, trg_c) / area).Compile()
 
-            reverse_reaction = CoefficientFunction(1.0)
-            for product in reaction.products:
-                reverse_reaction *= self.concentrations[product.name].components[i]
-            for reactant in reaction.reactants:
-                self._source_terms[reactant.name] += kr * reverse_reaction.Compile() * v[i] * dx(compartment)
-            for product in reaction.products:
-                self._source_terms[product.name] += -kr * reverse_reaction.Compile() * v[i] * dx(compartment)
+                ds = ngs.ds(membrane.name)
+                if src_idx is not None:
+                    source_terms[species] += -flux_density * test_functions[src_idx] * ds
+                if trg_idx is not None:
+                    source_terms[species] += flux_density * test_functions[trg_idx] * ds
 
-    def _add_charge_to_source_terms(self):
-        v = self._fes.TestFunction()
-        for name, u in self.concentrations.items():
-            beta = self._species[name].valence * const.e.si / (const.k_B * 310 * au.K)
-            diffusivity = self._species[name].diffusivity
-            for compartment, index in self._compartments.items():
-                if compartment in diffusivity:
-                    D = diffusivity[compartment].to(LENGTH ** 2 / TIME).value
-                    drift = InnerProduct(grad(self._potential.components[index]), grad(v[index]))
-                    self._source_terms[name] += D * beta.value * u.components[index] * drift  * dx(compartment)
+        return source_terms
 
-    def _setup_potential_equation(self):
-        # TODO: set permittivity based on the compartments
-        permittivity = 80.0 * const.eps0.to(au.F / LENGTH)
-        F = (96485.3365 * au.C / au.mol).to(au.C / au.amol)
 
-        u, v = self._fes.TnT()
-        a = BilinearForm(self._fes, check_unused=False)
-        for compartment, index in self._compartments.items():
-            a += permittivity.value * grad(u[index]) * grad(v[index]) * dx(compartment)
-            a += v[-1] * v[index] * dx(compartment)
-            a += u[-1] * u[index] * dx(compartment)
-        a.Assemble()
+def set_dofs(space, dof_array, region, value):
+    """Set the values of the degrees of freedom in a given region.
 
-        for compartment, index in self._compartments.items():
-            relevant_dofs = BitArray(self._fes.ndof)
-            relevant_dofs[:] = False
-            self._set_dofs(relevant_dofs, self.mesh.Region(VOL, compartment), True)
-            relevant_dofs[-1] = True  # The last DOF is the Lagrange multiplier for the constraint
-            self._a_pot_inv[index] = a.mat.Inverse(relevant_dofs)
+    :param space: The finite element space to which the degrees of freedom belong.
+    :param dof_array: The array of degrees of freedom to set. Changes are
+        made in place.
+    :param region: The region in which to set the degrees of freedom.
+    :param value: The value to set the degrees of freedom to.
+    """
+    for el in region.Elements():
+        for dof in space.GetDofNrs(el):
+            dof_array[dof] = value
 
-        self._f_pot = LinearForm(self._fes)
-        for name, species in self._species.items():
-            valence = species.valence
-            u = self.concentrations[name]
-            diffusivity = self._species[name].diffusivity
-            for compartment, index in self._compartments.items():
-                if compartment in diffusivity:
-                    self._f_pot += F.value * valence * u.components[index] * v[index]  * dx(compartment)
 
-    def time_step(self):
-        residual = {}
-        dt = self._time_step_size.to(TIME).value
+def find_latest_results(name: str, results_root: str) -> str:
+    """Find the latest results folder with a given name in a directory."
 
-        # Solve the potential equation
-        self._f_pot.Assemble()
-        for index, a_inv in self._a_pot_inv.items():
-            self._potential.components[index].Set(0)
-            self._potential.vec.data += a_inv * self._f_pot.vec
+    :param name: The name of the simulation of interest.
+    :param results_root: The directory in which to search for results folders.
+    :returns: The full path of the latest results folder for the given simulation.
+    """
+    result_folders = [
+        d for d in os.listdir(results_root)
+        if d.startswith(name) and os.path.isdir(os.path.join(results_root, d))
+    ]
+    if not result_folders:
+        raise RuntimeError(f"No folders with name {name} found in {results_root}.")
 
-        for name, f in self._source_terms.items():
-            f.Assemble()
-            a = self._diffusion_matrix[name]
-            u = self.concentrations[name]
-            residual[name] = self._time_step_size * (f.vec - a.mat * u.vec)
-
-        for name, u in self.concentrations.items():
-            u.vec.data += self._time_stepping_matrix[name] * residual[name]
-
-    def init_concentrations(self, **initial_concentrations):
-        for name, values in initial_concentrations.items():
-            for compartment, value in values.items():
-                i = self._compartments[compartment]
-                v = convert(value, CONCENTRATION)
-                self.concentrations[name].components[i].Set(v)
-
-            try:
-                species = self._species[name]
-                for bnd, value in species.clamp.items():
-                    v = convert(value, CONCENTRATION)
-                    self.concentrations[name].components[0].Set(v, definedon=self.mesh.Region(BND, bnd))
-            except Exception:
-                print(f"WARNING: Could not set up clamp for {name}. Using initial value instead.")
+    latest = max(result_folders, key=lambda d: os.path.getctime(os.path.join(results_root, d)))
+    return os.path.join(results_root, latest)

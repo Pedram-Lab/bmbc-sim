@@ -1,5 +1,6 @@
 from math import ceil
 from typing import Dict
+import warnings
 
 try:
     # Check if we are running in a Jupyter notebook
@@ -24,6 +25,11 @@ class SimulationClock:
             events: Dict[str, int] = None,
             verbose: bool = False
     ) -> None:
+        warnings.warn(
+            "SimulationClock is deprecated and will be removed in future releases.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.end_time = end_time
         self.current_time = 0.0
         self.events = events or {}

@@ -111,8 +111,20 @@ cells = extract_single_cell(mesh, cell_ids[0])
 # cells = surface
 # cells = pv.merge(cells)
 cells = cells.extract_surface()
+cells['face_cell_id'] = mesh['face_cell_id'][cells['vtkOriginalPointIds']]
 cells = cells.clean()
 cells = cells.smooth(n_iter=100)
 
 # Save as STL for netgen to load
 cells.save("scripts/cells.stl")
+
+# Record a gif of the postprocessed mesh
+# p = pv.Plotter()
+# p.add_mesh(cells, scalars='face_cell_id', cmap='tab20')
+# p.remove_scalar_bar()
+# p.camera.zoom(1.5)
+# p.show(auto_close=False)
+# path = p.generate_orbital_path(n_points=36, shift=mesh.length)
+# p.open_gif("postprocessed.gif")
+# p.orbit_on_path(path, write_frames=True)
+# p.close()
