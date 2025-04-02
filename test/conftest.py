@@ -3,14 +3,14 @@ import os
 import xarray as xr
 
 
-def get_point_values(result_dir):
+def get_point_values(result_dir, point_id=0):
     """Read the point values from a simulation."""
     zarr_path = os.path.join(result_dir, "point_data_0.zarr")
     point_data = xr.open_zarr(zarr_path)
 
     species_list = point_data.coords['species'].values
     time = point_data.coords['time'].values
-    point = point_data.coords['point'].values[0]
+    point = point_data.coords['point'].values[point_id]
 
     values = {}
     for species in species_list:
@@ -20,14 +20,14 @@ def get_point_values(result_dir):
     return values, time
 
 
-def get_substance_values(result_dir):
+def get_substance_values(result_dir, compartment_id=0):
     """Read the substance values from a simulation."""
     zarr_path = os.path.join(result_dir, "substance_data.zarr")
     substance_data = xr.open_zarr(zarr_path)
 
     species_list = substance_data.coords['species'].values
     time = substance_data.coords['time'].values
-    compartment = substance_data.coords['compartment'].values[0]
+    compartment = substance_data.coords['compartment'].values[compartment_id]
 
     values = {}
     for species in species_list:
