@@ -12,16 +12,14 @@ from conftest import get_point_values, get_substance_values
 
 
 def create_simulation(tmp_path, width):
-    """Create a simple test simulation with three regions that are sorted into two
-    compartments."
+    """Create a simple test geometry with one compartment and two named membranes.
     """
     box = occ.Box((0, 0, 0), (1, 1, width)).mat('cell').bc('reflective')
+    box.faces[0].bc('left')
+    box.faces[1].bc('right')
 
     geo = occ.OCCGeometry(box)
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
-
-    mesh.ngmesh.SetBCName(0, 'left')
-    mesh.ngmesh.SetBCName(1, 'right')
 
     simulation = ecsim.Simulation(f'outside_fluxes_{width}_test', result_root=tmp_path)
     simulation.setup_geometry(mesh)

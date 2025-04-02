@@ -12,16 +12,12 @@ from conftest import get_point_values, get_substance_values
 
 
 def create_simulation(tmp_path):
-    """Create a simple test simulation with three regions that are sorted into two
-    compartments."
+    """Create a simple test geometry with a single compartment.
     """
     box = occ.Box((0, 0, 0), (1, 1, 1)).mat('cell').bc('reflective')
 
     geo = occ.OCCGeometry(box)
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
-
-    mesh.ngmesh.SetBCName(0, 'left')
-    mesh.ngmesh.SetBCName(1, 'right')
 
     simulation = ecsim.Simulation('single_compartment_test', result_root=tmp_path)
     simulation.setup_geometry(mesh)

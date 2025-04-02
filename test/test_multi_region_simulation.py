@@ -12,8 +12,8 @@ from conftest import get_point_values
 
 
 def create_simulation(tmp_path):
-    """Create a simple test simulation with three regions that are sorted into two
-    compartments."
+    """Create a simple test geometry with a compartment that is split into two
+    regions.
     """
     left = occ.Box((0, 0, 0), (1, 1, 1)).mat('cell:left').bc('reflective')
     right = occ.Box((1, 0, 0), (2, 1, 1)).mat('cell:right').bc('reflective')
