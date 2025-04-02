@@ -23,6 +23,7 @@ def create_simulation(tmp_path):
     simulation.setup_geometry(mesh)
     simulation.add_recorder(recorder.PointValues(10 * u.ms, points=[(0.5, 0.5, 0.5)]))
     simulation.add_recorder(recorder.CompartmentSubstance(10 * u.ms))
+    simulation.add_recorder(recorder.FullSnapshot(1 * u.s))
 
     return simulation
 
