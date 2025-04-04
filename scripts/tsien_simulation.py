@@ -98,7 +98,7 @@ print(f"rate_channel: {rate_channel}")
 
 channel.add_transport(
     species=ca, 
-    transport=transport.Channel(rate_channel),
+    transport=transport.GeneralFlux(rate_channel),
     source=ecs,
     target=cytosol
 )
