@@ -1,6 +1,6 @@
 """This script recreates the geometry of [Tour, Tsien; 2007] using float-based microns."""
 import astropy.units as u
-
+import numpy as np
 import ecsim
 from ecsim.geometry import create_ca_depletion_mesh
 from ecsim.simulation import recorder, transport
@@ -89,19 +89,67 @@ kf_egta = 2.7 / (uM * u.s)
 kr_egta = 0.5 / u.s
 
 # Add reaction
-cytosol.add_reaction(reactants=[ca, bapta], products=[ca_bapta], k_f=kf_bapta, k_r=kr_bapta)
+cytosol.add_reaction(
+    reactants=[ca, bapta], products=[ca_bapta],
+    k_f=kf_bapta, k_r=kr_bapta
+)
 # cytosol.add_reaction(reactants=[ca_cyt, egta], products=[ca_egta], k_f=kf_egta, k_r=kr_egta)
 
-rate_channel = 1 * u.mmol / (u.L * u.s) # Total flux 
-
-print(f"rate_channel: {rate_channel}")
+rate_channel = 1 * u.um / u.ms  # Total flux
+permeability = rate_channel * channel.area
 
 channel.add_transport(
     species=ca, 
-    transport=transport.GeneralFlux(rate_channel),
+    transport=transport.Passive(permeability=permeability),
     source=ecs,
     target=cytosol
 )
+
+# Add recorders to capture simulation data
+xs = np.linspace(0, 600, 100)
+points = [[x, 0, 3.005] for x in xs]
+simulation.add_recorder(recorder.FullSnapshot(1 * u.ms))
+simulation.add_recorder(recorder.CompartmentSubstance(1 * u.ms))
+simulation.add_recorder(recorder.PointValues(20 * u.ms, points))
+
+# Run the simulation
+simulation.run(end_time=20 * u.ms, time_step=1 * u.us)
+
+
+
+
+
+
+# # Convert ECS volume to liters
+# ecs_volume_L = ecs.volume.to(u.L)
+
+# # Calculate the total amount of calcium transferred per second (mmol/s)
+# total_rate = (rate_channel * ecs_volume_L).to(u.mmol / u.s)
+
+# # Calculate concentration in umol/um^3 so that everything is in microns
+# ca_ecs_um3 = ca_ecs_0.to(u.umol / u.um**3)
+
+# # Finally: Q = total_rate / concentration → um^3 / s
+# Q = (total_rate.to(u.umol / u.s) / ca_ecs_um3).to(u.um**3 / u.s)
+
+# print(f"Volumetric flow rate Q = {Q:.3e}")
+
+# print(f"rate_channel: {rate_channel}")
+
+# channel_area = (np.pi * channel_radius**2).to(u.um**2)
+
+# print(f"channel_area: {channel_area}")
+
+# delta_Ca = (ca_ecs_0 - ca_cyt_0).to(u.umol / u.um**3)
+
+# print(f"Delta Ca: {delta_Ca}")
+
+# P = (Q / (channel_area * delta_Ca))
+
+# #P = (Q / (channel_area * delta_Ca)).to(u.um / u.s)
+
+# print(f"Permeability: {P:.3e}")
+
 
 
 # rate_channel = 1 * u.mmol / (u.L * u.s)

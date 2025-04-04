@@ -152,14 +152,14 @@ class Active(Transport):
 
 
 class GeneralFlux(Transport):
-    """Channel transport mechanism that allows for a constant flux across the
-    membrane, independent of the concentration difference.
+    """General transport mechanism that allows for a constant or time dependent
+    flux across the membrane, independent of the concentration difference.
     """
     def __init__(
             self,
             flux: Coefficient
     ):
-        """Create a new channel transport mechanism.
+        """Create a new general transport mechanism.
 
         :param flux: The constant flux across the membrane (units: substance/time).
         """
@@ -172,5 +172,5 @@ class GeneralFlux(Transport):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction
     ) -> ngs.CoefficientFunction:
-        # Channel flux is independent of the concentrations
+        # Flux is independent of the concentrations
         return self.flux_value
