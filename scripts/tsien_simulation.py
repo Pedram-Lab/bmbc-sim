@@ -38,8 +38,7 @@ print(f"cytosol volume: {cytosol.volume}")
 print(f"Channel area: {channel.area}")
 
 # Add species to the simulation
-ca_ecs = simulation.add_species('Ca_ECS', valence=2)
-ca_cyt = simulation.add_species('Ca_cyt', valence=2)
+ca = simulation.add_species('Ca', valence=2)
 
 egta = simulation.add_species('EGTA', valence=-2)
 ca_egta = simulation.add_species('Ca_EGTA', valence=0)
@@ -60,8 +59,8 @@ ca_bapta_0 = 0 * u.mmol / u.L
 # egta_high_0 = 40 * u.mmol / u.L
 # ca_egta_high_0 = 0 * u.mmol / u.L
 
-ecs.initialize_species(ca_ecs, value=ca_ecs_0)
-cytosol.initialize_species(ca_cyt, value=ca_cyt_0)
+ecs.initialize_species(ca, value=ca_ecs_0)
+cytosol.initialize_species(ca, value=ca_cyt_0)
 
 cytosol.initialize_species(bapta, value=bapta_0)
 cytosol.initialize_species(ca_bapta, value=ca_bapta_0)
@@ -73,8 +72,8 @@ cytosol.initialize_species(ca_bapta, value=ca_bapta_0)
 # cytosol.initialize_species(ca_egta, value=ca_egta_high_0)
 
 # Add diffusion to the species 
-ecs.add_diffusion(species=ca_ecs, diffusivity=600 * u.um**2 / u.s)
-cytosol.add_diffusion(species=ca_cyt, diffusivity=220 * u.um**2 / u.s)
+ecs.add_diffusion(species=ca, diffusivity=600 * u.um**2 / u.s)
+cytosol.add_diffusion(species=ca, diffusivity=220 * u.um**2 / u.s)
 
 cytosol.add_diffusion(species=bapta, diffusivity=95 * u.um**2 / u.s)
 cytosol.add_diffusion(species=ca_bapta, diffusivity=95 * u.um**2 / u.s)
@@ -83,14 +82,14 @@ cytosol.add_diffusion(species=ca_bapta, diffusivity=95 * u.um**2 / u.s)
 # cytosol.add_diffusion(species=ca_bapta, diffusivity =113 * u.um**2 / u.s)
 
 #Add forward and reverse reaction rates for the buffers
-kf_bapta = 450 * u.umol / (u.L * u.s)
+kf_bapta = 450 / (uM * u.s)
 kr_bapta = 80 / u.s
 
-kf_egta = 2.7 * u.umol / (u.L * u.s)
+kf_egta = 2.7 / (uM * u.s)
 kr_egta = 0.5 / u.s
 
 # Add reaction
-cytosol.add_reaction(reactants=[ca_cyt, bapta], products=[ca_bapta], k_f=kf_bapta, k_r=kr_bapta)
+cytosol.add_reaction(reactants=[ca, bapta], products=[ca_bapta], k_f=kf_bapta, k_r=kr_bapta)
 # cytosol.add_reaction(reactants=[ca_cyt, egta], products=[ca_egta], k_f=kf_egta, k_r=kr_egta)
 
 rate_channel = 1 * u.mmol / (u.L * u.s) # Total flux 
@@ -98,7 +97,7 @@ rate_channel = 1 * u.mmol / (u.L * u.s) # Total flux
 print(f"rate_channel: {rate_channel}")
 
 channel.add_transport(
-    species=ca_ecs, 
+    species=ca, 
     transport=transport.Channel(rate_channel),
     source=ecs,
     target=cytosol
