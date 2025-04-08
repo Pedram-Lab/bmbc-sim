@@ -85,3 +85,46 @@ def create_ca_depletion_mesh(
     mesh.SetMaterial(2, "cytosol")
 
     return Mesh(mesh)
+
+
+def create_dish_geometry(
+        *,
+        dish_height: Quantity,
+        sidelength: Quantity,
+        mesh_size: Quantity,
+        substrate_height: Quantity = None
+) -> Mesh:
+    """Create a simple columnar geometry with given sidelength and height
+    represeting a slice in the middle of a dish. Optionally, a substrate can be
+    added as a region at the bottom of the dish.
+
+    :param dish_height: Height of the dish.
+    :param sidelength: Length of the sides of the slice.
+    :param mesh_size: Size of the mesh.
+    :param substrate_height: Height of the substrate (can be None).
+    :return: Mesh of the geometry.
+    """
+    h = to_simulation_units(dish_height, 'length')
+    s = to_simulation_units(sidelength, 'length')
+
+    dish = occ.Box((-s, -s, 0), (s, s, h))
+    dish.mat("dish:free")
+    for i in [0, 1, 2, 3]:
+        dish.faces[i].bc("side")
+    dish.faces[4].bc("bottom")
+    dish.faces[5].bc("top")
+
+    if substrate_height is not None:
+        sh = to_simulation_units(substrate_height, 'length')
+        substrate = occ.Box((-2*s, -2*s, -sh), (2*s, 2*s, sh))
+        substrate.mat("dish:substrate")
+        substrate.faces[5].bc("interface")
+        substrate = dish * substrate
+        substrate.col = (1, 0, 0)
+        geo = occ.Compound([substrate, dish - substrate])
+    else:
+        geo = dish
+
+    geo = occ.OCCGeometry(geo)
+    mesh_size = to_simulation_units(mesh_size, 'length')
+    return Mesh(geo.GenerateMesh(maxh=mesh_size))
