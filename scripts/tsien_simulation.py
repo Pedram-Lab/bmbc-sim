@@ -1,6 +1,9 @@
-"""This script recreates the geometry of [Tour, Tsien; 2007] using float-based microns."""
+"""This script recreates the geometry of [Tour, Tsien; 2007]."""
+from collections import namedtuple
+
 import astropy.units as u
 import numpy as np
+
 import ecsim
 from ecsim.geometry import create_ca_depletion_mesh
 from ecsim.simulation import recorder, transport
@@ -12,6 +15,7 @@ ecs_height = 0.1 * u.um
 cytosol_height = 3.0 * u.um
 channel_radius = 50 * u.nm
 M = u.mol / u.L
+mM = u.mmol / u.L
 uM = u.umol / u.L
 
 mesh = create_ca_depletion_mesh(
@@ -23,8 +27,6 @@ mesh = create_ca_depletion_mesh(
     mesh_size=100 * u.nm
 )
 
-
-#print(f"mesh: {mesh}")
 
 simulation = ecsim.Simulation('tsien', result_root='results')
 geometry = simulation.setup_geometry(mesh)
@@ -40,80 +42,50 @@ print(f"ecs volume: {ecs.volume}")
 print(f"cytosol volume: {cytosol.volume}")
 print(f"Channel area: {channel.area}")
 
+# Define 3 buffering scenarios: BAPTA and EGTA with both high and low initial concentrations
+BufferSpec = namedtuple('BufferSpec',
+                        ['name', 'initial_concentration', 'diffusivity', 'kf', 'kr'])
+buffer_spec = BufferSpec('BAPTA', 1 * mM, 95 * u.um**2 / u.s, 450 / (uM * u.s), 80 / u.s)
+# buffer_spec = BufferSpec('EGTA', 40 * mM, 113 * u.um**2 / u.s, 2.7 / (uM * u.s), 0.5 / u.s)
+# buffer_spec = BufferSpec('EGTA, 4.5 * mM, 113 * u.um**2 / u.s, 2.7 / (uM * u.s), 0.5 / u.s)
+
 # Add species to the simulation
 ca = simulation.add_species('Ca', valence=2)
-
-# egta = simulation.add_species('EGTA', valence=-2)
-# ca_egta = simulation.add_species('Ca_EGTA', valence=0)
-
-bapta = simulation.add_species('BAPTA', valence=-2)
-ca_bapta = simulation.add_species('Ca_BAPTA', valence=0)
+buffer = simulation.add_species(buffer_spec.name, valence=-2)
+ca_buffer = simulation.add_species('Ca_' + buffer_spec.name, valence=0)
 
 # Initial conditions
-ca_ecs_0 = 15 * u.mmol / u.L
-ca_cyt_0 = 0.1 * u.umol / u.L
+ecs.initialize_species(ca, value=15 * mM)
+cytosol.initialize_species(ca, value=0.1 * uM)
 
-bapta_0 = 1 * u.mmol / u.L
-ca_bapta_0 = 0 * u.mmol / u.L
+cytosol.initialize_species(buffer, value=buffer_spec.initial_concentration)
+cytosol.initialize_species(ca_buffer, value=0 * uM)
 
-# egta_low_0 = 4.5 * u.mmol / u.L
-# ca_egta_low_0 = 0 * u.mmol / u.L
-
-# egta_high_0 = 40 * u.mmol / u.L
-# ca_egta_high_0 = 0 * u.mmol / u.L
-
-ecs.initialize_species(ca, value=ca_ecs_0)
-cytosol.initialize_species(ca, value=ca_cyt_0)
-
-cytosol.initialize_species(bapta, value=bapta_0)
-cytosol.initialize_species(ca_bapta, value=ca_bapta_0)
-
-# cytosol.initialize_species(egta, value=egta_low_0)
-# cytosol.initialize_species(ca_egta, value=ca_egta_low_0)
-
-# cytosol.initialize_species(egta, value=egta_high_0)
-# cytosol.initialize_species(ca_egta, value=ca_egta_high_0)
-
-# Add diffusion to the species 
+# Add diffusion to the species
 ecs.add_diffusion(species=ca, diffusivity=600 * u.um**2 / u.s)
 cytosol.add_diffusion(species=ca, diffusivity=220 * u.um**2 / u.s)
 
-cytosol.add_diffusion(species=bapta, diffusivity=95 * u.um**2 / u.s)
-cytosol.add_diffusion(species=ca_bapta, diffusivity=95 * u.um**2 / u.s)
-
-# cytosol.add_diffusion(species=egta, diffusivity =113 * u.um**2 / u.s)
-# cytosol.add_diffusion(species=ca_bapta, diffusivity =113 * u.um**2 / u.s)
-
-#Add forward and reverse reaction rates for the buffers
-kf_bapta = 450 / (uM * u.s)
-kr_bapta = 80 / u.s
-
-kf_egta = 2.7 / (uM * u.s)
-kr_egta = 0.5 / u.s
+cytosol.add_diffusion(species=buffer, diffusivity=buffer_spec.diffusivity)
+cytosol.add_diffusion(species=ca_buffer, diffusivity=buffer_spec.diffusivity)
 
 # Add reaction
 cytosol.add_reaction(
-    reactants=[ca, bapta], products=[ca_bapta],
-    k_f=kf_bapta, k_r=kr_bapta
+    reactants=[ca, buffer], products=[ca_buffer],
+    k_f=buffer_spec.kf, k_r=buffer_spec.kr
 )
-# cytosol.add_reaction(reactants=[ca_cyt, egta], products=[ca_egta], k_f=kf_egta, k_r=kr_egta)
 
-#rate_channel = 10 * u.um / u.ms  # Total flux
-rate_channel = 10 * u.um / u.s  # Total flux
+# Add transport
+rate_channel = 10 * u.um / u.s
 permeability = rate_channel * channel.area
 channel.add_transport(
-    species=ca, 
+    species=ca,
     transport=transport.Passive(permeability=permeability),
     source=ecs,
     target=cytosol
 )
 
 # Add recorders to capture simulation data
-# xs = np.linspace(0, 600, 100)
-# points = [[x, 0, 2.995] for x in xs]
-# xs = np.linspace(0, 3.0, 100)  # en micras
-xs = np.linspace(0, 0.6, 300)  # en micras
-points = [[float(x), 0.0, 2.995] for x in xs]
+points = [[float(x), 0.0, 2.995] for x in np.linspace(0, 0.6, 300)]
 simulation.add_recorder(recorder.FullSnapshot(1 * u.ms))
 simulation.add_recorder(recorder.CompartmentSubstance(1 * u.ms))
 simulation.add_recorder(recorder.PointValues(20 * u.ms, points))
