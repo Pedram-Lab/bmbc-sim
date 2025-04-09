@@ -117,11 +117,11 @@ def create_dish_geometry(
     if substrate_height is not None:
         sh = to_simulation_units(substrate_height, 'length')
         substrate = occ.Box((-2*s, -2*s, -sh), (2*s, 2*s, sh))
-        substrate.mat("dish:substrate")
         substrate.faces[5].bc("interface")
         substrate = dish * substrate
+        substrate.mat("dish:substrate")
         substrate.col = (1, 0, 0)
-        geo = occ.Compound([substrate, dish - substrate])
+        geo = occ.Glue([substrate, dish - substrate])
     else:
         geo = dish
 
