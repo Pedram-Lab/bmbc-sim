@@ -78,8 +78,8 @@ class Transport(abc.ABC):
             raise ValueError("Coefficient must be either a Quantity or a callable.")
 
 
-class Linear(Transport):
-    """Linear transport mechanism that computes the flux as a linear function
+class Passive(Transport):
+    """Passive transport mechanism that computes the flux as a linear function
     of the concentration difference across the membrane.
     """
     def __init__(
@@ -87,7 +87,7 @@ class Linear(Transport):
             permeability: Coefficient,
             outside_concentration: u.Quantity = None
     ):
-        """Create a new linear transport mechanism with the given permeability.
+        """Create a new passive transport mechanism with the given permeability.
 
         :param permeability: Permeability of the membrane (units: area * length/time).
         :param outside_concentration: Concentration of the substance outside of
@@ -107,7 +107,6 @@ class Linear(Transport):
         source = self._constant_if_none(source)
         target = self._constant_if_none(target)
 
-        # TODO: find correct unit for channel flux!
         return self.permeability * (source - target)
 
 
@@ -121,16 +120,16 @@ class Linear(Transport):
         return cf
 
 
-class MichaelisMenten(Transport):
-    """Michaelis-Menten transport mechanism that computes the flux based on
-    the source concentration and a maximum rate.
+class Active(Transport):
+    """Active transport mechanism that computes the flux based on
+    Michaelis-Menten kinetics for the source concentration.
     """
     def __init__(
             self,
             v_max: Coefficient,
             km: Coefficient
     ):
-        """Create a new Michaelis-Menten transport mechanism.
+        """Create a new active transport mechanism based on Michaelis-Menten kinetics.
 
         :param v_max: Maximum rate of the transport (units: substance/time).
         :param km: Michaelis constant (units: concentration).
@@ -145,22 +144,22 @@ class MichaelisMenten(Transport):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction
     ) -> ngs.CoefficientFunction:
-        # Only the source concentration contributes to the (stationary) flux
+        # Only the source concentration contributes to the flux
         del target
 
         # Compute the flux using the Michaelis-Menten equation
         return self.v_max * source / (self.km + source)
 
 
-class Channel(Transport):
-    """Channel transport mechanism that allows for a constant flux across the
-    membrane, independent of the concentration difference.
+class GeneralFlux(Transport):
+    """General transport mechanism that allows for a constant or time dependent
+    flux across the membrane, independent of the concentration difference.
     """
     def __init__(
             self,
             flux: Coefficient
     ):
-        """Create a new channel transport mechanism.
+        """Create a new general transport mechanism.
 
         :param flux: The constant flux across the membrane (units: substance/time).
         """
@@ -173,5 +172,5 @@ class Channel(Transport):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction
     ) -> ngs.CoefficientFunction:
-        # Channel flux is independent of the concentrations
+        # Flux is independent of the concentrations
         return self.flux_value

@@ -47,7 +47,7 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     cell.initialize_species(too_low, 0.5 * u.mmol / u.L)
     cell.add_diffusion(too_low, 1 * u.um**2 / u.ms)
     permeability = 10 * u.nm / u.ms * left_membrane.area
-    t = transport.Linear(permeability=permeability, outside_concentration=0.7 * u.mmol / u.L)
+    t = transport.Passive(permeability=permeability, outside_concentration=0.7 * u.mmol / u.L)
     left_membrane.add_transport(species=too_low, transport=t, source=cell, target=None)
 
     # Species that should stay decrease to the outside value
@@ -60,14 +60,14 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     deplete = simulation.add_species('deplete', valence=0)
     cell.initialize_species(deplete, 0.4 * u.mmol / u.L)
     cell.add_diffusion(deplete, 1 * u.um**2 / u.ms)
-    t = transport.MichaelisMenten(v_max=50 * u.amol / u.s, km=1 * u.mmol / u.L)
+    t = transport.Active(v_max=50 * u.amol / u.s, km=1 * u.mmol / u.L)
     left_membrane.add_transport(species=deplete, transport=t, source=cell, target=None)
 
     # Constant influx (x5) that increases the species linearly
     constant_influx = simulation.add_species('constant-influx', valence=0)
     cell.initialize_species(constant_influx, 0.1 * u.mmol / u.L)
     cell.add_diffusion(constant_influx, 1 * u.um**2 / u.ms)
-    t = transport.Channel(0.2 * u.amol / (u.s))
+    t = transport.GeneralFlux(0.2 * u.amol / (u.s))
     for _ in range(5):
         right_membrane.add_transport(species=constant_influx, transport=t, source=None, target=cell)
 
@@ -75,7 +75,7 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     variable_influx = simulation.add_species('variable-influx', valence=0)
     cell.initialize_species(variable_influx, 0.2 * u.mmol / u.L)
     cell.add_diffusion(variable_influx, 1 * u.um**2 / u.ms)
-    t = transport.Channel(lambda t: t * (1 * u.s - t) * 6 * u.amol / u.s**3)
+    t = transport.GeneralFlux(lambda t: t * (1 * u.s - t) * 6 * u.amol / u.s**3)
     right_membrane.add_transport(species=variable_influx, transport=t, source=None, target=cell)
 
     # Run the simulation

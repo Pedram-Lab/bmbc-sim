@@ -1,9 +1,9 @@
-from .transport import Transport, Linear, MichaelisMenten, Channel
+from .transport import Transport, Passive, Active, GeneralFlux
 
 
 __all__ = [
     'Transport',
-    'Linear',
-    'MichaelisMenten',
-    'Channel'
+    'Passive',
+    'Active',
+    'GeneralFlux'
 ]
