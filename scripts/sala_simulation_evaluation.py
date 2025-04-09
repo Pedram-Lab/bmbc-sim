@@ -43,7 +43,7 @@ time = point_data.coords['time'].values
 points = point_data.coords['point'].values
 x_coords = [xyz[0] for xyz in point_data.attrs['point_coordinates']]
 
-dist = [0.25, 5.25, 10.25, 19.75]
+dist = [19.75, 10.25, 5.25, 0.25]
 for species in species_list:
     plt.figure()
     for d, point in zip(dist, points):
@@ -52,7 +52,6 @@ for species in species_list:
         plt.semilogy(time, ts_array.T, label=f"Distance {d}")
     plt.xlabel("Time [ms]")
     plt.ylabel("Concentration [µM]")
-    plt.ylim(4e-2, 3e1)
     plt.xlim(0, 2000)
     plt.title(f"Species: {species}")
     plt.legend()
