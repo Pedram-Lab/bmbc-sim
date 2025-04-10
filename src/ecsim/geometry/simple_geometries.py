@@ -90,7 +90,8 @@ def create_ca_depletion_mesh(
 def create_dish_geometry(
         *,
         dish_height: Quantity,
-        sidelength: Quantity,
+        slice_width: Quantity,
+        slice_depth: Quantity,
         mesh_size: Quantity,
         substrate_height: Quantity = None
 ) -> Mesh:
@@ -99,15 +100,18 @@ def create_dish_geometry(
     added as a region at the bottom of the dish.
 
     :param dish_height: Height of the dish.
-    :param sidelength: Length of the sides of the slice.
+    :param slice_width: Width of the slice.
+    :param slice_depth: Depth of the slice (this controls how fast species
+        can reach the boundary and thus be removed from the domain).
     :param mesh_size: Size of the mesh.
     :param substrate_height: Height of the substrate (can be None).
     :return: Mesh of the geometry.
     """
     h = to_simulation_units(dish_height, 'length')
-    s = to_simulation_units(sidelength, 'length')
+    sx = to_simulation_units(slice_width, 'length')
+    sy = to_simulation_units(slice_depth, 'length')
 
-    dish = occ.Box((-s, -s, 0), (s, s, h))
+    dish = occ.Box((-sx, -sy, 0), (sx, sy, h))
     dish.mat("dish:free")
     for i in [0, 1, 2, 3]:
         dish.faces[i].bc("side")
@@ -116,7 +120,7 @@ def create_dish_geometry(
 
     if substrate_height is not None:
         sh = to_simulation_units(substrate_height, 'length')
-        substrate = occ.Box((-2*s, -2*s, -sh), (2*s, 2*s, sh))
+        substrate = occ.Box((-2*sx, -2*sy, -sh), (2*sx, 2*sy, sh))
         substrate.faces[5].bc("interface")
         substrate = dish * substrate
         substrate.mat("dish:substrate")
