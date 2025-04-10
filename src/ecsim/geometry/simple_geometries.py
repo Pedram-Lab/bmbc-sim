@@ -113,10 +113,10 @@ def create_dish_geometry(
 
     dish = occ.Box((-sx, -sy, 0), (sx, sy, h))
     dish.mat("dish:free")
-    for i in [0, 1, 2, 3]:
-        dish.faces[i].bc("side")
-    dish.faces[4].bc("bottom")
-    dish.faces[5].bc("top")
+    for i in [0, 1, 4, 5]:
+        dish.faces[i].bc("reflective")
+    dish.faces[2].bc("side")
+    dish.faces[3].bc("side")
 
     if substrate_height is not None:
         sh = to_simulation_units(substrate_height, 'length')
