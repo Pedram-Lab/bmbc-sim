@@ -15,7 +15,7 @@ from ngsolve.webgui import Draw
 D = 2
 N_STEPS = 1000
 dt = 1 / N_STEPS
-N_THREADS = 16
+N_THREADS = 4
 
 # %%
 # Geometry

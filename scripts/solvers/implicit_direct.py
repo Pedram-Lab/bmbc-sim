@@ -88,4 +88,4 @@ print("Total time:", end - start)
 # %%
 # Plot
 settings = {'Multidim': {'animate': True, 'speed': 10}}
-Draw(us.components[1], mesh, min=-1, max=1, settings=settings)
+Draw(us.components[0], mesh, min=0, max=1, settings=settings)
