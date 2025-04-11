@@ -14,36 +14,44 @@ n_threads = 1
 
 # %%
 # Geometry
-box = occ.Box((0, 0, 0), (1, 1, 1))
+box1 = occ.Box((0, 0, 0), (1, 1, 1))
+box2 = occ.Box((1, 0, 0), (2, 1, 1))
 for k in range(2, 6):
-    box.faces[k].bc("reflective")
-box.faces[0].bc("left")
-box.faces[1].bc("right")
-box.mat("ecs")
-mesh = ngs.Mesh(occ.OCCGeometry(box).GenerateMesh(maxh=0.1))
+    box1.faces[k].bc("reflective")
+    box2.faces[k].bc("reflective")
+box1.faces[0].bc("left")
+box1.faces[1].bc("interface")
+box2.faces[0].bc("interface")
+box2.faces[1].bc("right")
+box1.mat("cell:left")
+box2.mat("cell:right")
+geo = occ.Glue([box1, box2])
+mesh = ngs.Mesh(occ.OCCGeometry(geo).GenerateMesh(maxh=0.1))
 print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
 Draw(mesh)
+print(mesh.GetBoundaries())
 
 # %%
-# FEM system (diffusion with influx on the left boundary, efflux on the right)
-fes = ngs.H1(mesh, order=1)
-u, v = fes.TnT()
-influx = ngs.Parameter(1)
-efflux = ngs.Parameter(0)
+# FEM system (diffusion with influx on the left boundary, transmission through the interface)
+fesl = ngs.Compress(ngs.H1(mesh, order=1, definedon="cell:left"))
+fesr = ngs.Compress(ngs.H1(mesh, order=1, definedon="cell:right"))
+fes = fesl * fesr
+(ul, ur), (vl, vr) = fes.TnT()
+transmission = ngs.Parameter(1)
 
 a = ngs.BilinearForm(fes)
-a += D * ngs.grad(u) * ngs.grad(v) * ngs.dx
-a += u * v * ngs.ds("left")
+a += D * ngs.grad(ul) * ngs.grad(vl) * ngs.dx("cell:left")
+a += D * ngs.grad(ur) * ngs.grad(vr) * ngs.dx("cell:right")
+# a += ul * vl * ngs.ds("left")
+a += transmission * (ul - ur) * (vl - vr) * ngs.ds("interface")
 
 m = ngs.BilinearForm(fes)
-m += u * v * ngs.dx
+m += ul * vl * ngs.dx("cell:left")
+m += ur * vr * ngs.dx("cell:right")
 
 u = ngs.GridFunction(fes)
+u.components[0].Set(1)
 us = ngs.GridFunction(fes, multidim=0)
-
-f = ngs.LinearForm(fes)
-f += influx * v * ngs.ds("left")
-f += efflux * v * ngs.ds("right")
 
 
 # %%
@@ -62,13 +70,11 @@ with ngs.TaskManager():
     k = 0
     us.AddMultiDimComponent(u.vec)
     for i in range(n_steps):
-        f.Assemble()
-        res = dt * (f.vec - a.mat * u.vec)
+        res = -dt * (a.mat * u.vec)
         u.vec.data += mstar_inv * res
         t += dt
         if t > 0.5:
-            influx.Set(0)
-            efflux.Set(-1)
+            transmission.Set(0)
         k += 1
         if k == 10:
             us.AddMultiDimComponent(u.vec)
@@ -80,6 +86,6 @@ print("Total time:", end - start)
 # %%
 # Plot
 settings = {'Multidim': {'animate': True, 'speed': 10}}
-Draw(us, min=0, max=1, settings=settings)
+Draw(us.components[1], mesh, min=-1, max=1, settings=settings)
 
 # %%
