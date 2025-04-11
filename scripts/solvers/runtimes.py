@@ -29,11 +29,29 @@ implicit_splitting = [
     19.774117708206177
 ]
 
-plt.loglog(threads, implicit_direct, 'ro-')
-plt.loglog(threads, [implicit_direct[0] / n for n in threads], 'b--')
+cg_full = [
+    4.088802099227905,
+    2.052219867706299,
+    1.2776226997375488,
+    1.1238210201263428,
+    1.6264290809631348
+]
+
+all_runtimes = [
+    (implicit_direct, 'Implicit Direct'),
+    (implicit_rhs, 'Implicit RHS'),
+    (implicit_splitting, 'Implicit Splitting'),
+    (cg_full, 'CG Full')
+]
+
+for runtimes, label in all_runtimes:
+    plt.loglog(threads, runtimes, 'o-', label=label)
+plt.loglog(threads, [implicit_splitting[0] / n for n in threads], 'b--', label='Ideal Speedup')
 plt.xlabel('Number of threads')
+plt.xticks(threads, threads)
+plt.gca().xaxis.set_minor_locator(plt.NullLocator())
 plt.ylabel('Runtime (s)')
 plt.title('Runtime vs. Number of Threads')
 plt.grid(which='both')
-plt.legend(['Runtime', 'Ideal Speedup'])
+plt.legend()
 plt.show()
