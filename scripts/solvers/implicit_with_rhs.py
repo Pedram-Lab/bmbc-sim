@@ -10,7 +10,7 @@ from ngsolve.webgui import Draw
 D = 2
 N_STEPS = 1000
 dt = 1 / N_STEPS
-N_THREADS = 1
+N_THREADS = 16
 
 # %%
 # Geometry
@@ -41,7 +41,6 @@ transmission = ngs.Parameter(1)
 a = ngs.BilinearForm(fes)
 a += D * ngs.grad(ul) * ngs.grad(vl) * ngs.dx("cell:left")
 a += D * ngs.grad(ur) * ngs.grad(vr) * ngs.dx("cell:right")
-a += transmission * (ul - ur) * (vl - vr) * ngs.ds("interface")
 
 m = ngs.BilinearForm(fes)
 m += ul * vl * ngs.dx("cell:left")
@@ -51,6 +50,9 @@ u = ngs.GridFunction(fes)
 u.components[0].Set(1)
 us = ngs.GridFunction(fes, multidim=0)
 
+f = ngs.LinearForm(fes)
+cf = transmission * (u.components[0] - u.components[1]) * (vr - vl)
+f += cf.Compile(maxderiv=0) * ngs.ds("interface")
 
 # %%
 start = time.time()
@@ -68,7 +70,8 @@ with ngs.TaskManager():
     k = 0
     us.AddMultiDimComponent(u.vec)
     for i in range(N_STEPS):
-        res = -dt * (a.mat * u.vec)
+        f.Assemble()
+        res = dt * (f.vec - a.mat * u.vec)
         u.vec.data += mstar_inv * res
         t += dt
         if t > 0.5:
@@ -84,4 +87,6 @@ print("Total time:", end - start)
 # %%
 # Plot
 settings = {'Multidim': {'animate': True, 'speed': 10}}
-Draw(us.components[1], mesh, min=-1, max=1, settings=settings)
+Draw(us.components[0], mesh, min=0, max=1, settings=settings)
+
+# %%
