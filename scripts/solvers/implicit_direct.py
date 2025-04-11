@@ -1,6 +1,7 @@
 # %%
 import time
 
+import matplotlib.pyplot as plt
 from netgen import occ
 import ngsolve as ngs
 from ngsolve.webgui import Draw
@@ -10,7 +11,7 @@ from ngsolve.webgui import Draw
 D = 2
 n_steps = 1000
 dt = 1 / n_steps
-n_threads = 1
+n_threads = 16
 
 # %%
 # Geometry
@@ -26,10 +27,9 @@ box2.faces[1].bc("right")
 box1.mat("cell:left")
 box2.mat("cell:right")
 geo = occ.Glue([box1, box2])
-mesh = ngs.Mesh(occ.OCCGeometry(geo).GenerateMesh(maxh=0.1))
+mesh = ngs.Mesh(occ.OCCGeometry(geo).GenerateMesh(maxh=0.05))
 print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
 Draw(mesh)
-print(mesh.GetBoundaries())
 
 # %%
 # FEM system (diffusion with influx on the left boundary, transmission through the interface)
@@ -89,3 +89,19 @@ settings = {'Multidim': {'animate': True, 'speed': 10}}
 Draw(us.components[1], mesh, min=-1, max=1, settings=settings)
 
 # %%
+threads = [1, 2, 4, 8, 16]
+runtimes = [
+    12.643525838851929,
+    13.944251775741577,
+    14.410449028015137,
+    14.782570123672485,
+    14.404155254364014
+]
+plt.loglog(threads, runtimes, 'ro-')
+plt.loglog(threads, [runtimes[0] / n for n in threads], 'b--')
+plt.xlabel('Number of threads')
+plt.ylabel('Runtime (s)')
+plt.title('Runtime vs. Number of Threads')
+plt.grid()
+plt.legend(['Runtime', 'Ideal Speedup'])
+plt.show()
