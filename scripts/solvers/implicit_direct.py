@@ -1,4 +1,8 @@
 # %%
+"""
+Concentration is diffusing from the left to the right compartment through an
+interface. The interface equation is part of the stiffness matrix.
+"""
 import time
 
 from netgen import occ

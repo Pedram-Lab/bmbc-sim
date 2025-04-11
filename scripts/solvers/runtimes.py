@@ -1,3 +1,6 @@
+"""
+Plot the runtimes of the implicit solvers over the number of threads.
+"""
 import matplotlib.pyplot as plt
 
 threads = [1, 2, 4, 8, 16]
