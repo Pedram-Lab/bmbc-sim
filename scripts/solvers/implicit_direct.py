@@ -1,7 +1,6 @@
 # %%
 import time
 
-import matplotlib.pyplot as plt
 from netgen import occ
 import ngsolve as ngs
 from ngsolve.webgui import Draw
@@ -9,9 +8,9 @@ from ngsolve.webgui import Draw
 # %%
 # Parameters
 D = 2
-n_steps = 1000
-dt = 1 / n_steps
-n_threads = 16
+N_STEPS = 1000
+dt = 1 / N_STEPS
+N_THREADS = 1
 
 # %%
 # Geometry
@@ -56,7 +55,7 @@ us = ngs.GridFunction(fes, multidim=0)
 
 # %%
 start = time.time()
-ngs.SetNumThreads(n_threads)
+ngs.SetNumThreads(N_THREADS)
 with ngs.TaskManager():
     a.Assemble()
     m.Assemble()
@@ -69,7 +68,7 @@ with ngs.TaskManager():
     t = 0
     k = 0
     us.AddMultiDimComponent(u.vec)
-    for i in range(n_steps):
+    for i in range(N_STEPS):
         res = -dt * (a.mat * u.vec)
         u.vec.data += mstar_inv * res
         t += dt
@@ -87,21 +86,3 @@ print("Total time:", end - start)
 # Plot
 settings = {'Multidim': {'animate': True, 'speed': 10}}
 Draw(us.components[1], mesh, min=-1, max=1, settings=settings)
-
-# %%
-threads = [1, 2, 4, 8, 16]
-runtimes = [
-    12.643525838851929,
-    13.944251775741577,
-    14.410449028015137,
-    14.782570123672485,
-    14.404155254364014
-]
-plt.loglog(threads, runtimes, 'ro-')
-plt.loglog(threads, [runtimes[0] / n for n in threads], 'b--')
-plt.xlabel('Number of threads')
-plt.ylabel('Runtime (s)')
-plt.title('Runtime vs. Number of Threads')
-plt.grid()
-plt.legend(['Runtime', 'Ideal Speedup'])
-plt.show()
