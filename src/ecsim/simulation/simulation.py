@@ -226,8 +226,6 @@ class Simulation:
         compartments = self.simulation_geometry.compartments.values()
         mass = ngs.BilinearForm(self._rd_fes, check_unused=False)
         stiffness = ngs.BilinearForm(self._rd_fes, check_unused=False)
-        active_dofs = ngs.BitArray(self._rd_fes.ndof)
-        active_dofs[:] = True
         test_and_trial = list(zip(*self._rd_fes.TnT()))
         concentration = ngs.GridFunction(self._rd_fes)
 
@@ -254,10 +252,10 @@ class Simulation:
         mass.Assemble()
         stiffness.Assemble()
 
-        # Invert the mass matrix and the matrix for the implicit mid-point rule
-        m_star = mass.mat.CreateMatrix()
-        m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
-        time_stepping_matrix = m_star.Inverse(active_dofs)
+        # Invert the mass matrix and the matrix for the implicit Euler rule
+        mass.mat.AsVector().data += self._dt * stiffness.mat.AsVector()
+        smoother = mass.mat.CreateSmoother(self._rd_fes.FreeDofs())
+        time_stepping_matrix = ngs.CGSolver(mat=mass.mat, pre=smoother, printrates=False)
 
         return concentration, stiffness, time_stepping_matrix
 
