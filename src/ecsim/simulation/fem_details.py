@@ -74,16 +74,14 @@ class FemLhs:
                 if s != species:
                     continue
 
-                def get_index_and_concentration(compartment, concentration):
+                def select(compartment, concentration, tnt):
                     if compartment is None:
-                        return None, None
+                        return None, None, None
                     idx = compartment_to_index[compartment]
-                    return idx, concentration.components[idx]
+                    return concentration.components[idx], *tnt[idx]
 
-                src_idx, src_c = get_index_and_concentration(source, concentration)
-                trg_idx, trg_c = get_index_and_concentration(target, concentration)
-                src_test, src_trial = None, None if src_idx is None else test_and_trial[src_idx]
-                trg_test, trg_trial = None, None if trg_idx is None else test_and_trial[trg_idx]
+                src_c, src_test, src_trial = select(source, concentration, test_and_trial)
+                trg_c, trg_test, trg_trial = select(target, concentration, test_and_trial)
 
                 # Calculate the flux density through the membrane
                 flux = transport.flux_lhs(src_c, trg_c, src_test, trg_test)
@@ -92,9 +90,9 @@ class FemLhs:
                     area = to_simulation_units(membrane.area, 'area')
                     flux_density = (flux / area).Compile()
                     ds = ngs.ds(membrane.name)
-                    if src_idx is not None:
+                    if src_trial is not None:
                         transport_term += -flux_density * src_trial * ds
-                    if trg_idx is not None:
+                    if trg_trial is not None:
                         transport_term += flux_density * trg_trial * ds
 
         # Assemble the mass and stiffness matrices
@@ -176,19 +174,19 @@ class FemRhs:
                 for product in products:
                     source_terms[product] += -reverse_reaction * ngs.dx
 
-        # Handle transport terms
+        # Handle explicit transport terms
         for membrane in simulation_geometry.membranes.values():
             for s, source, target, transport in membrane.get_transport():
                 concentration = concentrations[s]
 
-                def get_index_and_concentration(compartment, concentration):
+                def select(compartment, concentration, test):
                     if compartment is None:
                         return None, None
                     idx = compartment_to_index[compartment]
-                    return idx, concentration.components[idx]
+                    return concentration.components[idx], test[idx]
 
-                src_idx, src_c = get_index_and_concentration(source, concentration)
-                trg_idx, trg_c = get_index_and_concentration(target, concentration)
+                src_c, src_test = select(source, concentration, test_functions)
+                trg_c, trg_test = select(target, concentration, test_functions)
 
                 # Calculate the flux density through the membrane
                 flux = transport.flux_rhs(src_c, trg_c)
@@ -197,10 +195,10 @@ class FemRhs:
                     area = to_simulation_units(membrane.area, 'area')
                     flux_density = (flux / area).Compile()
                     ds = ngs.ds(membrane.name)
-                    if src_idx is not None:
-                        source_terms[s] += -flux_density * test_functions[src_idx] * ds
-                    if trg_idx is not None:
-                        source_terms[s] += flux_density * test_functions[trg_idx] * ds
+                    if src_test is not None:
+                        source_terms[s] += -flux_density * src_test * ds
+                    if trg_test is not None:
+                        source_terms[s] += flux_density * trg_test * ds
 
         return {s: cls(source_terms[s]) for s in species}
 

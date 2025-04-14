@@ -19,15 +19,17 @@ class Transport(abc.ABC):
 
     def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction,
-            src_test: ngs.comp.ProxyFunction,
-            trg_test: ngs.comp.ProxyFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
         """Compute the lhs-version of the boundary flux of the transport
         mechanism. The flux is assumed to be the total flux across the membrane.
         In case a flux density is readily available, it should be multiplied by
         :code:`membrane.area`.
+        All of the arguments can be None, in which case the flux is assumed to
+        connect the domain to the outside.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -43,13 +45,15 @@ class Transport(abc.ABC):
 
     def flux_rhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
     ) -> ngs.CoefficientFunction:
         """Compute the rhs-version of the boundary flux of the transport
         mechanism. The flux is assumed to be the total flux across the membrane.
         In case a flux density is readily available, it should be multiplied by
         :code:`membrane.area`.
+        All of the arguments can be None, in which case the flux is assumed to
+        connect the domain to the outside.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -127,26 +131,34 @@ class Passive(Transport):
 
     def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction,
-            src_test: ngs.comp.ProxyFunction,
-            trg_test: ngs.comp.ProxyFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
         del source, target  # Unused
-        src_test = self._constant_if_none(src_test)
-        trg_test = self._constant_if_none(trg_test)
+        if src_test is None and trg_test is None:
+            raise ValueError("Both source and target cannot be None.")
+        if (src_test is None or trg_test is None) and self.outside_concentration is None:
+            raise ValueError("No outside concentration specified for outside flux.")
+
+        if src_test is not None:
+            return -self.permeability * src_test
+        if trg_test is not None:
+            return self.permeability * trg_test
 
         return self.permeability * (src_test - trg_test)
 
 
-    def _constant_if_none(self, cf):
-        """Return a constant coefficient function if the input is None.
-        """
-        if cf is None:
-            if self.outside_concentration is None:
-                raise ValueError("No outside concentration specified.")
-            return ngs.CoefficientFunction(self.outside_concentration)
-        return cf
+    def flux_rhs(
+            self,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
+    ) -> ngs.CoefficientFunction:
+        if source is None:
+            return self.permeability * self.outside_concentration
+        if target is None:
+            return -self.permeability * self.outside_concentration
 
 
 class Active(Transport):
@@ -170,13 +182,15 @@ class Active(Transport):
 
     def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction,
-            src_test: ngs.comp.ProxyFunction,
-            trg_test: ngs.comp.ProxyFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
         # Only the source concentration contributes to the flux
         del target, trg_test  # Unused
+        if src_test is None:
+            raise ValueError("Source test function cannot be None in active transport.")
 
         # Compute the flux using the Michaelis-Menten equation
         return self.v_max * src_test / (self.km + source)
@@ -200,8 +214,8 @@ class GeneralFlux(Transport):
 
     def flux_rhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
     ) -> ngs.CoefficientFunction:
         # Flux is independent of the concentrations
         del source, target

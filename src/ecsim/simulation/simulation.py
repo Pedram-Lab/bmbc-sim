@@ -155,14 +155,14 @@ class Simulation:
             residual = {}
             for _ in trange(n_steps):
                 # Update the concentrations via IMEX approach:
-                # Reaction/transport (explicit)
+                # Reaction + some transport (explicit)
                 self._update_transport(t)
                 for species, c in self._concentrations.items():
                     lhs = self._lhs[species].assemble()
                     rhs = self._rhs[species].assemble()
                     residual[species] = dt * (rhs.vec - lhs.stiffness * c.vec)
 
-                # Diffusion (implicit)
+                # Diffusion + some transport (implicit)
                 for species, c in self._concentrations.items():
                     lhs = self._lhs[species]
                     c.vec.data += lhs.time_stepping * residual[species]
