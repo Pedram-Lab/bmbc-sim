@@ -117,12 +117,14 @@ class Simulation:
             end_time: u.Quantity,
             time_step: u.Quantity,
             start_time: u.Quantity = 0 * u.s,
+            n_threads: int = 4,
     ) -> None:
         """Run the simulation until a given end time.
 
         :param end_time: The end time of the simulation.
         :param time_step: The time step to use for the simulation.
         :param start_time: The start time of the simulation.
+        :param n_threads: The number of threads to use for the simulation.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -138,48 +140,44 @@ class Simulation:
         self._dt = to_simulation_units(time_step, 'time')
         self._time_step = time_step
 
-        # TODO: make number of threads configurable
-        ngs.SetNumThreads(4)
-        task_manager = ngs.TaskManager()
-        task_manager.__enter__()
+        # Main simulation loop (with parallelization)
+        ngs.SetNumThreads(n_threads)
+        with ngs.TaskManager:
+            self._setup()
 
-        self._setup()
-
-        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
-        for recorder in self._recorders:
-            recorder.setup(
-                directory=self.result_directory,
-                mesh=self.simulation_geometry.mesh,
-                compartments=self.simulation_geometry.compartments.values(),
-                concentrations=name_to_concentration,
-                start_time=start_time.copy()
-            )
-
-        t = start_time.copy()
-        for _ in trange(n_steps):
-            # Update the concentrations via first-order operator splitting
-            # Full step for reaction and transport
-            self._update_transport(t)
-            for species, c in self._concentrations.items():
-                f = self._source_terms[species]
-                f.Assemble()
-                c.vec.data += self._dt * (self._mass_inv * f.vec)
-
-            # Full step for diffusion
-            for species, c in self._concentrations.items():
-                a = self._stiffness[species]
-                m_star = self._time_stepping_matrix[species]
-                residual = -self._dt * (a.mat * c.vec)
-                c.vec.data += m_star * residual
-
-            t += self._time_step
+            name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
             for recorder in self._recorders:
-                recorder.record(current_time=t)
+                recorder.setup(
+                    directory=self.result_directory,
+                    mesh=self.simulation_geometry.mesh,
+                    compartments=self.simulation_geometry.compartments.values(),
+                    concentrations=name_to_concentration,
+                    start_time=start_time.copy()
+                )
 
-        for recorder in self._recorders:
-            recorder.finalize(end_time=t)
+            t = start_time.copy()
+            for _ in trange(n_steps):
+                # Update the concentrations via first-order operator splitting
+                # Full step for reaction and transport
+                self._update_transport(t)
+                for species, c in self._concentrations.items():
+                    f = self._source_terms[species]
+                    f.Assemble()
+                    c.vec.data += self._dt * (self._mass_inv * f.vec)
 
-        task_manager.__exit__(None, None, None)
+                # Full step for diffusion
+                for species, c in self._concentrations.items():
+                    a = self._stiffness[species]
+                    m_star = self._time_stepping_matrix[species]
+                    residual = -self._dt * (a.mat * c.vec)
+                    c.vec.data += m_star * residual
+
+                t += self._time_step
+                for recorder in self._recorders:
+                    recorder.record(current_time=t)
+
+            for recorder in self._recorders:
+                recorder.finalize(end_time=t)
 
 
     def _update_transport(self, t: u.Quantity) -> None:
