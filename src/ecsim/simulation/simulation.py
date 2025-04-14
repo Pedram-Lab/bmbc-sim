@@ -48,10 +48,9 @@ class Simulation:
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
         self ._rd_fes: ngs.FESpace = None
         self._stiffness: dict[ChemicalSpecies, ngs.BilinearForm] = {}
-        self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
+        self._time_stepping: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
-        self._mass_inv: ngs.BaseMatrix = None
         self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
 
         self._recorders: list[Recorder] = []
@@ -142,7 +141,7 @@ class Simulation:
 
         # Main simulation loop (with parallelization)
         ngs.SetNumThreads(n_threads)
-        with ngs.TaskManager:
+        with ngs.TaskManager():
             self._setup()
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
@@ -156,21 +155,21 @@ class Simulation:
                 )
 
             t = start_time.copy()
+            residual = {}
             for _ in trange(n_steps):
-                # Update the concentrations via first-order operator splitting
-                # Full step for reaction and transport
+                # Update the concentrations via IMEX approach:
+                # Reaction/transport (explicit)
                 self._update_transport(t)
                 for species, c in self._concentrations.items():
                     f = self._source_terms[species]
                     f.Assemble()
-                    c.vec.data += self._dt * (self._mass_inv * f.vec)
-
-                # Full step for diffusion
-                for species, c in self._concentrations.items():
                     a = self._stiffness[species]
-                    m_star = self._time_stepping_matrix[species]
-                    residual = -self._dt * (a.mat * c.vec)
-                    c.vec.data += m_star * residual
+                    residual[species] = self._dt * (f.vec - a.mat * c.vec)
+
+                # Diffusion (implicit)
+                for species, c in self._concentrations.items():
+                    m_star = self._time_stepping[species]
+                    c.vec.data += m_star * residual[species]
 
                 t += self._time_step
                 for recorder in self._recorders:
@@ -213,11 +212,10 @@ class Simulation:
                     self._rd_fes.ndof)
 
         for species in self.species:
-            concentration, mass_inv, stiffness, time_stepping_matrix = self._setup_lhs(species)
+            concentration, stiffness, time_stepping = self._setup_lhs(species)
             self._concentrations[species] = concentration
             self._stiffness[species] = stiffness
-            self._time_stepping_matrix[species] = time_stepping_matrix
-            self._mass_inv = mass_inv
+            self._time_stepping[species] = time_stepping
 
         self._source_terms = self._setup_rhs()
 
@@ -260,9 +258,8 @@ class Simulation:
         m_star = mass.mat.CreateMatrix()
         m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
         time_stepping_matrix = m_star.Inverse(active_dofs)
-        m_inv = mass.mat.Inverse()
 
-        return concentration, m_inv, stiffness, time_stepping_matrix
+        return concentration, stiffness, time_stepping_matrix
 
 
     def _setup_rhs(self):
