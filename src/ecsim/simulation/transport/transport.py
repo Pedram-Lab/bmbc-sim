@@ -22,7 +22,7 @@ class Transport(abc.ABC):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction,
             src_test: ngs.comp.ProxyFunction,
-            tgt_test: ngs.comp.ProxyFunction
+            trg_test: ngs.comp.ProxyFunction
     ) -> ngs.CoefficientFunction:
         """Compute the lhs-version of the boundary flux of the transport
         mechanism. The flux is assumed to be the total flux across the membrane.
@@ -34,11 +34,11 @@ class Transport(abc.ABC):
         :param target: Coefficient function representing the concentration in
             the target compartment.
         :param src_test: Test function for the source compartment.
-        :param tgt_test: Test function for the target compartment.
+        :param trg_test: Test function for the target compartment.
         :return: Coefficient function representing the flux across the membrane
             from source to target
         """
-        del source, target, src_test, tgt_test  # Unused in default implementation
+        del source, target, src_test, trg_test  # Unused in default implementation
         return None
 
     def flux_rhs(
@@ -130,13 +130,13 @@ class Passive(Transport):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction,
             src_test: ngs.comp.ProxyFunction,
-            tgt_test: ngs.comp.ProxyFunction
+            trg_test: ngs.comp.ProxyFunction
     ) -> ngs.CoefficientFunction:
         del source, target  # Unused
-        source = self._constant_if_none(source)
-        target = self._constant_if_none(target)
+        src_test = self._constant_if_none(src_test)
+        trg_test = self._constant_if_none(trg_test)
 
-        return self.permeability * (src_test - tgt_test)
+        return self.permeability * (src_test - trg_test)
 
 
     def _constant_if_none(self, cf):
@@ -173,10 +173,10 @@ class Active(Transport):
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction,
             src_test: ngs.comp.ProxyFunction,
-            tgt_test: ngs.comp.ProxyFunction
+            trg_test: ngs.comp.ProxyFunction
     ) -> ngs.CoefficientFunction:
         # Only the source concentration contributes to the flux
-        del target, tgt_test  # Unused
+        del target, trg_test  # Unused
 
         # Compute the flux using the Michaelis-Menten equation
         return self.v_max * src_test / (self.km + source)
