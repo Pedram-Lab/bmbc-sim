@@ -142,10 +142,10 @@ class Passive(Transport):
         if (src_test is None or trg_test is None) and self.outside_concentration is None:
             raise ValueError("No outside concentration specified for outside flux.")
 
-        if src_test is not None:
-            return -self.permeability * src_test
-        if trg_test is not None:
-            return self.permeability * trg_test
+        if trg_test is None:
+            return self.permeability * src_test
+        if src_test is None:
+            return -self.permeability * trg_test
 
         return self.permeability * (src_test - trg_test)
 
@@ -156,9 +156,9 @@ class Passive(Transport):
             target: ngs.CoefficientFunction | None
     ) -> ngs.CoefficientFunction:
         if source is None:
-            return self.permeability * self.outside_concentration
-        if target is None:
             return -self.permeability * self.outside_concentration
+        if target is None:
+            return self.permeability * self.outside_concentration
 
 
 class Active(Transport):

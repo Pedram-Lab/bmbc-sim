@@ -120,13 +120,13 @@ class FemLhs:
     @property
     def stiffness(self) -> ngs.BaseMatrix:
         """The stiffness matrix."""
-        return self._a + self._transport.mat
+        return self._a - self._transport.mat
 
 
     @property
     def time_stepping(self) -> ngs.BaseMatrix:
         """The matrix for the implicit Euler rule."""
-        return ngs.CGSolver(self._m_star + self._transport.mat, self._pre, printrates=False)
+        return ngs.CGSolver(self._m_star - self._transport.mat, self._pre, printrates=False)
 
 
 class FemRhs:
