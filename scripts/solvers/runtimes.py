@@ -37,11 +37,20 @@ cg_full = [
     1.6264290809631348
 ]
 
+cg_smart = [
+    9.626245260238647,
+    4.687720775604248,
+    2.8375468254089355,
+    2.103302001953125,
+    2.9910757541656494 
+]
+
 all_runtimes = [
     (implicit_direct, 'Implicit Direct'),
     (implicit_rhs, 'Implicit RHS'),
     (implicit_splitting, 'Implicit Splitting'),
-    (cg_full, 'CG Full')
+    (cg_full, 'CG Full'),
+    (cg_smart, 'CG Smart')
 ]
 
 for runtimes, label in all_runtimes:
