@@ -51,7 +51,8 @@ class Simulation:
         self._time_stepping: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._dt = None
-        self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
+        self._reaction: dict[ChemicalSpecies, ngs.LinearForm] = {}
+        self._transport: dict[ChemicalSpecies, ngs.BilinearForm] = {}
 
         self._recorders: list[Recorder] = []
         self._time_step = None
@@ -161,7 +162,7 @@ class Simulation:
                 # Reaction/transport (explicit)
                 self._update_transport(t)
                 for species, c in self._concentrations.items():
-                    f = self._source_terms[species]
+                    f = self._reaction[species]
                     f.Assemble()
                     a = self._stiffness[species]
                     residual[species] = self._dt * (f.vec - a.mat * c.vec)
@@ -217,7 +218,7 @@ class Simulation:
             self._stiffness[species] = stiffness
             self._time_stepping[species] = time_stepping
 
-        self._source_terms = self._setup_rhs()
+        self._reaction = self._setup_rhs()
 
 
     def _setup_lhs(self, species):
@@ -298,40 +299,28 @@ class Simulation:
             for species, source, target, transport in membrane.get_transport():
                 concentration = self._concentrations[species]
 
-                def get_index_and_concentration(compartment):
+                def get_index_and_concentration(compartment, concentration):
                     if compartment is None:
                         return None, None
                     idx = compartment_to_index[compartment]
                     return idx, concentration.components[idx]
 
-                src_idx, src_c = get_index_and_concentration(source)
-                trg_idx, trg_c = get_index_and_concentration(target)
+                src_idx, src_c = get_index_and_concentration(source, concentration)
+                trg_idx, trg_c = get_index_and_concentration(target, concentration)
 
                 # Calculate the flux density through the membrane
-                area = to_simulation_units(membrane.area, 'area')
-                flux_density = (transport.flux(src_c, trg_c) / area).Compile()
+                flux = transport.flux_rhs(src_c, trg_c)
 
-                ds = ngs.ds(membrane.name)
-                if src_idx is not None:
-                    source_terms[species] += -flux_density * test_functions[src_idx] * ds
-                if trg_idx is not None:
-                    source_terms[species] += flux_density * test_functions[trg_idx] * ds
+                if flux is not None:
+                    area = to_simulation_units(membrane.area, 'area')
+                    flux_density = (flux / area).Compile()
+                    ds = ngs.ds(membrane.name)
+                    if src_idx is not None:
+                        source_terms[species] += -flux_density * test_functions[src_idx] * ds
+                    if trg_idx is not None:
+                        source_terms[species] += flux_density * test_functions[trg_idx] * ds
 
         return source_terms
-
-
-def set_dofs(space, dof_array, region, value):
-    """Set the values of the degrees of freedom in a given region.
-
-    :param space: The finite element space to which the degrees of freedom belong.
-    :param dof_array: The array of degrees of freedom to set. Changes are
-        made in place.
-    :param region: The region in which to set the degrees of freedom.
-    :param value: The value to set the degrees of freedom to.
-    """
-    for el in region.Elements():
-        for dof in space.GetDofNrs(el):
-            dof_array[dof] = value
 
 
 def find_latest_results(name: str, results_root: str) -> str:

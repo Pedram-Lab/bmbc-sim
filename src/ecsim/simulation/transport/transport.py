@@ -17,15 +17,39 @@ class Transport(abc.ABC):
         self._mutable_coefficients = []
 
 
-    @abc.abstractmethod
-    def flux(
+    def flux_lhs(
+            self,
+            source: ngs.CoefficientFunction,
+            target: ngs.CoefficientFunction,
+            src_test: ngs.comp.ProxyFunction,
+            tgt_test: ngs.comp.ProxyFunction
+    ) -> ngs.CoefficientFunction:
+        """Compute the lhs-version of the boundary flux of the transport
+        mechanism. The flux is assumed to be the total flux across the membrane.
+        In case a flux density is readily available, it should be multiplied by
+        :code:`membrane.area`.
+
+        :param source: Coefficient function representing the concentration in
+            the source compartment.
+        :param target: Coefficient function representing the concentration in
+            the target compartment.
+        :param src_test: Test function for the source compartment.
+        :param tgt_test: Test function for the target compartment.
+        :return: Coefficient function representing the flux across the membrane
+            from source to target
+        """
+        del source, target, src_test, tgt_test  # Unused in default implementation
+        return None
+
+    def flux_rhs(
             self,
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction,
     ) -> ngs.CoefficientFunction:
-        """Compute the boundary flux of the transport mechanism. The flux is
-        assumed to be the total flux across the membrane. In case a flux
-        density is readily available, it should be multiplied by :code:`membrane.area`.
+        """Compute the rhs-version of the boundary flux of the transport
+        mechanism. The flux is assumed to be the total flux across the membrane.
+        In case a flux density is readily available, it should be multiplied by
+        :code:`membrane.area`.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -34,6 +58,8 @@ class Transport(abc.ABC):
         :return: Coefficient function representing the flux across the membrane
             from source to target
         """
+        del source, target  # Unused in default implementation
+        return None
 
 
     def update_flux(self, t: u.Quantity) -> None:
@@ -99,15 +125,18 @@ class Passive(Transport):
             self._register_coefficient(outside_concentration, 'molar concentration')
 
 
-    def flux(
+    def flux_lhs(
             self,
             source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            target: ngs.CoefficientFunction,
+            src_test: ngs.comp.ProxyFunction,
+            tgt_test: ngs.comp.ProxyFunction
     ) -> ngs.CoefficientFunction:
+        del source, target  # Unused
         source = self._constant_if_none(source)
         target = self._constant_if_none(target)
 
-        return self.permeability * (source - target)
+        return self.permeability * (src_test - tgt_test)
 
 
     def _constant_if_none(self, cf):
@@ -139,16 +168,18 @@ class Active(Transport):
         self.km = self._register_coefficient(km, 'molar concentration')
 
 
-    def flux(
+    def flux_lhs(
             self,
             source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            target: ngs.CoefficientFunction,
+            src_test: ngs.comp.ProxyFunction,
+            tgt_test: ngs.comp.ProxyFunction
     ) -> ngs.CoefficientFunction:
         # Only the source concentration contributes to the flux
-        del target
+        del target, tgt_test  # Unused
 
         # Compute the flux using the Michaelis-Menten equation
-        return self.v_max * source / (self.km + source)
+        return self.v_max * src_test / (self.km + source)
 
 
 class GeneralFlux(Transport):
@@ -167,10 +198,11 @@ class GeneralFlux(Transport):
         self.flux_value = self._register_coefficient(flux, 'catalytic activity')
 
 
-    def flux(
+    def flux_rhs(
             self,
             source: ngs.CoefficientFunction,
             target: ngs.CoefficientFunction
     ) -> ngs.CoefficientFunction:
         # Flux is independent of the concentrations
+        del source, target
         return self.flux_value
