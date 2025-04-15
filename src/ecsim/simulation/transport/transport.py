@@ -30,6 +30,10 @@ class Transport(abc.ABC):
         :code:`membrane.area`.
         All of the arguments can be None, in which case the flux is assumed to
         connect the domain to the outside.
+        The following term is added to left-hand side of the PDE:
+        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        the flux density that's implemented by this method in terms of test
+        functions and concentrations of the source and target compartments.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -54,6 +58,10 @@ class Transport(abc.ABC):
         :code:`membrane.area`.
         All of the arguments can be None, in which case the flux is assumed to
         connect the domain to the outside.
+        The following term is added to right-hand side of the PDE:
+        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        the flux density that's implemented by this method in terms of the
+        concentrations of the source and target compartments.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -156,9 +164,9 @@ class Passive(Transport):
             target: ngs.CoefficientFunction | None
     ) -> ngs.CoefficientFunction:
         if source is None:
-            return -self.permeability * self.outside_concentration
-        if target is None:
             return self.permeability * self.outside_concentration
+        if target is None:
+            return -self.permeability * self.outside_concentration
 
 
 class Active(Transport):

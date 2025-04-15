@@ -30,7 +30,7 @@ def create_simulation(tmp_path, width):
 
 
 @pytest.mark.parametrize('width', [1, 2])
-def test_single_compartment_fluxes(tmp_path, width, visualize=False):
+def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
     """Test that, in a single compartment:
     - linear flux drives a species to a constant value (from above and below)
     - Michaelis-Menten efflux depletes a species
@@ -148,4 +148,4 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
 
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as tmpdir:
-        test_single_compartment_fluxes(tmpdir, 2, visualize=True)
+        test_fluxes_from_to_outside(tmpdir, 2, visualize=True)
