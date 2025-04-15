@@ -24,9 +24,9 @@ mesh = create_ca_depletion_mesh(
     cytosol_height=cytosol_height,
     ecs_height=ecs_height,
     channel_radius=channel_radius,
-    mesh_size=100 * u.nm
+    mesh_size=100 * u.nm,
+    channel_mesh_size=50 * u.nm
 )
-
 
 simulation = ecsim.Simulation('tsien', result_root='results')
 geometry = simulation.setup_geometry(mesh)
@@ -38,6 +38,7 @@ geometry.visualize(resolve_regions=False)
 ecs = geometry.compartments['ecs']
 cytosol = geometry.compartments['cytosol']
 channel = geometry.membranes['channel']
+ecs_top = geometry.membranes['ecs_top']
 print(f"ecs volume: {ecs.volume}")
 print(f"cytosol volume: {cytosol.volume}")
 print(f"Channel area: {channel.area}")
@@ -75,13 +76,19 @@ cytosol.add_reaction(
 )
 
 # Add transport
-rate_channel = 10 * u.um / u.s
+rate_channel = 10 * u.um / u.ms
 permeability = rate_channel * channel.area
 channel.add_transport(
     species=ca,
     transport=transport.Passive(permeability=permeability),
     source=ecs,
     target=cytosol
+)
+ecs_top.add_transport(
+    species=ca,
+    transport=transport.Passive(permeability=permeability, outside_concentration=15 * mM),
+    source=ecs,
+    target=None
 )
 
 # Add recorders to capture simulation data
@@ -91,4 +98,4 @@ simulation.add_recorder(recorder.CompartmentSubstance(1 * u.ms))
 simulation.add_recorder(recorder.PointValues(20 * u.ms, points))
 
 # Run the simulation
-simulation.run(end_time=20 * u.ms, time_step=1 * u.us)
+simulation.run(end_time=20 * u.ms, time_step=1 * u.us, n_threads=8)

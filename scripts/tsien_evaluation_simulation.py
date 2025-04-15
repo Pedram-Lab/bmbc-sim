@@ -3,7 +3,6 @@ import os
 import pyvista as pv
 import xarray as xr
 import matplotlib.pyplot as plt
-import numpy as np
 
 from ecsim import find_latest_results
 
@@ -51,8 +50,6 @@ for species in species_list:
     plt.plot(x_coords, final_concentration, label=species)
     plt.xlabel("Distance from center [µm]")
     plt.ylabel("Concentration [µM]")
-    #plt.ylim(4e-2, 3e1)
-    #plt.xlim(0, 2000)
-    plt.title(f"Species: {species}")
+    plt.title(f"Species: {species} at t={time[-1]} ms")
     plt.legend()
 plt.show()
