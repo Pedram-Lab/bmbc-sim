@@ -11,7 +11,8 @@ from ecsim.simulation.recorder import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
-from .simulation_agents import ChemicalSpecies
+from ecsim.simulation.simulation_agents import ChemicalSpecies
+from ecsim.simulation.fem_details import FemLhs, FemRhs
 
 
 class Simulation:
@@ -47,15 +48,11 @@ class Simulation:
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
         self ._rd_fes: ngs.FESpace = None
-        self._stiffness: dict[ChemicalSpecies, ngs.BilinearForm] = {}
-        self._time_stepping_matrix: dict[ChemicalSpecies, ngs.BaseMatrix] = {}
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
-        self._dt = None
-        self._mass_inv: ngs.BaseMatrix = None
-        self._source_terms: dict[ChemicalSpecies, ngs.LinearForm] = {}
+        self._lhs: dict[ChemicalSpecies, FemLhs] = {}
+        self._rhs: dict[ChemicalSpecies, FemRhs] = {}
 
         self._recorders: list[Recorder] = []
-        self._time_step = None
 
 
     def setup_geometry(
@@ -117,12 +114,14 @@ class Simulation:
             end_time: u.Quantity,
             time_step: u.Quantity,
             start_time: u.Quantity = 0 * u.s,
+            n_threads: int = 4,
     ) -> None:
         """Run the simulation until a given end time.
 
         :param end_time: The end time of the simulation.
         :param time_step: The time step to use for the simulation.
         :param start_time: The start time of the simulation.
+        :param n_threads: The number of threads to use for the simulation.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -135,51 +134,45 @@ class Simulation:
             raise ValueError("Number of steps must be at least 1.")
         logger.info("Running simulation for %d steps of size %s.", n_steps, time_step)
 
-        self._dt = to_simulation_units(time_step, 'time')
-        self._time_step = time_step
+        dt = to_simulation_units(time_step, 'time')
 
-        # TODO: make number of threads configurable
-        ngs.SetNumThreads(4)
-        task_manager = ngs.TaskManager()
-        task_manager.__enter__()
+        # Main simulation loop (with parallelization)
+        ngs.SetNumThreads(n_threads)
+        with ngs.TaskManager():
+            self._setup(dt)
 
-        self._setup()
-
-        name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
-        for recorder in self._recorders:
-            recorder.setup(
-                directory=self.result_directory,
-                mesh=self.simulation_geometry.mesh,
-                compartments=self.simulation_geometry.compartments.values(),
-                concentrations=name_to_concentration,
-                start_time=start_time.copy()
-            )
-
-        t = start_time.copy()
-        for _ in trange(n_steps):
-            # Update the concentrations via first-order operator splitting
-            # Full step for reaction and transport
-            self._update_transport(t)
-            for species, c in self._concentrations.items():
-                f = self._source_terms[species]
-                f.Assemble()
-                c.vec.data += self._dt * (self._mass_inv * f.vec)
-
-            # Full step for diffusion
-            for species, c in self._concentrations.items():
-                a = self._stiffness[species]
-                m_star = self._time_stepping_matrix[species]
-                residual = -self._dt * (a.mat * c.vec)
-                c.vec.data += m_star * residual
-
-            t += self._time_step
+            name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
             for recorder in self._recorders:
-                recorder.record(current_time=t)
+                recorder.setup(
+                    directory=self.result_directory,
+                    mesh=self.simulation_geometry.mesh,
+                    compartments=self.simulation_geometry.compartments.values(),
+                    concentrations=name_to_concentration,
+                    start_time=start_time.copy()
+                )
 
-        for recorder in self._recorders:
-            recorder.finalize(end_time=t)
+            t = start_time.copy()
+            residual = {}
+            for _ in trange(n_steps):
+                # Update the concentrations via IMEX approach:
+                # Reaction + some transport (explicit)
+                self._update_transport(t)
+                for species, c in self._concentrations.items():
+                    lhs = self._lhs[species].assemble()
+                    rhs = self._rhs[species].assemble()
+                    residual[species] = dt * (rhs.vec - lhs.stiffness * c.vec)
 
-        task_manager.__exit__(None, None, None)
+                # Diffusion + some transport (implicit)
+                for species, c in self._concentrations.items():
+                    lhs = self._lhs[species]
+                    c.vec.data += lhs.time_stepping * residual[species]
+
+                t += time_step
+                for recorder in self._recorders:
+                    recorder.record(current_time=t)
+
+            for recorder in self._recorders:
+                recorder.finalize(end_time=t)
 
 
     def _update_transport(self, t: u.Quantity) -> None:
@@ -193,7 +186,7 @@ class Simulation:
                 transport.update_flux(t)
 
 
-    def _setup(self) -> None:
+    def _setup(self, dt) -> None:
         """Set up the simulation by initializing the finite element matrices.
         
         :param time_step: The time step to use for the simulation.
@@ -214,131 +207,33 @@ class Simulation:
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
                     self._rd_fes.ndof)
 
+        # Set up the solution vectors
         for species in self.species:
-            concentration, mass_inv, stiffness, time_stepping_matrix = self._setup_lhs(species)
-            self._concentrations[species] = concentration
-            self._stiffness[species] = stiffness
-            self._time_stepping_matrix[species] = time_stepping_matrix
-            self._mass_inv = mass_inv
-
-        self._source_terms = self._setup_rhs()
-
-
-    def _setup_lhs(self, species):
-        """Set up the left-hand side of the finite element equations for a given species.
-        """
-        compartments = self.simulation_geometry.compartments.values()
-        mass = ngs.BilinearForm(self._rd_fes, check_unused=False)
-        stiffness = ngs.BilinearForm(self._rd_fes, check_unused=False)
-        active_dofs = ngs.BitArray(self._rd_fes.ndof)
-        active_dofs[:] = True
-        test_and_trial = list(zip(*self._rd_fes.TnT()))
-        concentration = ngs.GridFunction(self._rd_fes)
-
-        for i, compartment in enumerate(compartments):
-            # Initialize data structures for the species
             logger.debug("Initializing concentrations for species %s.", species)
-            coefficients = compartment.coefficients
-            test, trial = test_and_trial[i]
+            self._concentrations[species] = ngs.GridFunction(self._rd_fes)
 
             # Initialize the concentrations in the compartment
-            if species in coefficients.initial_conditions:
-                c = concentration.components[i]
-                c.Set(coefficients.initial_conditions[species])
+            for i, compartment in enumerate(compartments):
+                coefficients = compartment.coefficients
+                if species in coefficients.initial_conditions:
+                    c = self._concentrations[species].components[i]
+                    c.Set(coefficients.initial_conditions[species])
 
-            # Assemble the stiffness matrix (diffusion terms)
-            if species in coefficients.diffusion and \
-                    (diffusivity := coefficients.diffusion[species]) is not None:
-                stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
-
-            # Set up the time-stepping matrix (inverted perturbed mass matrix)
-            mass += test * trial * ngs.dx
-
-        # Assemble the mass and stiffness matrices
-        mass.Assemble()
-        stiffness.Assemble()
-
-        # Invert the mass matrix and the matrix for the implicit mid-point rule
-        m_star = mass.mat.CreateMatrix()
-        m_star.AsVector().data = mass.mat.AsVector() + self._dt / 2 * stiffness.mat.AsVector()
-        time_stepping_matrix = m_star.Inverse(active_dofs)
-        m_inv = mass.mat.Inverse()
-
-        return concentration, m_inv, stiffness, time_stepping_matrix
-
-
-    def _setup_rhs(self):
-        """Set up the right-hand side of the finite element equations for all species.
-        """
-        test_functions = self._rd_fes.TestFunction()
-        source_terms = {s: ngs.LinearForm(self._rd_fes) for s in self.species}
-        compartments = list(self.simulation_geometry.compartments.values())
-        compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
-
-        # Handle reaction terms
-        for i, compartment in enumerate(compartments):
-            coefficients = compartment.coefficients
-            test = test_functions[i]
-
-            for (reactants, products), (k_f, k_r) in coefficients.reactions.items():
-                # TODO: find a better default value
-                all_reactants = ngs.CoefficientFunction(1.0)
-                for reactant in reactants:
-                    all_reactants *= self._concentrations[reactant].components[i]
-                forward_reaction = (k_f * all_reactants * test).Compile()
-                for reactant in reactants:
-                    source_terms[reactant] += -forward_reaction * ngs.dx
-                for product in products:
-                    source_terms[product] += forward_reaction * ngs.dx
-
-                all_products = ngs.CoefficientFunction(1.0)
-                for product in products:
-                    all_products *= self._concentrations[product].components[i]
-                reverse_reaction = (k_r * all_products * test).Compile()
-                for reactant in reactants:
-                    source_terms[reactant] += reverse_reaction * ngs.dx
-                for product in products:
-                    source_terms[product] += -reverse_reaction * ngs.dx
-
-        # Handle transport terms
-        for membrane in self.simulation_geometry.membranes.values():
-            for species, source, target, transport in membrane.get_transport():
-                concentration = self._concentrations[species]
-
-                def get_index_and_concentration(compartment):
-                    if compartment is None:
-                        return None, None
-                    idx = compartment_to_index[compartment]
-                    return idx, concentration.components[idx]
-
-                src_idx, src_c = get_index_and_concentration(source)
-                trg_idx, trg_c = get_index_and_concentration(target)
-
-                # Calculate the flux density through the membrane
-                area = to_simulation_units(membrane.area, 'area')
-                flux_density = (transport.flux(src_c, trg_c) / area).Compile()
-
-                ds = ngs.ds(membrane.name)
-                if src_idx is not None:
-                    source_terms[species] += -flux_density * test_functions[src_idx] * ds
-                if trg_idx is not None:
-                    source_terms[species] += flux_density * test_functions[trg_idx] * ds
-
-        return source_terms
-
-
-def set_dofs(space, dof_array, region, value):
-    """Set the values of the degrees of freedom in a given region.
-
-    :param space: The finite element space to which the degrees of freedom belong.
-    :param dof_array: The array of degrees of freedom to set. Changes are
-        made in place.
-    :param region: The region in which to set the degrees of freedom.
-    :param value: The value to set the degrees of freedom to.
-    """
-    for el in region.Elements():
-        for dof in space.GetDofNrs(el):
-            dof_array[dof] = value
+        logger.debug("Setting up finite element matrices...")
+        self._lhs = FemLhs.for_all_species(
+            self.species,
+            self._rd_fes,
+            self.simulation_geometry,
+            self._concentrations,
+            dt
+        )
+        logger.debug("Setting up finite element right-hand sides...")
+        self._rhs = FemRhs.for_all_species(
+            self.species,
+            self._rd_fes,
+            self.simulation_geometry,
+            self._concentrations,
+        )
 
 
 def find_latest_results(name: str, results_root: str) -> str:

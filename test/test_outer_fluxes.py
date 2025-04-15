@@ -30,7 +30,7 @@ def create_simulation(tmp_path, width):
 
 
 @pytest.mark.parametrize('width', [1, 2])
-def test_single_compartment_fluxes(tmp_path, width, visualize=False):
+def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
     """Test that, in a single compartment:
     - linear flux drives a species to a constant value (from above and below)
     - Michaelis-Menten efflux depletes a species
@@ -42,7 +42,7 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     left_membrane = simulation.simulation_geometry.membranes['left']
     right_membrane = simulation.simulation_geometry.membranes['right']
 
-    # Species that should stay increase to the outside value
+    # Species that starts too low increases to the outside value
     too_low = simulation.add_species('too-low', valence=0)
     cell.initialize_species(too_low, 0.5 * u.mmol / u.L)
     cell.add_diffusion(too_low, 1 * u.um**2 / u.ms)
@@ -50,7 +50,7 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
     t = transport.Passive(permeability=permeability, outside_concentration=0.7 * u.mmol / u.L)
     left_membrane.add_transport(species=too_low, transport=t, source=cell, target=None)
 
-    # Species that should stay decrease to the outside value
+    # Species that starts too high decreases to the outside value
     too_high = simulation.add_species('too-high', valence=0)
     cell.initialize_species(too_high, 0.8 * u.mmol / u.L)
     cell.add_diffusion(too_high, 1 * u.um**2 / u.ms)
@@ -148,4 +148,4 @@ def test_single_compartment_fluxes(tmp_path, width, visualize=False):
 
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as tmpdir:
-        test_single_compartment_fluxes(tmpdir, 2, visualize=True)
+        test_fluxes_from_to_outside(tmpdir, 2, visualize=True)
