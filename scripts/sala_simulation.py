@@ -5,6 +5,7 @@ import astropy.units as u
 
 import ecsim
 from ecsim.simulation import recorder, transport
+from ecsim.units import M, uM
 
 
 # Create a spherical cell
@@ -23,8 +24,6 @@ geometry = simulation.setup_geometry(mesh)
 # Get the compartments and membranes
 cell = geometry.compartments['cell']
 membrane = geometry.membranes['membrane']
-M = u.mol / u.L
-uM = u.umol / u.L
 
 # Add species to the simulation
 ca = simulation.add_species('Ca', valence=2)
