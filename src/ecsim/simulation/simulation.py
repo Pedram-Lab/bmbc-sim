@@ -12,7 +12,7 @@ from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.simulation.fem_details import FemLhs, FemRhs
+from ecsim.simulation.fem_details import FemLhs, FemRhs, PnpPotential
 
 
 class Simulation:
@@ -23,15 +23,19 @@ class Simulation:
             name: str,
             *,
             result_root: str,
+            electrostatics: bool = False,
     ):
         """Initialize a new simulation.
 
         :param name: The name of the simulation (used for naming the result directory).
         :param result_root: The directory under which simulation results will be
             stored.
+        :param electrostatics: Whether to include electrostatics in the simulation. If
+            yes, compartments must have a permeability.
         """
         self.simulation_geometry = None
         self.species: list[ChemicalSpecies] = []
+        self.electrostatics = electrostatics
 
         # Set up result directory and logging
         time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
@@ -48,7 +52,9 @@ class Simulation:
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
         self ._rd_fes: ngs.FESpace = None
+        self ._el_fes: ngs.FESpace = None
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
+        self._potential: PnpPotential = None
         self._lhs: dict[ChemicalSpecies, FemLhs] = {}
         self._rhs: dict[ChemicalSpecies, FemRhs] = {}
 
@@ -157,6 +163,8 @@ class Simulation:
                 # Update the concentrations via IMEX approach:
                 # Reaction + some transport (explicit)
                 self._update_transport(t)
+                if self.electrostatics:
+                    self._potential.update()
                 for species, c in self._concentrations.items():
                     lhs = self._lhs[species].assemble()
                     rhs = self._rhs[species].assemble()
@@ -202,10 +210,15 @@ class Simulation:
             logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
 
         # Note that the order of the compartment spaces is the same as the order of compartments
-        self._rd_fes = ngs.FESpace([self._compartment_fes[compartment]
-                                    for compartment in compartments])
+        self._rd_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments])
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
                     self._rd_fes.ndof)
+
+        if self.electrostatics:
+            self._el_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments] 
+                                        + [ngs.FESpace("number", mesh) for _ in compartments])
+            logger.info("Total number of degrees of freedom for electrostatics: %d.",
+                        self._el_fes.ndof)
 
         # Set up the solution vectors
         for species in self.species:
@@ -218,6 +231,15 @@ class Simulation:
                 if species in coefficients.initial_conditions:
                     c = self._concentrations[species].components[i]
                     c.Set(coefficients.initial_conditions[species])
+
+        if self.electrostatics:
+            logger.debug("Setting up electrostatic finite element matrices...")
+            self._potential = PnpPotential.for_all_species(
+                self.species,
+                self._el_fes,
+                self.simulation_geometry,
+                self._concentrations,
+            )
 
         logger.debug("Setting up finite element matrices...")
         self._lhs = FemLhs.for_all_species(
@@ -233,6 +255,7 @@ class Simulation:
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
+            self._potential
         )
 
 

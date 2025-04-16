@@ -1,4 +1,6 @@
 import ngsolve as ngs
+import astropy.units as u
+import astropy.constants as const
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -142,6 +144,7 @@ class FemRhs:
             fes,
             simulation_geometry,
             concentrations,
+            potential
     ):
         """Set up the right-hand side of the finite element equations for a given species.
         """
@@ -200,6 +203,17 @@ class FemRhs:
                     if trg_test is not None:
                         source_terms[s] += flux_density * trg_test * ds
 
+        # Handle potential terms
+        if potential is not None:
+            beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
+            for i, compartment in enumerate(compartments):
+                test = test_functions[i]
+                for s in species:
+                    d = compartment.diffusivity
+                    c = concentrations[s].components[i]
+                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test[i]))
+                    source_terms[s] += (d * beta * s.valence * c * drift).Compile() * ngs.dx
+
         return {s: cls(source_terms[s]) for s in species}
 
 
@@ -213,3 +227,58 @@ class FemRhs:
     def vec(self) -> ngs.BaseVector:
         """The vector of the right-hand side."""
         return self._source_term.vec
+
+
+class PnpPotential:
+    """FEM structures for Poisson-Nernst-Planck equations."""
+
+    def __init__(self, stiffness, smoother, source_term, potential):
+        self._stiffness = stiffness
+        self._smoother = smoother
+        self._source_term = source_term
+        self._potential = ngs.GridFunction(source_term.fes)
+
+    @classmethod
+    def for_all_species(
+            cls,
+            species,
+            fes,
+            simulation_geometry,
+            concentrations,
+    ):
+        """Set up the right-hand side of the finite element equations for a given species.
+        """
+        compartments = list(simulation_geometry.compartments.values())
+        faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
+
+        # Set up potential matrix and source term
+        test, trial = fes.TnT()
+        offset = len(species)
+        a = ngs.BilinearForm(fes, check_unused=False)
+        f = ngs.LinearForm(fes)
+        for k, compartment in enumerate(compartments):
+            eps = compartment.coefficients.permittivity
+            a += eps * ngs.grad(test[k]) * ngs.grad(trial[k]) * ngs.dx
+            a += trial[k + offset] * trial[k] * ngs.dx
+            a += test[k + offset] * test[k] * ngs.dx
+
+            for s in species:
+                c = concentrations[s]
+                f += faraday_const * s.valence * c.components[k] * trial[k] * ngs.dx
+
+        a.Assemble()
+        smoother = a.mat.Inverse(fes.FreeDofs())
+        potential = ngs.GridFunction(fes)
+
+        return cls(a.mat, smoother, f, potential)
+
+
+    def update(self):
+        """Update the potential given the current status of chemical concentrations."""
+        self._source_term.Assemble()
+        self._potential.vec.data = self._smoother * self._source_term.vec
+
+
+    def __getitem__(self, k: int) -> ngs.CoefficientFunction:
+        """Returns the k-th component of the potential."""
+        return self._potential.components[k]
