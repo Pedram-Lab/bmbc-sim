@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 import astropy.units as u
 
 import ecsim
-from ecsim.simulation import recorder, transport
+from ecsim.simulation import recorder
 from conftest import get_point_values, get_substance_values
 
 

@@ -209,9 +209,12 @@ class FemRhs:
             for i, compartment in enumerate(compartments):
                 test = test_functions[i]
                 for s in species:
-                    d = compartment.diffusivity
+                    if s.valence == 0:
+                        continue
+
+                    d = compartment.coefficients.diffusion[s]
                     c = concentrations[s].components[i]
-                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test[i]))
+                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
                     source_terms[s] += (d * beta * s.valence * c * drift).Compile() * ngs.dx
 
         return {s: cls(source_terms[s]) for s in species}
@@ -232,11 +235,11 @@ class FemRhs:
 class PnpPotential:
     """FEM structures for Poisson-Nernst-Planck equations."""
 
-    def __init__(self, stiffness, smoother, source_term, potential):
+    def __init__(self, stiffness, inverse, source_term, potential):
         self._stiffness = stiffness
-        self._smoother = smoother
+        self._inverse = inverse
         self._source_term = source_term
-        self._potential = ngs.GridFunction(source_term.fes)
+        self._potential = potential
 
     @classmethod
     def for_all_species(
@@ -267,16 +270,17 @@ class PnpPotential:
                 f += faraday_const * s.valence * c.components[k] * trial[k] * ngs.dx
 
         a.Assemble()
-        smoother = a.mat.Inverse(fes.FreeDofs())
+        smoother = a.mat.CreateSmoother(fes.FreeDofs())
+        inverse = ngs.GMRESSolver(a.mat, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
-        return cls(a.mat, smoother, f, potential)
+        return cls(a.mat, inverse, f, potential)
 
 
     def update(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
-        self._potential.vec.data = self._smoother * self._source_term.vec
+        self._potential.vec.data = self._inverse * self._source_term.vec
 
 
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:
