@@ -213,7 +213,7 @@ class FemRhs:
 
                     d = compartment.coefficients.diffusion[s]
                     c = concentrations[s].components[i]
-                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test_functions[i]))
+                    drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test_functions[i]))
                     source_terms[s] += (d * beta * s.valence * c * drift).Compile() * ngs.dx
 
         return {s: cls(source_terms[s]) for s in species}
