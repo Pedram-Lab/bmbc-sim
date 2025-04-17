@@ -269,7 +269,8 @@ class PnpPotential:
                 f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
 
         a.Assemble()
-        smoother = a.mat.CreateSmoother(fes.FreeDofs())
+        # TODO: find a better preconditioner - implemented Jacobi doesn't work
+        smoother = ngs.IdentityMatrix(fes.ndof)
         inverse = ngs.GMRESSolver(a.mat, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
