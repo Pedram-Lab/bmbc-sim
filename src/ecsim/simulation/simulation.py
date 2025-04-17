@@ -247,6 +247,7 @@ class Simulation:
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
+            self._potential,
             dt
         )
         logger.debug("Setting up finite element right-hand sides...")
@@ -255,7 +256,6 @@ class Simulation:
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
-            self._potential
         )
 
 

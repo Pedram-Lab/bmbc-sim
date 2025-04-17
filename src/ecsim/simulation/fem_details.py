@@ -24,6 +24,7 @@ class FemLhs:
             fes,
             simulation_geometry,
             concentrations,
+            potential,
             dt
     ) -> dict[ChemicalSpecies, 'FemLhs']:
         """Set up the left-hand side of the finite element equations for all
@@ -36,6 +37,7 @@ class FemLhs:
                 fes,
                 simulation_geometry,
                 concentrations[s],
+                potential,
                 dt
             )
         return species_to_lhs
@@ -48,6 +50,7 @@ class FemLhs:
             fes,
             simulation_geometry,
             concentration,
+            potential,
             dt
     ):
         """Set up the left-hand side of the finite element equations for a given species.
@@ -97,6 +100,15 @@ class FemLhs:
                         transport_term += -flux_density * src_test * ds
                     if trg_trial is not None:
                         transport_term += flux_density * trg_test * ds
+
+        # Handle potential terms
+        if potential is not None and species.valence != 0:
+            beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
+            for i, compartment in enumerate(compartments):
+                trial, test = trial_and_test[i]
+                d = compartment.coefficients.diffusion[species]
+                drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
+                transport_term += (d * beta * species.valence * trial * drift).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
         mass.Assemble()
@@ -148,7 +160,6 @@ class FemRhs:
             fes,
             simulation_geometry,
             concentrations,
-            potential
     ):
         """Set up the right-hand side of the finite element equations for a given species.
         """
@@ -206,19 +217,6 @@ class FemRhs:
                         source_terms[s] += -flux_density * src_test * ds
                     if trg_test is not None:
                         source_terms[s] += flux_density * trg_test * ds
-
-        # Handle potential terms
-        if potential is not None:
-            beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
-            for i, compartment in enumerate(compartments):
-                for s in species:
-                    if s.valence == 0:
-                        continue
-
-                    d = compartment.coefficients.diffusion[s]
-                    c = concentrations[s].components[i]
-                    drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test_functions[i]))
-                    source_terms[s] += (d * beta * s.valence * c * drift).Compile() * ngs.dx
 
         return {s: cls(source_terms[s]) for s in species}
 
