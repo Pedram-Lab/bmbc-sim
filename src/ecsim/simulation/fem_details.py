@@ -107,7 +107,7 @@ class FemLhs:
             for i, compartment in enumerate(compartments):
                 trial, test = trial_and_test[i]
                 d = compartment.coefficients.diffusion[species]
-                drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
+                drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
                 transport_term += (d * beta * species.valence * trial * drift).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
