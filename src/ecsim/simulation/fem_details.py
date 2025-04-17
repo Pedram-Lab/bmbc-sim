@@ -54,12 +54,12 @@ class FemLhs:
         compartments = simulation_geometry.compartments.values()
         mass = ngs.BilinearForm(fes, check_unused=False)
         stiffness = ngs.BilinearForm(fes, check_unused=False)
-        test_and_trial = list(zip(*fes.TnT()))
+        trial_and_test = list(zip(*fes.TnT()))
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
 
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
-            test, trial = test_and_trial[i]
+            trial, test = trial_and_test[i]
 
             # Set up stiffness matrix (diffusion terms)
             if species in coefficients.diffusion and \
@@ -67,7 +67,7 @@ class FemLhs:
                 stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
 
             # Set up mass matrix
-            mass += test * trial * ngs.dx
+            mass += trial * test * ngs.dx
 
         # Handle implicit transport terms
         transport_term = ngs.BilinearForm(fes, check_unused=False)
@@ -82,20 +82,20 @@ class FemLhs:
                     idx = compartment_to_index[compartment]
                     return concentration.components[idx], *tnt[idx]
 
-                src_c, src_test, src_trial = select(source, concentration, test_and_trial)
-                trg_c, trg_test, trg_trial = select(target, concentration, test_and_trial)
+                src_c, src_trial, src_test = select(source, concentration, trial_and_test)
+                trg_c, trg_trial, trg_test = select(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
-                flux = transport.flux_lhs(src_c, trg_c, src_test, trg_test)
+                flux = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
 
                 if flux is not None:
                     area = to_simulation_units(membrane.area, 'area')
                     flux_density = (flux / area).Compile()
                     ds = ngs.ds(membrane.name)
                     if src_trial is not None:
-                        transport_term += -flux_density * src_trial * ds
+                        transport_term += -flux_density * src_test * ds
                     if trg_trial is not None:
-                        transport_term += flux_density * trg_trial * ds
+                        transport_term += flux_density * trg_test * ds
 
         # Assemble the mass and stiffness matrices
         mass.Assemble()
@@ -207,14 +207,13 @@ class FemRhs:
         if potential is not None:
             beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
             for i, compartment in enumerate(compartments):
-                test = test_functions[i]
                 for s in species:
                     if s.valence == 0:
                         continue
 
                     d = compartment.coefficients.diffusion[s]
                     c = concentrations[s].components[i]
-                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
+                    drift = ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test_functions[i]))
                     source_terms[s] += (d * beta * s.valence * c * drift).Compile() * ngs.dx
 
         return {s: cls(source_terms[s]) for s in species}
@@ -255,19 +254,19 @@ class PnpPotential:
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
 
         # Set up potential matrix and source term
-        test, trial = fes.TnT()
+        trial, test = fes.TnT()
         offset = len(species)
         a = ngs.BilinearForm(fes, check_unused=False)
         f = ngs.LinearForm(fes)
         for k, compartment in enumerate(compartments):
             eps = compartment.coefficients.permittivity
-            a += eps * ngs.grad(test[k]) * ngs.grad(trial[k]) * ngs.dx
-            a += trial[k + offset] * trial[k] * ngs.dx
-            a += test[k + offset] * test[k] * ngs.dx
+            a += eps * ngs.grad(trial[k]) * ngs.grad(test[k]) * ngs.dx
+            a += trial[k + offset] * test[k] * ngs.dx
+            a += trial[k] * test[k + offset] * ngs.dx
 
             for s in species:
                 c = concentrations[s]
-                f += faraday_const * s.valence * c.components[k] * trial[k] * ngs.dx
+                f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
 
         a.Assemble()
         smoother = a.mat.CreateSmoother(fes.FreeDofs())
