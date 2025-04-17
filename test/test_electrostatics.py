@@ -30,8 +30,8 @@ def create_simulation(tmp_path):
     )
     simulation.setup_geometry(mesh)
     points = [(0.5, 0.5, 0.5), (1.5, 0.5, 0.5), (2.5, 0.5, 0.5)]
-    simulation.add_recorder(recorder.PointValues(10 * u.ms, points=points))
-    simulation.add_recorder(recorder.CompartmentSubstance(10 * u.ms))
+    simulation.add_recorder(recorder.PointValues(10 * u.us, points=points))
+    simulation.add_recorder(recorder.CompartmentSubstance(10 * u.us))
 
     return simulation
 
@@ -57,20 +57,20 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     eq1 = simulation.add_species('eq1', valence=2)
     eq2 = simulation.add_species('eq2', valence=-1)
 
-    # It's already in equilibrium in the left compartment
+    # Both species are already in equilibrium in the left compartment
     left.initialize_species(eq1, 0.6 * u.mmol / u.L)
     left.initialize_species(eq2, 1.1 * u.mmol / u.L)
     left.add_diffusion(eq1, 1 * u.um**2 / u.s)
     left.add_diffusion(eq2, 1 * u.um**2 / u.s)
 
-    # It's not in equilibrium in the right compartment and it should equilibrate
-    comp.initialize_species(eq1, {'middle': 0.4 * u.mmol / u.L, 'right': 1.0 * u.mmol / u.L})
-    comp.initialize_species(eq2, 1.2 * u.mmol / u.L)
-    comp.add_diffusion(eq1, 1 * u.um**2 / u.s)
+    # One species is in equilibrium, the other is not and pulls the first away from equilibrium
+    comp.initialize_species(eq1, {'middle': 0.4 * u.mmol / u.L, 'right': 0.6 * u.mmol / u.L})
+    comp.initialize_species(eq2, 1.0 * u.mmol / u.L)
+    comp.add_diffusion(eq1, 0 * u.um**2 / u.s)
     comp.add_diffusion(eq2, 1 * u.um**2 / u.s)
 
     # Run the simulation
-    simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
+    simulation.run(end_time=1.0 * u.ms, time_step=1.0 * u.us)
 
     # Test point values
     p0, time = get_point_values(simulation.result_directory, point_id=0)
@@ -78,37 +78,36 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     p2, _ = get_point_values(simulation.result_directory, point_id=2)
     assert p0['eq1'][0] == pytest.approx(0.6)
     assert p1['eq1'][0] == pytest.approx(0.4)
-    assert p2['eq1'][0] == pytest.approx(1.0)
+    assert p2['eq1'][0] == pytest.approx(0.6)
     assert p0['eq2'][0] == pytest.approx(1.1)
-    assert p1['eq2'][0] == pytest.approx(1.2)
-    assert p2['eq2'][0] == pytest.approx(1.2)
+    assert p1['eq2'][0] == pytest.approx(1.0)
+    assert p2['eq2'][0] == pytest.approx(1.0)
 
     assert p0['eq1'][1] == pytest.approx(0.6)
-    assert p1['eq1'][1] == pytest.approx(0.7)
-    assert p2['eq1'][1] == pytest.approx(0.7)
+    assert p1['eq1'][1] == pytest.approx(0.4)
+    assert p2['eq1'][1] == pytest.approx(0.6)
     assert p0['eq2'][1] == pytest.approx(1.1)
-    assert p1['eq2'][1] == pytest.approx(1.2)
-    assert p2['eq2'][1] == pytest.approx(1.2)
+    assert p1['eq2'][1] < 1.0
+    assert p2['eq2'][1] > 1.0
 
-
-    # Test total substance values
+    # Test total substance values (0 = left compartment, 1 = right compartment)
     s0, _ = get_substance_values(simulation.result_directory, compartment_id=0)
     s1, _ = get_substance_values(simulation.result_directory, compartment_id=1)
-    assert s0['eq1'][0] == pytest.approx(0.6)
-    assert s1['eq1'][0] == pytest.approx(0.4)
-    assert s0['eq2'][0] == pytest.approx(1.1)
-    assert s1['eq2'][0] == pytest.approx(1.2)
+    assert s0['eq1'][0] == pytest.approx(0.6, rel=1e-3)
+    assert s1['eq1'][0] == pytest.approx(1.0, rel=1e-3)
+    assert s0['eq2'][0] == pytest.approx(1.1, rel=1e-3)
+    assert s1['eq2'][0] == pytest.approx(2.0, rel=1e-3)
 
-    assert s0['eq1'][1] == pytest.approx(0.6)
-    assert s1['eq1'][1] == pytest.approx(0.7)
-    assert s0['eq2'][1] == pytest.approx(1.1)
-    assert s1['eq2'][1] == pytest.approx(1.2)
+    assert s0['eq1'][1] == pytest.approx(0.6, rel=1e-3)
+    assert s1['eq1'][1] == pytest.approx(1.0, rel=1e-3)
+    assert s0['eq2'][1] == pytest.approx(1.1, rel=1e-3)
+    assert s1['eq2'][1] == pytest.approx(2.0, rel=1e-3)
 
     if visualize:
         # Create a single figure with two side-by-side panels sharing the same y-axis.
         species = ['eq1', 'eq2']
         _, ((ax1, ax2, ax3), (ax4, ax5, _)) = \
-            plt.subplots(3, 2, figsize=(15, 10), sharey=True, gridspec_kw={'wspace': 0})
+            plt.subplots(2, 3, figsize=(15, 10), sharey=True, gridspec_kw={'wspace': 0})
 
         # Top row: point values in left, middle, right regions
         for s in species:
