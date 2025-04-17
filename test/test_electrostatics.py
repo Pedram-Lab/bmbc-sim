@@ -36,11 +36,6 @@ def create_simulation(tmp_path):
     return simulation
 
 
-def total_substance(left, right, species, time):
-    """Calculate the total substance of a species in two compartments."""
-    return left[species][time] + right[species][time]
-
-
 def test_pnp_dynamics(tmp_path, visualize=False):
     """Test that, in a two-compartment geometry:
     - two charged species in equilibrium stay in equilibrium
@@ -73,35 +68,35 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     simulation.run(end_time=1.0 * u.ms, time_step=1.0 * u.us)
 
     # Test point values
-    p0, time = get_point_values(simulation.result_directory, point_id=0)
-    p1, _ = get_point_values(simulation.result_directory, point_id=1)
-    p2, _ = get_point_values(simulation.result_directory, point_id=2)
-    assert p0['eq1'][0] == pytest.approx(0.6)
-    assert p1['eq1'][0] == pytest.approx(0.4)
-    assert p2['eq1'][0] == pytest.approx(0.6)
-    assert p0['eq2'][0] == pytest.approx(1.1)
-    assert p1['eq2'][0] == pytest.approx(1.0)
-    assert p2['eq2'][0] == pytest.approx(1.0)
+    pl, time = get_point_values(simulation.result_directory, point_id=0)
+    pm, _ = get_point_values(simulation.result_directory, point_id=1)
+    pr, _ = get_point_values(simulation.result_directory, point_id=2)
+    assert pl['eq1'][0] == pytest.approx(0.6)
+    assert pm['eq1'][0] == pytest.approx(0.4)
+    assert pr['eq1'][0] == pytest.approx(0.6)
+    assert pl['eq2'][0] == pytest.approx(1.1)
+    assert pm['eq2'][0] == pytest.approx(1.0)
+    assert pr['eq2'][0] == pytest.approx(1.0)
 
-    assert p0['eq1'][1] == pytest.approx(0.6)
-    assert p1['eq1'][1] == pytest.approx(0.4)
-    assert p2['eq1'][1] == pytest.approx(0.6)
-    assert p0['eq2'][1] == pytest.approx(1.1)
-    assert p1['eq2'][1] < 1.0
-    assert p2['eq2'][1] > 1.0
+    assert pl['eq1'][-1] == pytest.approx(0.6)
+    assert pm['eq1'][-1] == pytest.approx(0.4)
+    assert pr['eq1'][-1] == pytest.approx(0.6)
+    assert pl['eq2'][-1] == pytest.approx(1.1)
+    assert pm['eq2'][-1] < 0.9
+    assert pr['eq2'][-1] > 1.1
 
-    # Test total substance values (0 = left compartment, 1 = right compartment)
-    s0, _ = get_substance_values(simulation.result_directory, compartment_id=0)
-    s1, _ = get_substance_values(simulation.result_directory, compartment_id=1)
-    assert s0['eq1'][0] == pytest.approx(0.6, rel=1e-3)
-    assert s1['eq1'][0] == pytest.approx(1.0, rel=1e-3)
-    assert s0['eq2'][0] == pytest.approx(1.1, rel=1e-3)
-    assert s1['eq2'][0] == pytest.approx(2.0, rel=1e-3)
+    # Test total substance values (0 = right compartment, 1 = left compartment)
+    sl, _ = get_substance_values(simulation.result_directory, compartment_id=1)
+    sr, _ = get_substance_values(simulation.result_directory, compartment_id=0)
+    assert sl['eq1'][0] == pytest.approx(0.6, rel=1e-3)
+    assert sr['eq1'][0] == pytest.approx(1.0, rel=1e-3)
+    assert sl['eq2'][0] == pytest.approx(1.1, rel=1e-3)
+    assert sr['eq2'][0] == pytest.approx(2.0, rel=1e-3)
 
-    assert s0['eq1'][1] == pytest.approx(0.6, rel=1e-3)
-    assert s1['eq1'][1] == pytest.approx(1.0, rel=1e-3)
-    assert s0['eq2'][1] == pytest.approx(1.1, rel=1e-3)
-    assert s1['eq2'][1] == pytest.approx(2.0, rel=1e-3)
+    assert sl['eq1'][-1] == pytest.approx(0.6, rel=1e-3)
+    assert sr['eq1'][-1] == pytest.approx(1.0, rel=1e-3)
+    assert sl['eq2'][-1] == pytest.approx(1.1, rel=1e-3)
+    assert sr['eq2'][-1] == pytest.approx(2.0, rel=1e-3)
 
     if visualize:
         # Create a single figure with two side-by-side panels sharing the same y-axis.
@@ -111,7 +106,7 @@ def test_pnp_dynamics(tmp_path, visualize=False):
 
         # Top row: point values in left, middle, right regions
         for s in species:
-            ax1.plot(time / 1000, p0[s].T, label=s)
+            ax1.plot(time / 1000, pl[s].T, label=s)
         ax1.set_xlabel("Time [s]")
         ax1.set_ylabel("Concentration [mM]")
         ax1.set_title("Left region")
@@ -119,27 +114,27 @@ def test_pnp_dynamics(tmp_path, visualize=False):
         ax1.legend()
 
         for s in species:
-            ax2.plot(time / 1000, p1[s].T, label=s)
+            ax2.plot(time / 1000, pm[s].T, label=s)
         ax2.set_xlabel("Time [s]")
         ax2.set_title("Middle region")
         ax2.grid(True)
 
         for s in species:
-            ax3.plot(time / 1000, p2[s].T, label=s)
+            ax3.plot(time / 1000, pr[s].T, label=s)
         ax3.set_xlabel("Time [s]")
         ax3.set_title("Right region")
         ax3.grid(True)
 
         # Bottom row: total substance in left/middle and right regions
         for s in species:
-            ax4.plot(time / 1000, s0[s].T, label=s)
+            ax4.plot(time / 1000, sl[s].T, label=s)
         ax4.set_xlabel("Time [s]")
         ax4.set_ylabel("Total substance [amol]")
         ax4.set_title("Total substance in left and middle regions")
         ax4.grid(True)
 
         for s in species:
-            ax5.plot(time / 1000, s1[s].T, label=s)
+            ax5.plot(time / 1000, sr[s].T, label=s)
         ax5.set_xlabel("Time [s]")
         ax5.set_title("Total substance in right region")
         ax5.grid(True)
