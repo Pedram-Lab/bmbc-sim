@@ -9,11 +9,12 @@ from ecsim.units import to_simulation_units
 class FemLhs:
     """Left-hand side of the finite element equations for a single species."""
 
-    def __init__(self, a, transport, m_star, pre):
+    def __init__(self, a, transport, m_star, pre, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
         self._pre = pre
+        self._dt = dt
 
 
     @classmethod
@@ -109,7 +110,8 @@ class FemLhs:
             stiffness.mat,
             transport_term,
             mass.mat,
-            smoother
+            smoother,
+            dt
         )
 
 
@@ -128,7 +130,9 @@ class FemLhs:
     @property
     def time_stepping(self) -> ngs.BaseMatrix:
         """The matrix for the implicit Euler rule."""
-        return ngs.CGSolver(self._m_star - self._transport.mat, self._pre, printrates=False)
+        scaled_transport = self._transport.mat.CreateMatrix()
+        scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
+        return ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
 
 
 class FemRhs:
