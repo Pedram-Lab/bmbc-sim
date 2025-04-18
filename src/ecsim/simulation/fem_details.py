@@ -114,9 +114,10 @@ class FemLhs:
         mass.Assemble()
         stiffness.Assemble()
 
-        # Invert the mass matrix and the matrix for the implicit Euler rule
+        # Invert the matrix for the implicit Euler integrator
+        # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
-        smoother = mass.mat.CreateSmoother(fes.FreeDofs())
+        smoother = mass.mat.CreateSmoother(fes.FreeDofs(), GS=True)
 
         return cls(
             stiffness.mat,
