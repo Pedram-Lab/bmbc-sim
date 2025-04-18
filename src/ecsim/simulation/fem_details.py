@@ -272,12 +272,25 @@ class PnpPotential:
                 f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
 
         a.Assemble()
-        # TODO: find a better preconditioner - implemented Jacobi doesn't work
-        smoother = ngs.IdentityMatrix(fes.ndof)
-        inverse = ngs.GMRESSolver(a.mat, pre=smoother, printrates=False)
+        a = a.mat.DeleteZeroElements(1e-10)
+
+        # Assemble preconditioner
+        p = ngs.BilinearForm(fes, check_unused=False)
+        for k, compartment in enumerate(compartments):
+            p += trial[k + offset] * test[k + offset] * ngs.dx
+
+        p.Assemble()
+        p = p.mat.DeleteZeroElements(1e-10)
+
+        free_dofs = fes.FreeDofs()
+        for i in range(len(species)):
+            free_dofs[-i - 1] = False
+
+        smoother = a.CreateSmoother(free_dofs, GS=True) + p
+        inverse = ngs.GMRESSolver(a, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
-        return cls(a.mat, inverse, f, potential)
+        return cls(a, inverse, f, potential)
 
 
     def update(self):
