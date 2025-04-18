@@ -104,7 +104,7 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
     assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-3)
 
     # Test substance values
-    sbst_values, _ = get_substance_values(simulation.result_directory)
+    sbst_values, _ = get_substance_values(simulation.result_directory, compartment_name='cell')
     too_low_results = sbst_values['too-low']
     assert too_low_results[0] == pytest.approx(0.5 * width)
     assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-3)

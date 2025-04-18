@@ -7,6 +7,7 @@ import numpy as np
 import ecsim
 from ecsim.geometry import create_ca_depletion_mesh
 from ecsim.simulation import recorder, transport
+from ecsim.units import mM, uM
 
 
 # Dimensions
@@ -14,9 +15,6 @@ side = 3.0 * u.um
 ecs_height = 0.1 * u.um
 cytosol_height = 3.0 * u.um
 channel_radius = 50 * u.nm
-M = u.mol / u.L
-mM = u.mmol / u.L
-uM = u.umol / u.L
 
 mesh = create_ca_depletion_mesh(
     side_length_x=side,

@@ -1,4 +1,6 @@
 import ngsolve as ngs
+import astropy.units as u
+import astropy.constants as const
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -7,11 +9,12 @@ from ecsim.units import to_simulation_units
 class FemLhs:
     """Left-hand side of the finite element equations for a single species."""
 
-    def __init__(self, a, transport, m_star, pre):
+    def __init__(self, a, transport, m_star, pre, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
         self._pre = pre
+        self._dt = dt
 
 
     @classmethod
@@ -21,6 +24,7 @@ class FemLhs:
             fes,
             simulation_geometry,
             concentrations,
+            potential,
             dt
     ) -> dict[ChemicalSpecies, 'FemLhs']:
         """Set up the left-hand side of the finite element equations for all
@@ -33,6 +37,7 @@ class FemLhs:
                 fes,
                 simulation_geometry,
                 concentrations[s],
+                potential,
                 dt
             )
         return species_to_lhs
@@ -45,6 +50,7 @@ class FemLhs:
             fes,
             simulation_geometry,
             concentration,
+            potential,
             dt
     ):
         """Set up the left-hand side of the finite element equations for a given species.
@@ -52,12 +58,12 @@ class FemLhs:
         compartments = simulation_geometry.compartments.values()
         mass = ngs.BilinearForm(fes, check_unused=False)
         stiffness = ngs.BilinearForm(fes, check_unused=False)
-        test_and_trial = list(zip(*fes.TnT()))
+        trial_and_test = list(zip(*fes.TnT()))
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
 
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
-            test, trial = test_and_trial[i]
+            trial, test = trial_and_test[i]
 
             # Set up stiffness matrix (diffusion terms)
             if species in coefficients.diffusion and \
@@ -65,7 +71,7 @@ class FemLhs:
                 stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
 
             # Set up mass matrix
-            mass += test * trial * ngs.dx
+            mass += trial * test * ngs.dx
 
         # Handle implicit transport terms
         transport_term = ngs.BilinearForm(fes, check_unused=False)
@@ -80,34 +86,47 @@ class FemLhs:
                     idx = compartment_to_index[compartment]
                     return concentration.components[idx], *tnt[idx]
 
-                src_c, src_test, src_trial = select(source, concentration, test_and_trial)
-                trg_c, trg_test, trg_trial = select(target, concentration, test_and_trial)
+                src_c, src_trial, src_test = select(source, concentration, trial_and_test)
+                trg_c, trg_trial, trg_test = select(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
-                flux = transport.flux_lhs(src_c, trg_c, src_test, trg_test)
+                flux = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
 
                 if flux is not None:
                     area = to_simulation_units(membrane.area, 'area')
                     flux_density = (flux / area).Compile()
                     ds = ngs.ds(membrane.name)
                     if src_trial is not None:
-                        transport_term += -flux_density * src_trial * ds
+                        transport_term += -flux_density * src_test * ds
                     if trg_trial is not None:
-                        transport_term += flux_density * trg_trial * ds
+                        transport_term += flux_density * trg_test * ds
+
+        # Handle potential terms
+        if potential is not None and species.valence != 0:
+            beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
+            for i, compartment in enumerate(compartments):
+                trial, test = trial_and_test[i]
+                d = compartment.coefficients.diffusion[species]
+                drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
+                transport_term += (d * beta * species.valence * trial * drift).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
         mass.Assemble()
         stiffness.Assemble()
 
-        # Invert the mass matrix and the matrix for the implicit Euler rule
+        # Invert the matrix for the implicit Euler integrator
+        # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
-        smoother = mass.mat.CreateSmoother(fes.FreeDofs())
+        mass = mass.mat.DeleteZeroElements(1e-10)
+        smoother = mass.CreateSmoother(fes.FreeDofs(), GS=True)
+        stiffness = stiffness.mat.DeleteZeroElements(1e-10)
 
         return cls(
-            stiffness.mat,
+            stiffness,
             transport_term,
-            mass.mat,
-            smoother
+            mass,
+            smoother,
+            dt
         )
 
 
@@ -126,7 +145,10 @@ class FemLhs:
     @property
     def time_stepping(self) -> ngs.BaseMatrix:
         """The matrix for the implicit Euler rule."""
-        return ngs.CGSolver(self._m_star - self._transport.mat, self._pre, printrates=False)
+        scaled_transport = self._transport.mat.CreateMatrix()
+        scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
+        scaled_transport = scaled_transport.DeleteZeroElements(1e-10)
+        return ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
 
 
 class FemRhs:
@@ -213,3 +235,73 @@ class FemRhs:
     def vec(self) -> ngs.BaseVector:
         """The vector of the right-hand side."""
         return self._source_term.vec
+
+
+class PnpPotential:
+    """FEM structures for Poisson-Nernst-Planck equations."""
+
+    def __init__(self, stiffness, inverse, source_term, potential):
+        self._stiffness = stiffness
+        self._inverse = inverse
+        self._source_term = source_term
+        self._potential = potential
+
+    @classmethod
+    def for_all_species(
+            cls,
+            species,
+            fes,
+            simulation_geometry,
+            concentrations,
+    ):
+        """Set up the right-hand side of the finite element equations for a given species.
+        """
+        compartments = list(simulation_geometry.compartments.values())
+        faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
+
+        # Set up potential matrix and source term
+        trial, test = fes.TnT()
+        offset = len(species)
+        a = ngs.BilinearForm(fes, check_unused=False)
+        f = ngs.LinearForm(fes)
+        for k, compartment in enumerate(compartments):
+            eps = compartment.coefficients.permittivity
+            a += eps * ngs.grad(trial[k]) * ngs.grad(test[k]) * ngs.dx
+            a += trial[k + offset] * test[k] * ngs.dx
+            a += trial[k] * test[k + offset] * ngs.dx
+
+            for s in species:
+                c = concentrations[s]
+                f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
+
+        a.Assemble()
+        a = a.mat.DeleteZeroElements(1e-10)
+
+        # Assemble preconditioner
+        p = ngs.BilinearForm(fes, check_unused=False)
+        for k, compartment in enumerate(compartments):
+            p += trial[k + offset] * test[k + offset] * ngs.dx
+
+        p.Assemble()
+        p = p.mat.DeleteZeroElements(1e-10)
+
+        free_dofs = fes.FreeDofs()
+        for i in range(len(species)):
+            free_dofs[-i - 1] = False
+
+        smoother = a.CreateSmoother(free_dofs, GS=True) + p
+        inverse = ngs.CGSolver(a, pre=smoother, printrates=False)
+        potential = ngs.GridFunction(fes)
+
+        return cls(a, inverse, f, potential)
+
+
+    def update(self):
+        """Update the potential given the current status of chemical concentrations."""
+        self._source_term.Assemble()
+        self._potential.vec.data = self._inverse * self._source_term.vec
+
+
+    def __getitem__(self, k: int) -> ngs.CoefficientFunction:
+        """Returns the k-th component of the potential."""
+        return self._potential.components[k]

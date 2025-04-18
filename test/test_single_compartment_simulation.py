@@ -23,7 +23,6 @@ def create_simulation(tmp_path):
     simulation.setup_geometry(mesh)
     simulation.add_recorder(recorder.PointValues(10 * u.ms, points=[(0.5, 0.5, 0.5)]))
     simulation.add_recorder(recorder.CompartmentSubstance(10 * u.ms))
-    simulation.add_recorder(recorder.FullSnapshot(1 * u.s))
 
     return simulation
 
@@ -99,7 +98,7 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
 
 
     # Test substance values
-    sbst_values, _ = get_substance_values(simulation.result_directory)
+    sbst_values, _ = get_substance_values(simulation.result_directory, compartment_name='cell')
     fixed_results = sbst_values['fixed']
     assert len(fixed_results) == 101
     assert fixed_results[0] == pytest.approx(1.1)

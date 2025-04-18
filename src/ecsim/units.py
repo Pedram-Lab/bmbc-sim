@@ -30,6 +30,14 @@ BASE_UNITS = {
     'angle': u.rad
 }
 
+
+# Define molar and derived
+M = u.mol / u.liter
+mM = M / 1000
+uM = M / 1e6
+nM = M / 1e9
+
+
 def to_simulation_units(value: u.Quantity, physical_name: str = None) -> float:
     """Convert a value to simulation units.
 

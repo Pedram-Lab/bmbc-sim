@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import astropy.units as u
+import astropy.constants as const
 import ngsolve as ngs
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
@@ -106,6 +107,28 @@ class Compartment:
             self._to_coefficient_function(diffusivity, 'diffusivity')
 
 
+    def add_relative_permittivity(
+            self,
+            relative_permittivity: float | dict[str, float]
+    ) -> None:
+        """Add a relative permittivity for electric fields in the compartment.
+
+        :param permittivity: Relative permittivity value for the compartment. The
+            value is multiplied by the vacuum permittivity to get the actual
+            permittivity for electric fields in the compartment.
+        :raises ValueError: If permittivity for the compartment is already defined.
+        """
+        if self.coefficients.permittivity is not None:
+            raise ValueError(f"Permittivity already defined for compartment '{self.name}'")
+        if isinstance(relative_permittivity, float):
+            eps = relative_permittivity * const.eps0
+        else:
+            eps = {region: value * const.eps0 for region, value in relative_permittivity.items()}
+
+        self.coefficients.permittivity = \
+            self._to_coefficient_function(eps, 'permittivity')
+
+
     def add_reaction(
             self,
             reactants: list[S],
@@ -198,3 +221,4 @@ class SimulationDetails:
     initial_conditions: dict[S, C] = field(default_factory=dict)
     diffusion: dict[S, C] = field(default_factory=dict)
     reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
+    permittivity: C = field(default_factory=lambda: None)
