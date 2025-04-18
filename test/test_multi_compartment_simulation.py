@@ -111,8 +111,8 @@ def test_multi_compartment_dynamics(tmp_path, visualize=False):
     assert p1['channel_r2l'][-1] < 0.8
 
     # Test total substance values
-    s0, _ = get_substance_values(simulation.result_directory, compartment_id=0)
-    s1, _ = get_substance_values(simulation.result_directory, compartment_id=1)
+    s0, _ = get_substance_values(simulation.result_directory, compartment_name='left')
+    s1, _ = get_substance_values(simulation.result_directory, compartment_name='right')
     assert total_substance(s0, s1, 'equilibrium', 0) == pytest.approx(1.8, rel=1e-3)
     assert total_substance(s0, s1, 'equilibrium', -1) == pytest.approx(1.8, rel=1e-3)
 

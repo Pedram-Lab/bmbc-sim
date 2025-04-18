@@ -86,8 +86,8 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     assert pr['eq2'][-1] > 1.1
 
     # Test total substance values (0 = right compartment, 1 = left compartment)
-    sl, _ = get_substance_values(simulation.result_directory, compartment_id=1)
-    sr, _ = get_substance_values(simulation.result_directory, compartment_id=0)
+    sl, _ = get_substance_values(simulation.result_directory, compartment_name='left')
+    sr, _ = get_substance_values(simulation.result_directory, compartment_name='comp')
     assert sl['eq1'][0] == pytest.approx(0.6, rel=1e-3)
     assert sr['eq1'][0] == pytest.approx(1.0, rel=1e-3)
     assert sl['eq2'][0] == pytest.approx(1.1, rel=1e-3)

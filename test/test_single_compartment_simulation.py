@@ -98,7 +98,7 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
 
 
     # Test substance values
-    sbst_values, _ = get_substance_values(simulation.result_directory)
+    sbst_values, _ = get_substance_values(simulation.result_directory, compartment_name='cell')
     fixed_results = sbst_values['fixed']
     assert len(fixed_results) == 101
     assert fixed_results[0] == pytest.approx(1.1)
