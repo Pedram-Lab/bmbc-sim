@@ -117,12 +117,14 @@ class FemLhs:
         # Invert the matrix for the implicit Euler integrator
         # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
-        smoother = mass.mat.CreateSmoother(fes.FreeDofs(), GS=True)
+        mass = mass.mat.DeleteZeroElements(1e-10)
+        smoother = mass.CreateSmoother(fes.FreeDofs(), GS=True)
+        stiffness = stiffness.mat.DeleteZeroElements(1e-10)
 
         return cls(
-            stiffness.mat,
+            stiffness,
             transport_term,
-            mass.mat,
+            mass,
             smoother,
             dt
         )
@@ -145,6 +147,7 @@ class FemLhs:
         """The matrix for the implicit Euler rule."""
         scaled_transport = self._transport.mat.CreateMatrix()
         scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
+        scaled_transport = scaled_transport.DeleteZeroElements(1e-10)
         return ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
 
 
