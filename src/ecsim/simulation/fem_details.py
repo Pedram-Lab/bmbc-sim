@@ -290,7 +290,7 @@ class PnpPotential:
             free_dofs[-i - 1] = False
 
         smoother = a.CreateSmoother(free_dofs, GS=True) + p
-        inverse = ngs.GMRESSolver(a, pre=smoother, printrates=False)
+        inverse = ngs.CGSolver(a, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
         return cls(a, inverse, f, potential)
