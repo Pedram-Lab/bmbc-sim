@@ -24,7 +24,7 @@ def create_simulation(tmp_path):
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
     simulation = ecsim.Simulation(
-        'multi_compartment_test',
+        'electrostatics_test',
         result_root=tmp_path,
         electrostatics=True
     )
