@@ -24,16 +24,29 @@ geometry = geometry.decimate(0.7)
 # %%
 # Manually remove some cells that didn't successfully mesh
 # TODO: properly clean the cells
+all_cells = geometry.cells
 faulty_cells = {47, 58, 139, 149, 162, 214, 295, 296, 298, 309, 441, 462, 556, 584, 680, 897}
-working_cells = [c for i, c in enumerate(geometry.cells) if not i in faulty_cells]
+working_cells = [c for i, c in enumerate(all_cells) if not i in faulty_cells]
 geometry = TissueGeometry(working_cells)
 
 # %%
+# To see where the faulty cells are, uncomment the following lines
+# faulty_cells = [c for i, c in enumerate(all_cells) if i in faulty_cells]
+# fault_geometry = TissueGeometry(faulty_cells)
+# plotter = pv.Plotter()
+# plotter.add_mesh(geometry.as_single_mesh(), opacity=0.05)
+# plotter.add_mesh(fault_geometry.as_single_mesh(), color='red')
+# box = pv.Box((1.2, 3.2, -0.8, 1.2, 0, 2))
+# plotter.add_mesh(box, color='gray')
+# plotter.show_grid()
+# plotter.show()
+
+# %%
 # Extract cells from a small center portion
-min_clip, max_clip = min_coords / 5, max_coords / 5
+box_bounds = (1.2, 3.2, -0.8, 1.2, 0, 2)
 geometry = geometry.keep_cells_within(
-    min_coords=min_clip,
-    max_coords=max_clip,
+    min_coords=box_bounds[::2],
+    max_coords=box_bounds[1::2],
     inside_threshold=0.1
 )
 
@@ -41,9 +54,7 @@ geometry = geometry.keep_cells_within(
 # Visualize the mesh together with the bounding box
 combined_mesh = geometry.as_single_mesh()
 plotter = pv.Plotter()
-box = pv.Box((min_clip[0], max_clip[0],
-                min_clip[1], max_clip[1],
-                min_clip[2], max_clip[2]))
+box = pv.Box(box_bounds)
 plotter.add_mesh(combined_mesh, scalars='face_cell_id', show_edges=True, cmap='tab20b')
 plotter.add_mesh(box, color='gray', opacity=0.5)
 plotter.show()
@@ -51,8 +62,8 @@ plotter.show()
 # %% Create an ngsolve mesh and visualize it
 mesh = geometry.to_ngs_mesh(
     mesh_size=1.0,
-    min_coords=min_clip,
-    max_coords=max_clip,
+    min_coords=box_bounds[::2],
+    max_coords=box_bounds[1::2],
     projection_tol=0.01,
 )
 print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
