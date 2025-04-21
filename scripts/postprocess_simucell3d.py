@@ -1,4 +1,6 @@
 # %%
+from math import sqrt
+
 import pyvista as pv
 from ngsolve.webgui import Draw
 import ngsolve as ngs
@@ -89,7 +91,7 @@ def compute_diffusion_time(
     :return: Time needed for diffusion
     """
     # Define FE space
-    fes = ngs.H1(mesh, order=1, dirichlet="left")
+    fes = ngs.H1(mesh, order=1, dirichlet="left", definedon="ecs")
     c = ngs.GridFunction(fes)
     tau = 0.001
 
@@ -137,7 +139,7 @@ box = occ.Box(box_bounds[::2], box_bounds[1::2])
 box.mat("ecs")
 for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
     box.faces[i].bc(name)
-box_mesh = ngs.Mesh(occ.OCCGeometry(box).GenerateMesh(maxh=0.1))
+box_mesh = ngs.Mesh(occ.OCCGeometry(box).GenerateMesh(maxh=0.05))
 print(f"Created box mesh with {box_mesh.nv} vertices and {box_mesh.ne} elements")
 t_unhindered = compute_diffusion_time(box_mesh)
 print(f"Time needed for diffusion: {t_unhindered:.2f} ms")
@@ -146,6 +148,6 @@ print(f"Time needed for diffusion: {t_unhindered:.2f} ms")
 # Compute diffusion time in tissue
 t_tissue = compute_diffusion_time(tissue_mesh)
 print(f"Time needed for diffusion in tissue: {t_tissue:.2f} ms")
-print(f"Tortuosity: {t_tissue / t_unhindered:.2f}")
+print(f"Tortuosity: {sqrt(t_tissue / t_unhindered):.2f}")
 
 # %%

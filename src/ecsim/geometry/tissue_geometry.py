@@ -189,6 +189,7 @@ class TissueGeometry:
         cell_geometries = occ.Glue(cell_geometries)
         for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
             bounding_box.faces[i].bc(name)
+        bounding_box.mat("ecs")
         geometry = occ.OCCGeometry(occ.Glue([cell_geometries, bounding_box - cell_geometries]))
 
         return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))
