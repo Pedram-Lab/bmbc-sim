@@ -1,6 +1,8 @@
 # %%
 import pyvista as pv
 from ngsolve.webgui import Draw
+import ngsolve as ngs
+from netgen import occ
 
 from ecsim.geometry import TissueGeometry
 
@@ -16,8 +18,8 @@ print(f"Bounding box: {min_coords}, {max_coords}")
 
 # %%
 # Post-process the mesh to create ECS and make the surfaces look nicer
-ECS_PERCENTAGE = 0.3
-geometry = geometry.shrink_cells(1 - ECS_PERCENTAGE, jitter=0.1)
+ECS_RATIO = 0.3
+geometry = geometry.shrink_cells(1 - ECS_RATIO, jitter=0.1)
 geometry = geometry.smooth(100)
 geometry = geometry.decimate(0.7)
 
@@ -60,13 +62,83 @@ plotter.add_mesh(box, color='gray', opacity=0.5)
 plotter.show()
 
 # %% Create an ngsolve mesh and visualize it
-mesh = geometry.to_ngs_mesh(
+tissue_mesh = geometry.to_ngs_mesh(
     mesh_size=1.0,
     min_coords=box_bounds[::2],
     max_coords=box_bounds[1::2],
     projection_tol=0.01,
 )
-print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
-Draw(mesh)
+print(f"Created mesh with {tissue_mesh.nv} vertices and {tissue_mesh.ne} elements")
+Draw(tissue_mesh)
+
+# %%
+# Compute the tortuosity by solving a diffusion problem
+def compute_diffusion_time(
+        mesh: ngs.Mesh,
+        filename: str = None,
+) -> tuple[float, ngs.GridFunction]:
+    """
+    Function to compute the time needed for a substance to diffuse through a
+    (geometrically porous) medium. The time is given by the time it takes for
+    the substance to reach a concentration of 50% of the concentration density
+    at the left boundary at the right boundary.
+
+    :param mesh: Netgen mesh
+    :param filename: Name of the file to save the time-evolution to. If None,
+        the time-evolution is not saved.
+    :return: Time needed for diffusion
+    """
+    # Define FE space
+    fes = ngs.H1(mesh, order=1, dirichlet="left")
+    concentration = ngs.GridFunction(fes)
+    tau = 0.001
+
+    # Define diffusion problem
+    trial, test = fes.TnT()
+    a = ngs.BilinearForm(fes)
+    a += ngs.grad(trial) * ngs.grad(test) * ngs.dx
+    m = ngs.BilinearForm(fes)
+    m += trial * test * ngs.dx
+
+    # Time stepping
+    concentration.Set(0)
+    concentration.Set(1, definedon=mesh.Boundaries("left"))
+    right_area = ngs.Integrate(1, mesh, definedon=mesh.Boundaries("right"))
+    right_substance = 0
+    t = 0
+
+    ngs.SetNumThreads(8)
+    with ngs.TaskManager():
+        a.Assemble()
+        m.Assemble()
+        m.mat.AsVector().data += tau * a.mat.AsVector()
+        smoother = m.mat.CreateSmoother(fes.FreeDofs(), GS=True)
+        mstar_inv = ngs.CGSolver(m.mat, smoother)
+
+        while right_substance / right_area < 0.5:
+            res = -tau * (a.mat * concentration.vec)
+            concentration.vec.data += mstar_inv * res
+            right_substance = ngs.Integrate(
+                concentration, mesh, definedon=mesh.Boundaries("right"))
+            t += tau
+
+    return t
+
+# %%
+# Compute diffusion time in free space
+box = occ.Box(box_bounds[::2], box_bounds[1::2])
+box.mat("ecs")
+for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
+    box.faces[i].bc(name)
+box_mesh = ngs.Mesh(occ.OCCGeometry(box).GenerateMesh(maxh=0.1))
+print(f"Created box mesh with {box_mesh.nv} vertices and {box_mesh.ne} elements")
+t_unhindered = compute_diffusion_time(box_mesh)
+print(f"Time needed for diffusion: {t_unhindered:.2f} ms")
+
+# %%
+# Compute diffusion time in tissue
+t_tissue = compute_diffusion_time(tissue_mesh)
+print(f"Time needed for diffusion in tissue: {t_tissue:.2f} ms")
+print(f"Tortuosity: {t_tissue / t_unhindered:.2f}")
 
 # %%
