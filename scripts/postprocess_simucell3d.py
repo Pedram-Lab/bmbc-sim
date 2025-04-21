@@ -22,6 +22,13 @@ geometry = geometry.smooth(100)
 geometry = geometry.decimate(0.7)
 
 # %%
+# Manually remove some cells that didn't successfully mesh
+# TODO: properly clean the cells
+faulty_cells = {47, 58, 139, 149, 162, 214, 295, 296, 298, 309, 441, 462, 556, 584, 680, 897}
+working_cells = [c for i, c in enumerate(geometry.cells) if not i in faulty_cells]
+geometry = TissueGeometry(working_cells)
+
+# %%
 # Extract cells from a small center portion
 min_clip, max_clip = min_coords / 5, max_coords / 5
 geometry = geometry.keep_cells_within(
@@ -29,12 +36,6 @@ geometry = geometry.keep_cells_within(
     max_coords=max_clip,
     inside_threshold=0.1
 )
-
-# %%
-# Manually remove some cells that didn't successfully mesh
-# TODO: properly clean the cells
-working_cells = [c for i, c in enumerate(geometry.cells) if not i in [1, 4, 31]]
-geometry = TissueGeometry(working_cells)
 
 # %%
 # Visualize the mesh together with the bounding box
