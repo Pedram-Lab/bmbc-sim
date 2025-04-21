@@ -90,8 +90,13 @@ def compute_diffusion_time(
     """
     # Define FE space
     fes = ngs.H1(mesh, order=1, dirichlet="left")
-    concentration = ngs.GridFunction(fes)
+    c = ngs.GridFunction(fes)
     tau = 0.001
+
+    # Set up output if desired
+    vtk_output = None
+    if filename is not None:
+        vtk_output = ngs.VTKOutput(mesh, coefs=[c], names=["concentration"], filename=filename)
 
     # Define diffusion problem
     trial, test = fes.TnT()
@@ -101,11 +106,11 @@ def compute_diffusion_time(
     m += trial * test * ngs.dx
 
     # Time stepping
-    concentration.Set(0)
-    concentration.Set(1, definedon=mesh.Boundaries("left"))
+    c.Set(0)
+    c.Set(1, definedon=mesh.Boundaries("left"))
     right_area = ngs.Integrate(1, mesh, definedon=mesh.Boundaries("right"))
     right_substance = 0
-    t = 0
+    n = 0
 
     ngs.SetNumThreads(8)
     with ngs.TaskManager():
@@ -116,13 +121,15 @@ def compute_diffusion_time(
         mstar_inv = ngs.CGSolver(m.mat, smoother)
 
         while right_substance / right_area < 0.5:
-            res = -tau * (a.mat * concentration.vec)
-            concentration.vec.data += mstar_inv * res
+            res = -tau * (a.mat * c.vec)
+            c.vec.data += mstar_inv * res
             right_substance = ngs.Integrate(
-                concentration, mesh, definedon=mesh.Boundaries("right"))
-            t += tau
+                c, mesh, definedon=mesh.Boundaries("right"))
+            n += 1
+            if n % 20 == 0 and vtk_output is not None:
+                vtk_output.Do(time=n * tau)
 
-    return t
+    return n * tau
 
 # %%
 # Compute diffusion time in free space
