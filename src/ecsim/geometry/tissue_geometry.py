@@ -281,15 +281,16 @@ if __name__ == "__main__":
     plotter.add_mesh(box, color='gray', opacity=0.5)
     plotter.show()
 
+    # Manually remove some cells that didn't successfully mesh
+    # TODO: properly clean the cells
     working_cells = [c for i, c in enumerate(geometry.cells) if not i in [1, 4, 31]]
+    geometry = TissueGeometry(working_cells)
 
-    # geometry.cells[1].plot(show_edges=True)
-    # geometry = TissueGeometry(geometry.cells[1:2])
-    # mesh = geometry.to_ngs_mesh(
-    #     mesh_size=0.1,
-    #     min_coords=min_coords,
-    #     max_coords=max_coords,
-    #     projection_tol=0.004,
-    # )
-    # print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
-    # Draw(mesh)
+    mesh = geometry.to_ngs_mesh(
+        mesh_size=0.1,
+        min_coords=min_coords,
+        max_coords=max_coords,
+        projection_tol=0.004,
+    )
+    print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
+    Draw(mesh)
