@@ -39,10 +39,11 @@ class TissueGeometry:
         shrunk around their center of mass. Some random jitter can be added to
         the centers of the cells to make spacing between cells more variable.
 
-        :param factor: The factor by which to shrink the cells.
+        :param factor: The volume factor by which to shrink the cells.
         :param jitter: Optional jitter to add to the center of mass while shrinking.
         :return: A new TissueGeometry object with the shrunk cells.
         """
+        factor = factor ** (1 / 3)  # Convert volume factor to length factor
         new_cells = [cell.copy() for cell in self.cells]
         for cell in new_cells:
             if jitter > 0:
@@ -67,6 +68,29 @@ class TissueGeometry:
         min_coords = np.min([cell.bounds[::2] for cell in self.cells], axis=0)
         max_coords = np.max([cell.bounds[1::2] for cell in self.cells], axis=0)
         return min_coords, max_coords
+
+    def smooth(self, n_iter: int = 10) -> 'TissueGeometry':
+        """Smooth the tissue geometry using a Laplacian filter.
+
+        :param n_iter: The number of smoothing iterations.
+        :return: A new TissueGeometry object with the smoothed cells.
+        """
+        new_cells = [cell.smooth(n_iter) for cell in self.cells]
+        for cell, new_cell in zip(self.cells, new_cells):
+            new_cell['face_cell_id'] = cell['face_cell_id']
+        return TissueGeometry(new_cells)
+
+    def decimate(self, factor: float) -> 'TissueGeometry':
+        """Decimate the number of triangles in the tissue geometry by a given factor.
+
+        :param factor: The decimation factor.
+        :return: A new TissueGeometry object with the decimated cells.
+        """
+        new_cells = [cell.decimate(factor) for cell in self.cells]
+        for cell, new_cell in zip(self.cells, new_cells):
+            cell_id = cell['face_cell_id'][0]
+            new_cell['face_cell_id'] = np.full(new_cell.n_cells, cell_id)
+        return TissueGeometry(new_cells)
 
     @classmethod
     def from_file(cls, file_name: str):
@@ -112,6 +136,8 @@ if __name__ == "__main__":
     print(f"Bounding box: {min}, {max}")
 
     geometry = geometry.shrink_cells(0.7, jitter=0.1)
+    geometry = geometry.smooth(100)
+    geometry = geometry.decimate(0.7)
     combined_mesh = geometry.as_single_mesh()
     combined_mesh.plot(show_edges=True, cmap="tab20b")
     cell = geometry.cells[0]
