@@ -92,6 +92,37 @@ class TissueGeometry:
             new_cell['face_cell_id'] = np.full(new_cell.n_cells, cell_id)
         return TissueGeometry(new_cells)
 
+    def keep_cells_within(
+            self,
+            *,
+            min_coords: np.ndarray,
+            max_coords: np.ndarray,
+            touching: bool = True
+        ) -> 'TissueGeometry':
+        """Keep only the cells that are contained within a given bounding box.
+
+        :param min_coords: The minimum coordinates of the bounding box.
+        :param max_coords: The maximum coordinates of the bounding box.
+        :param touching: If True, cells that touch the bounding box are kept, otherwise
+            only cells that are fully contained within the bounding box are kept.
+        :return: A new TissueGeometry object with the cells that are within the bounding box.
+        """
+        new_cells = []
+        for cell in self.cells:
+            larger_than_min = np.all(cell.points >= min_coords, axis=1)
+            smaller_than_max = np.all(cell.points <= max_coords, axis=1)
+            in_box = np.logical_and(larger_than_min, smaller_than_max)
+
+            if touching:
+                within_box = np.any(in_box)
+            else:
+                within_box = np.all(in_box)
+
+            if within_box:
+                new_cells.append(cell.copy())
+                
+        return TissueGeometry(new_cells)
+
     @classmethod
     def from_file(cls, file_name: str):
         """Load a tissue geometry from a file. The file must be in vtk format
@@ -132,12 +163,19 @@ if __name__ == "__main__":
     # Example usage
     geometry = TissueGeometry.from_file("/Users/innerbergerm/Projects/janelia/ecm-simulations/scripts/result_3590.vtk")
     geometry = geometry.scale(8000)
-    min, max = geometry.bounding_box()
-    print(f"Bounding box: {min}, {max}")
+    min_coords, max_coords = geometry.bounding_box()
+    print(f"Bounding box: {min_coords}, {max_coords}")
 
     geometry = geometry.shrink_cells(0.7, jitter=0.1)
     geometry = geometry.smooth(100)
     geometry = geometry.decimate(0.7)
+
+    geometry = geometry.keep_cells_within(
+        min_coords=min_coords / 2,
+        max_coords=max_coords / 2,
+        touching=True
+    )
+
     combined_mesh = geometry.as_single_mesh()
     combined_mesh.plot(show_edges=True, cmap="tab20b")
     cell = geometry.cells[0]
