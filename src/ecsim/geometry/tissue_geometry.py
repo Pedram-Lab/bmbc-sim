@@ -140,7 +140,8 @@ class TissueGeometry:
         given min and max coordinates, and the cells are clipped to fit within
         the box. The extracellular space is named 'ecs', the cells and their
         boundaries can be given a custom name. The boundaries of the box are
-        named 'left', 'right', 'top', 'bottom', 'front', 'back'.
+        named 'left', 'right', 'top', 'bottom', 'front', 'back', their
+        intersection with the cells is named 'cell_boundary'.
         An optional projection step is applied to points near the box faces to
         reduce the number of triangles in the mesh.
 
@@ -181,11 +182,13 @@ class TissueGeometry:
         min_coords = tuple(float(c) for c in min_coords)
         max_coords = tuple(float(c) for c in max_coords)
         bounding_box = occ.Box(min_coords, max_coords)
-        for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
-            bounding_box.faces[i].bc(name)
+        for face in bounding_box.faces:
+            face.bc("cell_boundary")
 
         cell_geometries = [cell * bounding_box for cell in cell_geometries]
         cell_geometries = occ.Glue(cell_geometries)
+        for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
+            bounding_box.faces[i].bc(name)
         geometry = occ.OCCGeometry(occ.Glue([cell_geometries, bounding_box - cell_geometries]))
 
         return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))

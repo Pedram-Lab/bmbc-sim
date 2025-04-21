@@ -1,5 +1,4 @@
 # %%
-import numpy as np
 import pyvista as pv
 from ngsolve.webgui import Draw
 
@@ -10,8 +9,8 @@ from ecsim.geometry import TissueGeometry
 geometry = TissueGeometry.from_file("result_3590.vtk")
 
 # %%
-# Scale it so that the bounding box is roughly [-1, 1]^3
-geometry = geometry.scale(8000)
+# Scale it so that the bounding box is roughly [-5, 5]^3
+geometry = geometry.scale(40000)
 min_coords, max_coords = geometry.bounding_box()
 print(f"Bounding box: {min_coords}, {max_coords}")
 
@@ -44,19 +43,18 @@ plotter = pv.Plotter()
 box = pv.Box((min_clip[0], max_clip[0],
                 min_clip[1], max_clip[1],
                 min_clip[2], max_clip[2]))
-plotter.add_mesh(combined_mesh, scalars='face_cell_id', show_edges=True)
+plotter.add_mesh(combined_mesh, scalars='face_cell_id', show_edges=True, cmap='tab20b')
 plotter.add_mesh(box, color='gray', opacity=0.5)
 plotter.show()
 
 # %% Create an ngsolve mesh and visualize it
 mesh = geometry.to_ngs_mesh(
-    mesh_size=0.1,
+    mesh_size=1.0,
     min_coords=min_clip,
     max_coords=max_clip,
-    projection_tol=0.004,
+    projection_tol=0.01,
 )
 print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
 Draw(mesh)
 
 # %%
-cell_ids = np.unique(mesh['face_cell_id'])
