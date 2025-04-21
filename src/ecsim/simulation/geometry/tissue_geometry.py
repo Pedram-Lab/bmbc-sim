@@ -45,14 +45,17 @@ class TissueGeometry:
         """
         new_cells = [cell.copy() for cell in self.cells]
         for cell in new_cells:
-            # Shrink the nodes around the center of mass
-            center = cell.center_of_mass()
             if jitter > 0:
-                jitter_vector = np.random.uniform(-jitter, jitter, size=3)
-                center += jitter_vector
+                # Create a random weight field to ensure center is within the cell (if it's convex)
+                cell['jitter_weight'] = np.random.poisson(jitter, cell.n_points)
+                cell.set_active_scalars('jitter_weight')
+                center = cell.center_of_mass(scalars_weight=True)
+                cell.point_data.remove('jitter_weight')
+            else:
+                center = cell.center_of_mass()
 
             cell.points = center + factor * (cell.points - center)
-            
+
         return TissueGeometry(new_cells)
 
     def bounding_box(self) -> tuple[np.ndarray, np.ndarray]:
