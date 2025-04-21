@@ -103,28 +103,25 @@ class TissueGeometry:
             *,
             min_coords: np.ndarray,
             max_coords: np.ndarray,
-            touching: bool = True
+            inside_threshold: float = 0.1
         ) -> 'TissueGeometry':
         """Keep only the cells that are contained within a given bounding box.
 
         :param min_coords: The minimum coordinates of the bounding box.
         :param max_coords: The maximum coordinates of the bounding box.
-        :param touching: If True, cells that touch the bounding box are kept, otherwise
-            only cells that are fully contained within the bounding box are kept.
-        :return: A new TissueGeometry object with the cells that are within the bounding box.
+        :param inside_threshold: A ratio between 0 and 1. All cells that have at
+            least this ratio of their nodes within the bounding box are kept.
+        :return: A new TissueGeometry object with the cells that are within the
+            bounding box.
         """
         new_cells = []
         for cell in self.cells:
             larger_than_min = np.all(cell.points >= min_coords, axis=1)
             smaller_than_max = np.all(cell.points <= max_coords, axis=1)
-            in_box = np.logical_and(larger_than_min, smaller_than_max)
+            inside_box = np.logical_and(larger_than_min, smaller_than_max)
+            ratio_inside_box = np.count_nonzero(inside_box) / cell.n_points
 
-            if touching:
-                within_box = np.any(in_box)
-            else:
-                within_box = np.all(in_box)
-
-            if within_box:
+            if ratio_inside_box > inside_threshold:
                 new_cells.append(cell.copy())
 
         return TissueGeometry(new_cells)
@@ -250,7 +247,7 @@ def snap_points_to_bounds(
     """Snap points to the nearest point on the bounding box."""
     n = points.shape[0]
     bounds = np.tile(bounds, (n, 1))
-    dist = cell.points - bounds
+    dist = points - bounds
     project = np.abs(dist) < tol
     points[project] = bounds[project]
     return points
@@ -262,6 +259,7 @@ if __name__ == "__main__":
     geometry = TissueGeometry.from_file("/Users/innerbergerm/Projects/janelia/ecm-simulations/scripts/result_3590.vtk")
     geometry = geometry.scale(8000)
     min_coords, max_coords = geometry.bounding_box()
+    min_coords, max_coords = min_coords / 5, max_coords / 5
     print(f"Bounding box: {min_coords}, {max_coords}")
 
     geometry = geometry.shrink_cells(0.7, jitter=0.1)
@@ -269,17 +267,29 @@ if __name__ == "__main__":
     geometry = geometry.decimate(0.7)
 
     geometry = geometry.keep_cells_within(
-        min_coords=min_coords / 5,
-        max_coords=max_coords / 5,
-        touching=False
+        min_coords=min_coords,
+        max_coords=max_coords,
+        inside_threshold=0.1
     )
 
     combined_mesh = geometry.as_single_mesh()
-    combined_mesh.plot(show_edges=True, cmap="tab20b")
+    plotter = pv.Plotter()
+    box = pv.Box((min_coords[0], max_coords[0],
+                  min_coords[1], max_coords[1],
+                  min_coords[2], max_coords[2]))
+    plotter.add_mesh(combined_mesh, scalars='face_cell_id', show_edges=True)
+    plotter.add_mesh(box, color='gray', opacity=0.5)
+    plotter.show()
 
-    mesh = geometry.to_ngs_mesh(
-        mesh_size=0.1,
-        min_coords=min_coords / 5,
-        max_coords=max_coords / 5,
-    )
-    Draw(mesh)
+    working_cells = [c for i, c in enumerate(geometry.cells) if not i in [1, 4, 31]]
+
+    # geometry.cells[1].plot(show_edges=True)
+    # geometry = TissueGeometry(geometry.cells[1:2])
+    # mesh = geometry.to_ngs_mesh(
+    #     mesh_size=0.1,
+    #     min_coords=min_coords,
+    #     max_coords=max_coords,
+    #     projection_tol=0.004,
+    # )
+    # print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
+    # Draw(mesh)
