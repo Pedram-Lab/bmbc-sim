@@ -1,5 +1,7 @@
 import numpy as np
 import pyvista as pv
+import ngsolve as ngs
+from netgen import occ
 
 
 class TissueGeometry:
@@ -28,7 +30,7 @@ class TissueGeometry:
         for cell in new_cells:
             cell.points *= factor
         return TissueGeometry(new_cells)
-    
+
     def shrink_cells(
             self,
             factor: float,
@@ -69,24 +71,28 @@ class TissueGeometry:
         max_coords = np.max([cell.bounds[1::2] for cell in self.cells], axis=0)
         return min_coords, max_coords
 
-    def smooth(self, n_iter: int = 10) -> 'TissueGeometry':
+    def smooth(self, n_iter: int = 10, **kwargs) -> 'TissueGeometry':
         """Smooth the tissue geometry using a Laplacian filter.
 
         :param n_iter: The number of smoothing iterations.
+        :param kwargs: Additional arguments to pass to the
+            :method:`pyvista.PolyData.smooth` filter.
         :return: A new TissueGeometry object with the smoothed cells.
         """
-        new_cells = [cell.smooth(n_iter) for cell in self.cells]
+        new_cells = [cell.smooth(n_iter, **kwargs) for cell in self.cells]
         for cell, new_cell in zip(self.cells, new_cells):
             new_cell['face_cell_id'] = cell['face_cell_id']
         return TissueGeometry(new_cells)
 
-    def decimate(self, factor: float) -> 'TissueGeometry':
+    def decimate(self, factor: float = 0.7, **kwargs) -> 'TissueGeometry':
         """Decimate the number of triangles in the tissue geometry by a given factor.
 
         :param factor: The decimation factor.
+        :param kwargs: Additional arguments to pass to the
+            :method:`pyvista.PolyData.decimate` filter.
         :return: A new TissueGeometry object with the decimated cells.
         """
-        new_cells = [cell.decimate(factor) for cell in self.cells]
+        new_cells = [cell.decimate(factor, **kwargs) for cell in self.cells]
         for cell, new_cell in zip(self.cells, new_cells):
             cell_id = cell['face_cell_id'][0]
             new_cell['face_cell_id'] = np.full(new_cell.n_cells, cell_id)
@@ -97,31 +103,98 @@ class TissueGeometry:
             *,
             min_coords: np.ndarray,
             max_coords: np.ndarray,
-            touching: bool = True
+            inside_threshold: float = 0.1
         ) -> 'TissueGeometry':
         """Keep only the cells that are contained within a given bounding box.
 
         :param min_coords: The minimum coordinates of the bounding box.
         :param max_coords: The maximum coordinates of the bounding box.
-        :param touching: If True, cells that touch the bounding box are kept, otherwise
-            only cells that are fully contained within the bounding box are kept.
-        :return: A new TissueGeometry object with the cells that are within the bounding box.
+        :param inside_threshold: A ratio between 0 and 1. All cells that have at
+            least this ratio of their nodes within the bounding box are kept.
+        :return: A new TissueGeometry object with the cells that are within the
+            bounding box.
         """
         new_cells = []
         for cell in self.cells:
             larger_than_min = np.all(cell.points >= min_coords, axis=1)
             smaller_than_max = np.all(cell.points <= max_coords, axis=1)
-            in_box = np.logical_and(larger_than_min, smaller_than_max)
+            inside_box = np.logical_and(larger_than_min, smaller_than_max)
+            ratio_inside_box = np.count_nonzero(inside_box) / cell.n_points
 
-            if touching:
-                within_box = np.any(in_box)
-            else:
-                within_box = np.all(in_box)
-
-            if within_box:
+            if ratio_inside_box > inside_threshold:
                 new_cells.append(cell.copy())
-                
+
         return TissueGeometry(new_cells)
+
+    def to_ngs_mesh(
+            self,
+            mesh_size: float,
+            *,
+            min_coords: np.ndarray,
+            max_coords: np.ndarray,
+            cell_names: str | list[str] = "cell",
+            cell_bnd_names: str | list[str] = "membrane",
+            projection_tol: float = None
+    ) -> ngs.Mesh:
+        """Convert the tissue geometry to a netgen mesh. The mesh is a box with
+        given min and max coordinates, and the cells are clipped to fit within
+        the box. The extracellular space is named 'ecs', the cells and their
+        boundaries can be given a custom name. The boundaries of the box are
+        named 'left', 'right', 'top', 'bottom', 'front', 'back', their
+        intersection with the cells is named 'cell_boundary'.
+        An optional projection step is applied to points near the box faces to
+        reduce the number of triangles in the mesh.
+
+        :param mesh_size: The size of the mesh elements.
+        :param min_coords: The minimum coordinates of the bounding box.
+        :param max_coords: The maximum coordinates of the bounding box.
+        :param cell_names: The name of the cells in the mesh. If a list is given,
+            the names are assigned in the order of the cells.
+        :param cell_bnd_names: The name of the cell boundaries in the mesh. If a
+            list is given, the names are assigned in the order of the cells.
+        :param projection_tol: The tolerance for projecting points to the box faces.
+            If None, no projection is applied.
+        :return: A netgen mesh object of the tissue geometry.
+        """
+        # Project points to nearest box face if below projection_tol
+        if projection_tol is not None:
+            for cell in self.cells:
+                cell.points = snap_points_to_bounds(cell.points, min_coords, projection_tol)
+                cell.points = snap_points_to_bounds(cell.points, max_coords, projection_tol)
+
+        # Sort out the cell and boundary names
+        if isinstance(cell_names, str):
+            cell_names = [cell_names] * len(self.cells)
+        if isinstance(cell_bnd_names, str):
+            cell_bnd_names = [cell_bnd_names] * len(self.cells)
+        if len(cell_names) != len(self.cells) or len(cell_bnd_names) != len(self.cells):
+            raise ValueError("Number of cell and boundary names must match number of cells.")
+
+        # Create an occ surface from the triangular mesh
+        cell_geometries = []
+        for cell, name, bc_name in zip(self.cells, cell_names, cell_bnd_names):
+            cell = polydata_to_occ(cell)
+            cell.mat(name)
+            cell.bc(bc_name)
+            cell_geometries.append(cell)
+
+        # Create the bounding box and clip cells
+        min_coords = tuple(float(c) for c in min_coords)
+        max_coords = tuple(float(c) for c in max_coords)
+        bounding_box = occ.Box(min_coords, max_coords)
+        for face in bounding_box.faces:
+            face.bc("cell_boundary")
+
+        cell_geometries = [cell * bounding_box for cell in cell_geometries]
+        cell_geometries = occ.Glue(cell_geometries)
+        for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
+            bounding_box.faces[i].bc(name)
+        bounding_box.mat("ecs")
+        geometry = occ.OCCGeometry(occ.Glue([cell_geometries, bounding_box - cell_geometries]))
+
+        return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))
+
+
 
     @classmethod
     def from_file(cls, file_name: str):
@@ -159,23 +232,26 @@ def extract_single_cell(
     return pv.PolyData.from_regular_faces(points=cell_nodes, faces=local_connectivity)
 
 
-if __name__ == "__main__":
-    # Example usage
-    geometry = TissueGeometry.from_file("/Users/innerbergerm/Projects/janelia/ecm-simulations/scripts/result_3590.vtk")
-    geometry = geometry.scale(8000)
-    min_coords, max_coords = geometry.bounding_box()
-    print(f"Bounding box: {min_coords}, {max_coords}")
+def polydata_to_occ(surface: pv.PolyData) -> occ.Solid:
+    """Create an occ solid from a triangular pyvista surface mesh."""
+    polys = []
+    for trig in surface.cell:
+        vertices = [occ.Vertex(tuple(p)) for p in trig.points[[0, 1, 2, 0]]]
+        poly = occ.Face(occ.MakePolygon(vertices))
+        poly.col = (1, 0, 0)
+        polys.append(poly)
+    return occ.Solid(occ.Glue(polys))
 
-    geometry = geometry.shrink_cells(0.7, jitter=0.1)
-    geometry = geometry.smooth(100)
-    geometry = geometry.decimate(0.7)
 
-    geometry = geometry.keep_cells_within(
-        min_coords=min_coords / 2,
-        max_coords=max_coords / 2,
-        touching=True
-    )
-
-    combined_mesh = geometry.as_single_mesh()
-    combined_mesh.plot(show_edges=True, cmap="tab20b")
-    cell = geometry.cells[0]
+def snap_points_to_bounds(
+    points: np.ndarray,
+    bounds: np.ndarray,
+    tol: float
+) -> np.ndarray:
+    """Snap points to the nearest point on the bounding box."""
+    n = points.shape[0]
+    bounds = np.tile(bounds, (n, 1))
+    dist = points - bounds
+    project = np.abs(dist) < tol
+    points[project] = bounds[project]
+    return points

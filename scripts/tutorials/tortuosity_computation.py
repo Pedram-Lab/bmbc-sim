@@ -1,20 +1,6 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.16.4
-#   kernelspec:
-#     display_name: Python 3 (ipykernel)
-#     language: python
-#     name: python3
-# ---
-
 # %% [markdown]
 # # Computing the tortuosity of a porous medium
-# # This script demonstrates how to compute the tortuosity of a porous medium
+# This script demonstrates how to compute the tortuosity of a porous medium
 # using a simple diffusion model. The tortuosity is a measure of the effective
 # path length of a substance in a porous medium compared to the straight-line
 # distance. It is defined as the ratio of the effective diffusion coefficient to
@@ -29,18 +15,17 @@ from math import pi
 from typing import Tuple
 
 import numpy as np
-from netgen.occ import Box, Sphere, Pnt, OCCGeometry
-from ngsolve import (Mesh, H1, GridFunction, BilinearForm, grad, dx, Integrate,
-    SetNumThreads, TaskManager)
+import astropy.units as u
+from netgen import occ
+import ngsolve as ngs
 from ngsolve.webgui import Draw
-from astropy.units import um, ms, us
 
-import ecsim.units
+from ecsim.units import to_simulation_units
 
 # %%
 # Parameters (some generic solution in extracellular space)
-DIFFUSIVITY = ecsim.units.convert(1 * um ** 2 / ms, ecsim.units.DIFFUSIVITY)
-TAU = ecsim.units.convert(1 * us, ecsim.units.TIME)
+DIFFUSIVITY = to_simulation_units(1 * u.um ** 2 / u.ms, 'diffusivity')
+TAU = to_simulation_units(1 * u.us, 'time')
 
 # %%
 # Define geometry
@@ -48,7 +33,7 @@ def create_porous_geometry(
         n_spheres_per_dim: int,
         volume_fraction: float,
         mesh_size: float
-) -> Mesh:
+) -> ngs.Mesh:
     """
     Function to create a porous geometry with an array of spheres in a cubic box.
     :param n_spheres_per_dim: Number of spheres per dimension, i.e., the total
@@ -63,7 +48,7 @@ def create_porous_geometry(
         raise ValueError("Volume fraction of spheres can't be larger than pi/6")
 
     # Create a cubic box
-    box = Box(Pnt(0, 0, 0), Pnt(1, 1, 1)).bc("reflective")
+    box = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, 1)).bc("reflective")
     box.faces.col = (0, 1, 0)
     box.faces[0].bc("left")
     box.faces[1].bc("right")
@@ -77,12 +62,12 @@ def create_porous_geometry(
         for x in sphere_midpoints_per_dim:
             for y in sphere_midpoints_per_dim:
                 for z in sphere_midpoints_per_dim:
-                    sphere = Sphere(Pnt(x, y, z), radius)
+                    sphere = occ.Sphere(occ.Pnt(x, y, z), radius)
                     sphere.faces.col = (1, 0, 0)
                     sphere.bc("reflective")
                     box = box - sphere
 
-    return Mesh(OCCGeometry(box).GenerateMesh(maxh=mesh_size))
+    return ngs.Mesh(occ.OCCGeometry(box).GenerateMesh(maxh=mesh_size))
 
 # %%
 ecs = create_porous_geometry(n_spheres_per_dim=5, volume_fraction=0.1, mesh_size=0.1)
@@ -92,10 +77,10 @@ Draw(ecs, clipping=clipping_settings, settings=visualization_settings)
 
 # %%
 def compute_diffusion_time(
-        mesh: Mesh,
+        mesh: ngs.Mesh,
         diffusivity: float,
         tau: float
-) -> Tuple[float, GridFunction]:
+) -> Tuple[float, ngs.GridFunction]:
     """
     Function to compute the time needed for a substance to diffuse through a
     porous medium. The time is given by the time it takes for the substance to
@@ -107,15 +92,15 @@ def compute_diffusion_time(
     :return: Time needed for diffusion and final concentration
     """
     # Define FE space
-    fes = H1(mesh, order=1, dirichlet="left")
-    concentration = GridFunction(fes)
+    fes = ngs.H1(mesh, order=1, dirichlet="left")
+    concentration = ngs.GridFunction(fes)
 
     # Define diffusion problem
-    v_test, v_trial = fes.TnT()
-    a = BilinearForm(fes)
-    a += diffusivity * grad(v_test) * grad(v_trial) * dx
-    m = BilinearForm(fes)
-    m += v_test * v_trial * dx
+    trial, test = fes.TnT()
+    a = ngs.BilinearForm(fes)
+    a += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
+    m = ngs.BilinearForm(fes)
+    m += trial * test * ngs.dx
 
     a.Assemble()
     m.Assemble()
@@ -125,17 +110,18 @@ def compute_diffusion_time(
     # Time stepping
     concentration.Set(0)
     concentration.Set(1, definedon=mesh.Boundaries("left"))
-    left_concentration = Integrate(concentration, mesh, definedon=mesh.Boundaries("left"))
+    left_concentration = ngs.Integrate(concentration, mesh, definedon=mesh.Boundaries("left"))
     right_concentration = 0
     t = 0
 
-    SetNumThreads(8)
-    with TaskManager():
+    ngs.SetNumThreads(8)
+    with ngs.TaskManager():
         while right_concentration < 0.5 * left_concentration:
             # Solve the diffusion equation
             res = -tau * (a.mat * concentration.vec)
             concentration.vec.data += mstar_inv * res
-            right_concentration = Integrate(concentration, mesh, definedon=mesh.Boundaries("right"))
+            right_concentration = ngs.Integrate(
+                concentration, mesh, definedon=mesh.Boundaries("right"))
             t += tau
 
     return t, concentration
