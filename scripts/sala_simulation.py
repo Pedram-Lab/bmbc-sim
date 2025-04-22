@@ -5,6 +5,7 @@ import astropy.units as u
 
 import ecsim
 from ecsim.simulation import recorder, transport
+from ecsim.units import M, uM
 
 
 # Create a spherical cell
@@ -23,8 +24,6 @@ geometry = simulation.setup_geometry(mesh)
 # Get the compartments and membranes
 cell = geometry.compartments['cell']
 membrane = geometry.membranes['membrane']
-M = u.mol / u.L
-uM = u.umol / u.L
 
 # Add species to the simulation
 ca = simulation.add_species('Ca', valence=2)
@@ -101,14 +100,14 @@ channel_current = I / (2 * F)
 # Time dependent influx
 membrane.add_transport(
     species=ca,
-    transport=transport.Channel(lambda t: channel_current if t < t_off else 0 * u.mol / u.s),
+    transport=transport.GeneralFlux(lambda t: channel_current if t < t_off else 0 * u.mol / u.s),
     source=None,
     target=cell
 )
 # MM-type extrusion out of the cell (dependent on inside concentration)
 membrane.add_transport(
     species=ca,
-    transport=transport.MichaelisMenten(v_max=v_max, km=km),
+    transport=transport.Active(v_max=v_max, km=km),
     source=cell,
     target=None
 )
@@ -117,7 +116,7 @@ ca_0 = 0.05 * u.umol / u.L
 channel_flux = v_max * ca_0 / (km + ca_0)
 membrane.add_transport(
     species=ca,
-    transport=transport.Channel(channel_flux),
+    transport=transport.GeneralFlux(channel_flux),
     source=None,
     target=cell
 )

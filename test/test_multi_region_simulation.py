@@ -55,11 +55,11 @@ def test_multi_region_dynamics(tmp_path, visualize=False):
     flux = 1 * u.amol /  u.s
     left_membrane.add_transport(
         species=gradient, source=cell, target=None,
-        transport=transport.Channel(flux=flux)
+        transport=transport.GeneralFlux(flux=flux)
     )
     right_membrane.add_transport(
         species=gradient, source=None, target=cell,
-        transport=transport.Channel(flux=flux)
+        transport=transport.GeneralFlux(flux=flux)
     )
 
     # Species with different initial values should relax to the same value

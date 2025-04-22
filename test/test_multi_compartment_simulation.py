@@ -55,7 +55,7 @@ def test_multi_compartment_dynamics(tmp_path, visualize=False):
     left.add_diffusion(equilibrium, 10 * u.um**2 / u.s)
     right.add_diffusion(equilibrium, 10 * u.um**2 / u.s)
     permeability = 10 * u.nm / u.ms * membrane.area
-    t = transport.Linear(permeability=permeability)
+    t = transport.Passive(permeability=permeability)
     membrane.add_transport(species=equilibrium, transport=t, source=left, target=right)
 
     # Species with Michaelis-Menten transport that creates a discontinuity
@@ -64,7 +64,7 @@ def test_multi_compartment_dynamics(tmp_path, visualize=False):
     right.initialize_species(michaelis_menten, 0.9 * u.mmol / u.L)
     left.add_diffusion(michaelis_menten, 10 * u.um**2 / u.s)
     right.add_diffusion(michaelis_menten, 10 * u.um**2 / u.s)
-    t = transport.MichaelisMenten(v_max=1 * u.amol / u.s, km=0.5 * u.mmol / u.L)
+    t = transport.Active(v_max=1 * u.amol / u.s, km=0.5 * u.mmol / u.L)
     membrane.add_transport(species=michaelis_menten, transport=t, source=left, target=right)
 
     # Species with channel transport that creates a discontinuity
@@ -73,7 +73,7 @@ def test_multi_compartment_dynamics(tmp_path, visualize=False):
     right.initialize_species(channel_l2r, 0 * u.mmol / u.L)
     left.add_diffusion(channel_l2r, 10 * u.um**2 / u.s)
     right.add_diffusion(channel_l2r, 10 * u.um**2 / u.s)
-    t = transport.Channel(1 * u.amol / u.s)
+    t = transport.GeneralFlux(1 * u.amol / u.s)
     membrane.add_transport(species=channel_l2r, transport=t, source=left, target=right)
 
     # Species with reverse channel transport that creates a discontinuity
@@ -111,8 +111,8 @@ def test_multi_compartment_dynamics(tmp_path, visualize=False):
     assert p1['channel_r2l'][-1] < 0.8
 
     # Test total substance values
-    s0, _ = get_substance_values(simulation.result_directory, compartment_id=0)
-    s1, _ = get_substance_values(simulation.result_directory, compartment_id=1)
+    s0, _ = get_substance_values(simulation.result_directory, compartment_name='left')
+    s1, _ = get_substance_values(simulation.result_directory, compartment_name='right')
     assert total_substance(s0, s1, 'equilibrium', 0) == pytest.approx(1.8, rel=1e-3)
     assert total_substance(s0, s1, 'equilibrium', -1) == pytest.approx(1.8, rel=1e-3)
 

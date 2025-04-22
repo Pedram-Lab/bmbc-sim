@@ -6,37 +6,8 @@ import matplotlib.pyplot as plt
 
 from ecsim import find_latest_results
 
-custom_theme = {
-    'font.size': 9,
-    'axes.titlesize': 9,
-    'axes.labelsize': 9,
-    'legend.fontsize': 9,
-    'legend.edgecolor': 'black',
-    'legend.frameon': False,
-    'lines.linewidth': 0.5,
-    'font.family': ['Arial', 'sans-serif'],
-    'axes.spines.top': True,
-    'axes.spines.right': True,
-    'axes.spines.left': True,
-    'axes.spines.bottom': True,
-    'axes.linewidth': 0.5,
-    'xtick.major.width': 0.5,
-    'ytick.major.width': 0.5,
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9
-}
-
-# Apply the theme to matplotlib globally
-for key, value in custom_theme.items():
-    plt.rcParams[key] = value
-
-fig_width = 5.36  # pulgadas
-fig_height = 3.27  # pulgadas
-
-fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-
 # Find the latest folder with test data
-latest_folder = find_latest_results("sala", "results")
+latest_folder = find_latest_results("tsien", "results")
 
 ### Full snapshots
 # snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
@@ -72,19 +43,13 @@ time = point_data.coords['time'].values
 points = point_data.coords['point'].values
 x_coords = [xyz[0] for xyz in point_data.attrs['point_coordinates']]
 
-dist = [19.75, 10.25, 5.25, 0.25]
 for species in species_list:
     plt.figure()
-    for d, point in zip(dist, points):
-        ts = point_data.sel(species=species, point=point)
-        ts_array = ts.to_array().values * 1000
-        plt.semilogy(time, ts_array.T, label=f"Distance {d}")
-    plt.xlabel("Time [ms]")
+    final_concentration = point_data.sel(species=species).isel(time=-1)
+    final_concentration = final_concentration.to_dataarray().squeeze()
+    plt.plot(x_coords, final_concentration, label=species)
+    plt.xlabel("Distance from center [µm]")
     plt.ylabel("Concentration [µM]")
-    plt.xlim(0, 2000)
-    plt.title(f"Species: {species}")
+    plt.title(f"Species: {species} at t={time[-1]} ms")
     plt.legend()
-
-plt.tight_layout()
-plt.savefig("sala_simulation.svg", format="svg")
-plt.show() 
+plt.show()

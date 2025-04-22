@@ -17,15 +17,51 @@ class Transport(abc.ABC):
         self._mutable_coefficients = []
 
 
-    @abc.abstractmethod
-    def flux(
+    def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
-        """Compute the boundary flux of the transport mechanism. The flux is
-        assumed to be the total flux across the membrane. In case a flux
-        density is readily available, it should be multiplied by :code:`membrane.area`.
+        """Compute the lhs-version of the boundary flux of the transport
+        mechanism. The flux is assumed to be the total flux across the membrane.
+        In case a flux density is readily available, it should be multiplied by
+        :code:`membrane.area`.
+        All of the arguments can be None, in which case the flux is assumed to
+        connect the domain to the outside.
+        The following term is added to left-hand side of the PDE:
+        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        the flux density that's implemented by this method in terms of test
+        functions and concentrations of the source and target compartments.
+
+        :param source: Coefficient function representing the concentration in
+            the source compartment.
+        :param target: Coefficient function representing the concentration in
+            the target compartment.
+        :param src_test: Test function for the source compartment.
+        :param trg_test: Test function for the target compartment.
+        :return: Coefficient function representing the flux across the membrane
+            from source to target
+        """
+        del source, target, src_test, trg_test  # Unused in default implementation
+        return None
+
+    def flux_rhs(
+            self,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
+    ) -> ngs.CoefficientFunction:
+        """Compute the rhs-version of the boundary flux of the transport
+        mechanism. The flux is assumed to be the total flux across the membrane.
+        In case a flux density is readily available, it should be multiplied by
+        :code:`membrane.area`.
+        All of the arguments can be None, in which case the flux is assumed to
+        connect the domain to the outside.
+        The following term is added to right-hand side of the PDE:
+        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        the flux density that's implemented by this method in terms of the
+        concentrations of the source and target compartments.
 
         :param source: Coefficient function representing the concentration in
             the source compartment.
@@ -34,6 +70,8 @@ class Transport(abc.ABC):
         :return: Coefficient function representing the flux across the membrane
             from source to target
         """
+        del source, target  # Unused in default implementation
+        return None
 
 
     def update_flux(self, t: u.Quantity) -> None:
@@ -78,8 +116,8 @@ class Transport(abc.ABC):
             raise ValueError("Coefficient must be either a Quantity or a callable.")
 
 
-class Linear(Transport):
-    """Linear transport mechanism that computes the flux as a linear function
+class Passive(Transport):
+    """Passive transport mechanism that computes the flux as a linear function
     of the concentration difference across the membrane.
     """
     def __init__(
@@ -87,7 +125,7 @@ class Linear(Transport):
             permeability: Coefficient,
             outside_concentration: u.Quantity = None
     ):
-        """Create a new linear transport mechanism with the given permeability.
+        """Create a new passive transport mechanism with the given permeability.
 
         :param permeability: Permeability of the membrane (units: area * length/time).
         :param outside_concentration: Concentration of the substance outside of
@@ -99,38 +137,48 @@ class Linear(Transport):
             self._register_coefficient(outside_concentration, 'molar concentration')
 
 
-    def flux(
+    def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
-        source = self._constant_if_none(source)
-        target = self._constant_if_none(target)
+        del source, target  # Unused
+        if src_test is None and trg_test is None:
+            raise ValueError("Both source and target cannot be None.")
+        if (src_test is None or trg_test is None) and self.outside_concentration is None:
+            raise ValueError("No outside concentration specified for outside flux.")
 
-        # TODO: find correct unit for channel flux!
-        return self.permeability * (source - target)
+        if trg_test is None:
+            return self.permeability * src_test
+        if src_test is None:
+            return -self.permeability * trg_test
 
-
-    def _constant_if_none(self, cf):
-        """Return a constant coefficient function if the input is None.
-        """
-        if cf is None:
-            if self.outside_concentration is None:
-                raise ValueError("No outside concentration specified.")
-            return ngs.CoefficientFunction(self.outside_concentration)
-        return cf
+        return self.permeability * (src_test - trg_test)
 
 
-class MichaelisMenten(Transport):
-    """Michaelis-Menten transport mechanism that computes the flux based on
-    the source concentration and a maximum rate.
+    def flux_rhs(
+            self,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
+    ) -> ngs.CoefficientFunction:
+        if source is None:
+            return self.permeability * self.outside_concentration
+        if target is None:
+            return -self.permeability * self.outside_concentration
+
+
+class Active(Transport):
+    """Active transport mechanism that computes the flux based on
+    Michaelis-Menten kinetics for the source concentration.
     """
     def __init__(
             self,
             v_max: Coefficient,
             km: Coefficient
     ):
-        """Create a new Michaelis-Menten transport mechanism.
+        """Create a new active transport mechanism based on Michaelis-Menten kinetics.
 
         :param v_max: Maximum rate of the transport (units: substance/time).
         :param km: Michaelis constant (units: concentration).
@@ -140,27 +188,31 @@ class MichaelisMenten(Transport):
         self.km = self._register_coefficient(km, 'molar concentration')
 
 
-    def flux(
+    def flux_lhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
     ) -> ngs.CoefficientFunction:
-        # Only the source concentration contributes to the (stationary) flux
-        del target
+        # Only the source concentration contributes to the flux
+        del target, trg_test  # Unused
+        if src_test is None:
+            raise ValueError("Source test function cannot be None in active transport.")
 
         # Compute the flux using the Michaelis-Menten equation
-        return self.v_max * source / (self.km + source)
+        return self.v_max * src_test / (self.km + source)
 
 
-class Channel(Transport):
-    """Channel transport mechanism that allows for a constant flux across the
-    membrane, independent of the concentration difference.
+class GeneralFlux(Transport):
+    """General transport mechanism that allows for a constant or time dependent
+    flux across the membrane, independent of the concentration difference.
     """
     def __init__(
             self,
             flux: Coefficient
     ):
-        """Create a new channel transport mechanism.
+        """Create a new general transport mechanism.
 
         :param flux: The constant flux across the membrane (units: substance/time).
         """
@@ -168,10 +220,11 @@ class Channel(Transport):
         self.flux_value = self._register_coefficient(flux, 'catalytic activity')
 
 
-    def flux(
+    def flux_rhs(
             self,
-            source: ngs.CoefficientFunction,
-            target: ngs.CoefficientFunction
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
     ) -> ngs.CoefficientFunction:
-        # Channel flux is independent of the concentrations
+        # Flux is independent of the concentrations
+        del source, target
         return self.flux_value
