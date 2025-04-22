@@ -6,6 +6,7 @@ import ngsolve as ngs
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
+import numbers
 
 
 # Define type aliases to shorten type annotations
@@ -120,7 +121,7 @@ class Compartment:
         """
         if self.coefficients.permittivity is not None:
             raise ValueError(f"Permittivity already defined for compartment '{self.name}'")
-        if isinstance(relative_permittivity, float):
+        if isinstance(relative_permittivity, numbers.Real):
             eps = relative_permittivity * const.eps0
         else:
             eps = {region: value * const.eps0 for region, value in relative_permittivity.items()}

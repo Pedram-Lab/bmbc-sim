@@ -261,7 +261,7 @@ class PnpPotential:
 
         # Set up potential matrix and source term
         trial, test = fes.TnT()
-        offset = len(species)
+        offset = len(compartments)
         a = ngs.BilinearForm(fes, check_unused=False)
         f = ngs.LinearForm(fes)
         for k, compartment in enumerate(compartments):
