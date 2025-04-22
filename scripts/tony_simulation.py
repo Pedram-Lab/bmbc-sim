@@ -1,5 +1,5 @@
-"""
-This code simulates a rapid calcium dilution in a dish-like environment (Tony experiment), considering:
+"""This code simulates a rapid calcium dilution in a dish-like environment (Tony
+experiment), considering:
 - Calcium diffusion
 - Reversible binding to a buffer
 - Controlled calcium removal
@@ -38,7 +38,7 @@ simulation = ecsim.Simulation('tony', result_root='results')
 geometry = simulation.setup_geometry(mesh)
 
 # Access compartments and membrane
-dish = geometry.compartments['dish'] 
+dish = geometry.compartments['dish']
 outside = geometry.membranes['side']
 
 
@@ -63,12 +63,12 @@ dish.add_diffusion(buffer, 0 * u.um**2 / u.s)
 dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': free_buffer_init})
 
 # Add complex species (non-diffusive)
-complex = simulation.add_species('complex', valence=0)
-dish.initialize_species(complex, {'free': 0 * u.mmol / u.L, 'substrate': ca_b_init})
-dish.add_diffusion(complex, 0 * u.um**2 / u.s)
+cab_complex = simulation.add_species('complex', valence=0)
+dish.initialize_species(cab_complex, {'free': 0 * u.mmol / u.L, 'substrate': ca_b_init})
+dish.add_diffusion(cab_complex, 0 * u.um**2 / u.s)
 
 # Add reversible binding reaction: Ca + buffer ↔ complex
-dish.add_reaction(reactants=[ca, buffer], products=[complex],
+dish.add_reaction(reactants=[ca, buffer], products=[cab_complex],
                   k_f=kf, k_r=kr)
 
 # Compute Ca to remove for dilution
@@ -80,6 +80,7 @@ flux_rate = substance_to_remove / (dilution_end - dilution_start)
 
 # Time-dependent efflux function
 def efflux(t):
+    """Efflux function for Ca removal during dilution period."""
     if dilution_start <= t < dilution_end:
         return flux_rate
     else:
@@ -87,8 +88,8 @@ def efflux(t):
 
 
 # Apply Ca efflux through the membrane
-t = transport.Channel(flux=efflux)
-outside.add_transport(ca, transport=t, source=dish, target=None)
+tran = transport.GeneralFlux(flux=efflux)
+outside.add_transport(ca, transport=tran, source=dish, target=None)
 
 # Define recording points and run simulation
 points = [[150.0, 150.0, float(z)] for z in np.linspace(0, 10, 1500)]
