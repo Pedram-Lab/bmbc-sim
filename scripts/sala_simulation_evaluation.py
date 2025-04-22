@@ -6,6 +6,35 @@ import matplotlib.pyplot as plt
 
 from ecsim import find_latest_results
 
+custom_theme = {
+    'font.size': 9,
+    'axes.titlesize': 9,
+    'axes.labelsize': 9,
+    'legend.fontsize': 9,
+    'legend.edgecolor': 'black',
+    'legend.frameon': False,
+    'lines.linewidth': 0.5,
+    'font.family': ['Arial', 'sans-serif'],
+    'axes.spines.top': True,
+    'axes.spines.right': True,
+    'axes.spines.left': True,
+    'axes.spines.bottom': True,
+    'axes.linewidth': 0.5,
+    'xtick.major.width': 0.5,
+    'ytick.major.width': 0.5,
+    'xtick.labelsize': 9,
+    'ytick.labelsize': 9
+}
+
+# Apply the theme to matplotlib globally
+for key, value in custom_theme.items():
+    plt.rcParams[key] = value
+
+fig_width = 5.36  # pulgadas
+fig_height = 3.27  # pulgadas
+
+fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
 # Find the latest folder with test data
 latest_folder = find_latest_results("sala", "results")
 
@@ -56,4 +85,7 @@ for species in species_list:
     plt.xlim(0, 2000)
     plt.title(f"Species: {species}")
     plt.legend()
-plt.show()
+
+plt.tight_layout()
+plt.savefig("sala_simulation.svg", format="svg")
+plt.show() 
