@@ -38,10 +38,6 @@ convection = -b * u * ngs.grad(v) * ngs.dx \
 a = ngs.BilinearForm(0.1 * (diffusion + convection)).Assemble()
 m = ngs.BilinearForm(u * v * ngs.dx).Assemble()
 
-m_star = m.mat.CreateMatrix()
-m_star.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
-m_star_inv = m_star.Inverse(freedofs=fes.FreeDofs(), inverse="umfpack")
-
 gfu = ngs.GridFunction(fes, name="uDG")
 gfu.Set(ngs.sin(10 * ngs.x) + ngs.cos(10 * ngs.y))
 Draw(gfu)
@@ -54,9 +50,17 @@ ngs.SetNumThreads(8)
 integrals = []
 with ngs.TaskManager():
     start = time()
+    m_star = m.mat.CreateMatrix()
+    m_star.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
+    # pre = m_star.CreateSmoother(fes.FreeDofs(), GS=True)
+    # m_star_inv = ngs.krylovspace.GMResSolver(m_star, pre=pre)
+    # m_star_inv = ngs.GMRESSolver(m_star, pre=pre)
+    m_star_inv = m_star.Inverse(fes.FreeDofs(), inverse="umfpack")
+
     while n * dt < 1:
         n += 1
         a.Apply(gfu.vec, res)
+        # gfu.vec.data += -dt * ngs.krylovspace.GMRes(m_star, res, pre=pre, printrates=False)
         gfu.vec.data += -dt * (m_star_inv * res)
         if n % 10 == 0:
             u_t.AddMultiDimComponent(gfu.vec)
@@ -67,5 +71,7 @@ Draw(u_t, mesh, "uDG")
 
 
 integrals = np.array(integrals)
-plt.plot(np.arange(len(integrals)) * dt, integrals)
+dev = np.abs(integrals - integrals[0])
+plt.plot(np.arange(len(integrals)) * dt, dev)
+plt.ylim(0, dev.max() * 1.1)
 plt.show()
