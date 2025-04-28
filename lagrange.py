@@ -14,10 +14,20 @@ u, v = fes.TnT()
 
 diffusion = ngs.grad(u) * ngs.grad(v) * ngs.dx
 
-b = ngs.CoefficientFunction((20, 5))
+b = ngs.CoefficientFunction((200, 5))
 convection = -b * u * ngs.grad(v) * ngs.dx
 
-a = ngs.BilinearForm(0.1 * (diffusion + convection)).Assemble()
+# SUPG regularization τ (b·∇u)(b·∇v) with parameter τ ~ h/(2|b|)
+# Seems to be much more stable than the artificial diffusion and even faster
+h = ngs.specialcf.mesh_size
+tau = h / (2 * b.Norm() + 1e-10)
+regularization = tau * (b * ngs.grad(u)) * (b * ngs.grad(v)) * ngs.dx
+
+# Artificial (isotropic) diffusion regularization: ε |b| h ∇u·∇v
+# eps = 0.1
+# regularization = eps * b.Norm() * h * ngs.grad(u) * ngs.grad(v) * ngs.dx
+
+a = ngs.BilinearForm(0.1 * (diffusion + convection + regularization)).Assemble()
 m = ngs.BilinearForm(u * v * ngs.dx).Assemble()
 
 gfu = ngs.GridFunction(fes)
