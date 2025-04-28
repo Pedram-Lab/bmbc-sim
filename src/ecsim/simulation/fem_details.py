@@ -108,7 +108,7 @@ class FemLhs:
                 trial, test = trial_and_test[i]
                 d = compartment.coefficients.diffusion[species]
                 drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
-                transport_term += (d * beta * species.valence * trial * drift).Compile() * ngs.dx
+                transport_term += (d * beta * 1e-6 * species.valence * trial * drift).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
         mass.Assemble()
@@ -272,7 +272,7 @@ class PnpPotential:
 
             for s in species:
                 c = concentrations[s]
-                f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
+                f += faraday_const * 1e-3 * s.valence * c.components[k] * test[k] * ngs.dx
 
         a.Assemble()
         a = a.mat.DeleteZeroElements(1e-10)
