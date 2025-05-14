@@ -104,11 +104,21 @@ class FemLhs:
         # Handle potential terms
         if potential is not None and species.valence != 0:
             beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
+            h = ngs.specialcf.mesh_size
             for i, compartment in enumerate(compartments):
                 trial, test = trial_and_test[i]
                 d = compartment.coefficients.diffusion[species]
-                drift = -ngs.InnerProduct(ngs.grad(potential[i]), ngs.grad(test))
-                transport_term += (d * beta * species.valence * trial * drift).Compile() * ngs.dx
+
+                # Drift term D * β * valence * u * ∇φ·∇v
+                grad_phi = ngs.grad(potential[i])
+                directional_test = ngs.InnerProduct(grad_phi, ngs.grad(test))
+                drift = beta * species.valence * trial
+
+                # SUPG regularization D * τ * (∇φ·∇u)(∇φ·∇v) with parameter τ ~ h/(2|∇φ|)
+                tau = h / (2 * grad_phi.Norm() + 1e-6)
+                supg = tau * (grad_phi * ngs.grad(trial))
+
+                transport_term += (-d * (supg + drift) * directional_test).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
         mass.Assemble()
