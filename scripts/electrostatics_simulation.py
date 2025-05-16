@@ -1,9 +1,5 @@
-"""This code simulates a rapid calcium dilution in a dish-like environment (Tony
-experiment), considering:
-- Calcium diffusion
-- Reversible binding to a buffer
-- Controlled calcium removal
-- Visualization and recording of spatial and temporal behavior
+"""This code simulates electrostatic interactions among three chemical species: B1 (immobile), B2 (mobile), and Ca (diffusing).
+The simulation is performed within a two-region geometry, where the concentrations of the chemical species are distributed unevenly across the domains.
 """
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
