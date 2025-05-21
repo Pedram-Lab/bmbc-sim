@@ -1,29 +1,17 @@
-"""This code simulates a rapid calcium dilution in a dish-like environment (Tony
-experiment), considering:
-- Calcium diffusion
-- Reversible binding to a buffer
-- Controlled calcium removal
-- Visualization and recording of spatial and temporal behavior
 """
-
+This code simulates chemical interactions among three species: B1 (immobile),
+B2 (mobile), and Ca (diffusing). The simulation is performed within a two-region
+geometry, where the concentrations of the chemical species are distributed
+unevenly across the regions.
 """
-TODO:
-Chelation (start with this):
-- Create a geometry with sensible dimensions (~1µm).
-- Add mobile buffer and interaction constants.
-- Initialize buffers and Ca (pay attention to charge neutrality).
-Electrostatics:
-- Set 'electrostatics=true'.
-- Delete all chelation.
-- Lower the time step size.
-"""
-
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
 import numpy as np
+
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder, transport  # Tools for data recording and transport
+from ecsim.simulation import recorder  # Tools for data recording and transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
+
 
 # Initial and target Ca concentrations
 CA_INIT = 1 * u.mmol / u.L
@@ -52,7 +40,6 @@ geometry = simulation.setup_geometry(mesh)
 dish = geometry.compartments['dish']
 outside = geometry.membranes['side']
 
-
 # Add Ca species and set diffusion
 ca = simulation.add_species('ca', valence=2)
 dish.initialize_species(ca, CA_INIT)
@@ -66,7 +53,6 @@ kr = kf * buffer_kd  # Reverse rate
 
 # Compute initial free buffer and complex
 free_buffer_init = buffer_tot * (buffer_kd / (buffer_kd + CA_INIT))
-#ca_b_init = 1.0 * u.mmol / u.L 
 ca_b_init = buffer_tot - free_buffer_init
 
 # Add buffer species (non-diffusive)
@@ -80,8 +66,7 @@ dish.initialize_species(cab_complex, {'free': 0 * u.mmol / u.L, 'substrate': ca_
 dish.add_diffusion(cab_complex, 0 * u.um**2 / u.s)
 
 # Add reversible binding reaction: Ca + buffer ↔ complex
-dish.add_reaction(reactants=[ca, buffer], products=[cab_complex],
-                  k_f=kf, k_r=kr)
+dish.add_reaction(reactants=[ca, buffer], products=[cab_complex], k_f=kf, k_r=kr)
 
 # Buffer2 parameters
 buffer_tot_2 = 2.0 * u.mmol / u.L  # Total buffer
@@ -104,11 +89,9 @@ dish.initialize_species(cab_complex_2, {'free': ca_b_init_2, 'substrate': 0 * u.
 dish.add_diffusion(cab_complex_2, 50 * u.um**2 / u.s)
 
 # Add reversible binding reaction: Ca + buffer ↔ complex
-dish.add_reaction(reactants=[ca, buffer_2], products=[cab_complex_2],
-                  k_f=kf_2, k_r=kr_2)
+dish.add_reaction(reactants=[ca, buffer_2], products=[cab_complex_2], k_f=kf_2, k_r=kr_2)
 
 # Define recording points and run simulation
 points = [[0.5, 0.5, float(z)] for z in np.linspace(0, 1, 100)]
 simulation.add_recorder(recorder.FullSnapshot(0.5 * u.ms))
-#simulation.add_recorder(recorder.ConcentrationProfile(ca, points=points, interval=10*u.s))
 simulation.run(end_time=20 * u.ms, time_step=10 * u.us)

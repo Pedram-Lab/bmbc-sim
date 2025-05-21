@@ -1,12 +1,17 @@
-"""This code simulates electrostatic interactions among three chemical species: B1 (immobile), B2 (mobile), and Ca (diffusing).
-The simulation is performed within a two-region geometry, where the concentrations of the chemical species are distributed unevenly across the domains.
+"""
+This code simulates electrostatic interactions among three chemical species: B1
+(immobile), B2 (mobile), and Ca (diffusing). The simulation is performed within
+a two-region geometry, where the concentrations of the chemical species are
+distributed unevenly across the regions.
 """
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
 import numpy as np
+
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder, transport  # Tools for data recording and transport
+from ecsim.simulation import recorder  # Tools for data recording and transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
+
 
 # Initial and target Ca concentrations
 CA_INIT = 1 * u.mmol / u.L
@@ -50,17 +55,13 @@ buffer = simulation.add_species('buffer', valence=-1)
 dish.add_diffusion(buffer, 0 * u.um**2 / u.s)
 dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': buffer_tot})
 
-
-# # Buffer2 parameters
+# Buffer2 parameters
 buffer_tot_2 = 2.0 * u.mmol / u.L  # Total buffer
-
 
 # Add buffer species (diffusive)
 buffer_2 = simulation.add_species('buffer_2', valence=-1)
 dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
 dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
-
-
 
 # Define recording points and run simulation
 points = [[0.5, 0.5, float(z)] for z in np.linspace(0, 1, 100)]
