@@ -47,7 +47,9 @@ class PointValues(Recorder):
             mesh: ngs.Mesh,
             compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
+            potential: ngs.GridFunction | None
     ) -> None:
+        #TODO: Add potential to the output
         del compartments  # Unused
         self._directory = directory
 

@@ -34,7 +34,9 @@ class CompartmentSubstance(Recorder):
             mesh: ngs.Mesh,
             compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
+            potential: ngs.GridFunction | None
     ) -> None:
+        #TODO: Add potential to the output
         self._mesh = mesh
         self._directory = directory
         self._volumes = [to_simulation_units(comp.volume, 'volume') for comp in compartments]

@@ -22,6 +22,7 @@ class Recorder(abc.ABC):
             mesh: ngs.Mesh,
             compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
+            potential: ngs.GridFunction | None,
             start_time: u.Quantity
     ) -> None:
         """Set up the recorder with the necessary parameters.
@@ -31,9 +32,12 @@ class Recorder(abc.ABC):
         :param compartments: List of compartments in the simulation geometry.
         :param concentrations: Dictionary mapping species names to their
             respective NGSolve GridFunctions representing concentrations.
+        :param potential: NGSolve GridFunction representing the electric
+            potential (if applicable).
+        :param start_time: The initial time of the simulation.
         """
         # Record the initial state
-        self._setup(directory, mesh, compartments, concentrations)
+        self._setup(directory, mesh, compartments, concentrations, potential)
         self.record(start_time)
 
 
@@ -43,7 +47,8 @@ class Recorder(abc.ABC):
             directory: str,
             mesh: ngs.Mesh,
             compartments: list[Compartment],
-            concentrations: dict[str, ngs.GridFunction]
+            concentrations: dict[str, ngs.GridFunction],
+            potential: ngs.GridFunction | None
     ) -> None:
         """Internal method to set up the recorder with the necessary parameters.
 
@@ -52,6 +57,7 @@ class Recorder(abc.ABC):
         :param compartments: List of compartments in the simulation geometry.
         :param concentrations: Dictionary mapping species names to their
             respective NGSolve GridFunctions representing concentrations.
+        :param potential: NGSolve GridFunction representing the electric
         """
 
 
