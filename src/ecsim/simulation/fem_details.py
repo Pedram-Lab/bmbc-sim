@@ -254,7 +254,7 @@ class PnpPotential:
         self._stiffness = stiffness
         self._inverse = inverse
         self._source_term = source_term
-        self._potential = potential
+        self.potential = potential
 
     @classmethod
     def for_all_species(
@@ -309,9 +309,9 @@ class PnpPotential:
     def update(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
-        self._potential.vec.data = self._inverse * self._source_term.vec
+        self.potential.vec.data = self._inverse * self._source_term.vec
 
 
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:
         """Returns the k-th component of the potential."""
-        return self._potential.components[k]
+        return self.potential.components[k]

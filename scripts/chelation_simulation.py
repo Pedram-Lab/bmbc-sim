@@ -1,0 +1,97 @@
+"""
+This code simulates chemical interactions among three species: B1 (immobile),
+B2 (mobile), and Ca (diffusing). The simulation is performed within a two-region
+geometry, where the concentrations of the chemical species are distributed
+unevenly across the regions.
+"""
+import astropy.units as u  # Physical units
+from ngsolve.webgui import Draw  # Mesh visualization
+import numpy as np
+
+import ecsim  # Simulation framework
+from ecsim.simulation import recorder  # Tools for data recording and transport
+from ecsim.geometry import create_dish_geometry  # Geometry generator
+
+
+# Initial and target Ca concentrations
+CA_INIT = 1 * u.mmol / u.L
+
+# Define dish geometry dimensions
+DISH_HEIGHT = 1 * u.um
+SIDELENGTH = 0.5 * u.um
+SUBSTRATE_HEIGHT = 0.5 * u.um
+
+# Create and visualize 3D mesh
+mesh = create_dish_geometry(
+    dish_height=DISH_HEIGHT,
+    slice_width=SIDELENGTH,
+    slice_depth=0.5 * u.um,
+    mesh_size=SIDELENGTH / 10,
+    substrate_height=SUBSTRATE_HEIGHT
+)
+Draw(mesh)
+print("Material names in mesh:", mesh.GetMaterials())
+
+# Initialize simulation and link geometry
+simulation = ecsim.Simulation('chelation', result_root='results')
+geometry = simulation.setup_geometry(mesh)
+
+# Access compartments and membrane
+dish = geometry.compartments['dish']
+outside = geometry.membranes['side']
+
+# Add Ca species and set diffusion
+ca = simulation.add_species('ca', valence=2)
+dish.initialize_species(ca, CA_INIT)
+dish.add_diffusion(ca, 600 * u.um**2 / u.s)
+
+# Buffer 1 parameters
+buffer_tot = 2.0 * u.mmol / u.L  # Total buffer
+buffer_kd = 0.05 * u.mmol / u.L  # Dissociation constant
+kf = 0.001 / (u.umol / u.L * u.s)  # Forward rate
+kr = kf * buffer_kd  # Reverse rate
+
+# Compute initial free buffer and complex
+free_buffer_init = buffer_tot * (buffer_kd / (buffer_kd + CA_INIT))
+ca_b_init = buffer_tot - free_buffer_init
+
+# Add buffer species (non-diffusive)
+buffer = simulation.add_species('buffer', valence=-1)
+dish.add_diffusion(buffer, 0 * u.um**2 / u.s)
+dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': free_buffer_init})
+
+# Add complex species (non-diffusive)
+cab_complex = simulation.add_species('complex', valence=0)
+dish.initialize_species(cab_complex, {'free': 0 * u.mmol / u.L, 'substrate': ca_b_init})
+dish.add_diffusion(cab_complex, 0 * u.um**2 / u.s)
+
+# Add reversible binding reaction: Ca + buffer ↔ complex
+dish.add_reaction(reactants=[ca, buffer], products=[cab_complex], k_f=kf, k_r=kr)
+
+# Buffer2 parameters
+buffer_tot_2 = 2.0 * u.mmol / u.L  # Total buffer
+buffer_kd_2 = 0.05 * u.mmol / u.L  # Dissociation constant
+kf_2 = 1 / (u.mmol / u.L * u.s)  # Forward rate
+kr_2 = kf_2 * buffer_kd_2  # Reverse rate
+
+# Compute initial free buffer and complex
+free_buffer_init_2 = buffer_tot_2 * (buffer_kd_2 / (buffer_kd_2 + CA_INIT))
+ca_b_init_2 = buffer_tot_2 - free_buffer_init_2
+
+# Add buffer species (diffusive)
+buffer_2 = simulation.add_species('buffer_2', valence=-1)
+dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
+dish.initialize_species(buffer_2, {'free': free_buffer_init_2, 'substrate': 0 * u.mmol / u.L})
+
+# Add complex species (diffusive)
+cab_complex_2 = simulation.add_species('complex_2', valence=0)
+dish.initialize_species(cab_complex_2, {'free': ca_b_init_2, 'substrate': 0 * u.mmol / u.L})
+dish.add_diffusion(cab_complex_2, 50 * u.um**2 / u.s)
+
+# Add reversible binding reaction: Ca + buffer ↔ complex
+dish.add_reaction(reactants=[ca, buffer_2], products=[cab_complex_2], k_f=kf_2, k_r=kr_2)
+
+# Define recording points and run simulation
+points = [[0.5, 0.5, float(z)] for z in np.linspace(0, 1, 100)]
+simulation.add_recorder(recorder.FullSnapshot(0.5 * u.ms))
+simulation.run(end_time=20 * u.ms, time_step=10 * u.us)

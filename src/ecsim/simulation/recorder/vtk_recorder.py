@@ -26,6 +26,7 @@ class FullSnapshot(Recorder):
             mesh: ngs.Mesh,
             compartments: list[Compartment],
             concentrations: dict[str, ngs.GridFunction],
+            potential: ngs.GridFunction | None
     ) -> None:
         # GridFunctions in multi-component spaces cannot automatically be converted
         # to values on the mesh, so we need to set up MaterialCFs manually by a mapping
@@ -33,11 +34,18 @@ class FullSnapshot(Recorder):
         #                                   containst the material)
         coeff = {}
         for species, concentration in concentrations.items():
-            species_coeff = {}
-            for i, compartment in enumerate(compartments):
-                for region in compartment.get_region_names(full_names=True):
-                    species_coeff[region] = concentration.components[i]
-            coeff[species] = mesh.MaterialCF(species_coeff)
+            coeff[species] = mesh.MaterialCF({
+                region: concentration.components[i]
+                for i, compartment in enumerate(compartments)
+                for region in compartment.get_region_names(full_names=True)
+            })
+
+        if potential is not None:
+            coeff['potential'] = mesh.MaterialCF({
+                region: potential.components[i]
+                for i, compartment in enumerate(compartments)
+                for region in compartment.get_region_names(full_names=True)
+            })
 
         # Create a VTK writer for a subfolder in the specified directory
         file_template = os.path.join(directory, "snapshots", "snapshot")

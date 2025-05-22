@@ -154,6 +154,7 @@ class Simulation:
                     mesh=self.simulation_geometry.mesh,
                     compartments=self.simulation_geometry.compartments.values(),
                     concentrations=name_to_concentration,
+                    potential=self._potential.potential if self.electrostatics else None,
                     start_time=start_time.copy()
                 )
 
