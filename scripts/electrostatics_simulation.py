@@ -6,7 +6,6 @@ distributed unevenly across the regions.
 """
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
-import numpy as np
 
 import ecsim  # Simulation framework
 from ecsim.simulation import recorder  # Tools for data recording and transport
@@ -33,7 +32,7 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('chelation', result_root='results', electrostatics=True)
+simulation = ecsim.Simulation('electrostatics', result_root='results', electrostatics=True)
 geometry = simulation.setup_geometry(mesh)
 
 # Access compartments and membrane
@@ -64,6 +63,5 @@ dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
 dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
 
 # Define recording points and run simulation
-points = [[0.5, 0.5, float(z)] for z in np.linspace(0, 1, 100)]
-simulation.add_recorder(recorder.FullSnapshot(0.5 * u.ms))
-simulation.run(end_time=20 * u.ms, time_step=10 * u.us)
+simulation.add_recorder(recorder.FullSnapshot(2 * u.us))
+simulation.run(end_time=1 * u.ms, time_step=10 * u.ns)
