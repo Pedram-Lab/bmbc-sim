@@ -168,12 +168,15 @@ def create_sensor_geometry(
     box2 = occ.Box(occ.Pnt(L1, -W / 2, -H / 2), occ.Pnt(L1 + L2, W / 2, H / 2))
     box1.mat("cube:left")
     box2.mat("cube:right")
+    regions = [box1, box2]
 
     # Spheres at specified position
-    sphere = occ.Sphere((PX, 0, 0), R)
-    sphere.mat("cube:sphere")
+    if R > 0:
+        sphere = occ.Sphere((PX, 0, 0), R)
+        sphere.mat("cube:sphere")
+        regions.append(sphere)
 
     # Glue everything into one geometry
-    geo = occ.Glue([box1, box2, sphere])
+    geo = occ.Glue(regions)
     occ_geo = occ.OCCGeometry(geo)
     return Mesh(occ_geo.GenerateMesh(maxh=maxh))
