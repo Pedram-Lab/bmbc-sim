@@ -116,3 +116,64 @@ def create_dish_geometry(
     geo = occ.OCCGeometry(geo)
     mesh_size = to_simulation_units(mesh_size, 'length')
     return Mesh(geo.GenerateMesh(maxh=mesh_size))
+
+
+def create_sensor_geometry(
+        *,
+        side_length: Quantity | tuple[Quantity, Quantity, Quantity],
+        compartment_ratio: float,
+        sphere_position_x: Quantity,
+        sphere_radius: Quantity,
+        mesh_size: Quantity
+) -> Mesh:
+    """
+    Creates a cube split into two compartments along the x-axis, each containing
+    a centered sphere. The length ratio between compartments is controlled by
+    compartment_ratio.
+
+    :param total_length: Side length of the cube along all axes or side lengths
+        per axis.
+    :param compartment_ratio: Ratio of length for the first compartment (0-1).
+    :param sphere_position_x: Position of the sphere along the x-axis, between
+        0 and the length in the x-axis.
+    :param sphere_radius: Radius of sphere inside compartment.
+    :param mesh_size: Maximum mesh size for meshing.
+    :return: Mesh object for the geometry.
+    """
+    if isinstance(side_length, Quantity):
+        side_length = 3 * (side_length,)
+
+    # Convert units
+    L = to_simulation_units(side_length[0], 'length')
+    W = to_simulation_units(side_length[1], 'length')
+    H = to_simulation_units(side_length[2], 'length')
+    PX = to_simulation_units(sphere_position_x, 'length')
+    R = to_simulation_units(sphere_radius, 'length')
+    maxh = to_simulation_units(mesh_size, 'length')
+
+    # Validate ratio
+    if not 0 < compartment_ratio < 1:
+        raise ValueError("Compartment_ratio must be between 0 and 1 (exclusive).")
+
+    L1 = L * compartment_ratio
+    L2 = L * (1 - compartment_ratio)
+
+    # Check that the sphere is completely within one compartment
+    if W / 2 <= R or H / 2 <= R \
+            or PX <= R or PX >= L - R or abs(PX - L1) <= R:
+        raise ValueError("Sphere is not completely contained within one compartment.")
+
+    # Regions
+    box1 = occ.Box(occ.Pnt(0, -W / 2, -H / 2), occ.Pnt(L1, W / 2, H / 2))
+    box2 = occ.Box(occ.Pnt(L1, -W / 2, -H / 2), occ.Pnt(L1 + L2, W / 2, H / 2))
+    box1.mat("cube:left")
+    box2.mat("cube:right")
+
+    # Spheres at specified position
+    sphere = occ.Sphere((PX, 0, 0), R)
+    sphere.mat("cube:sphere")
+
+    # Glue everything into one geometry
+    geo = occ.Glue([box1, box2, sphere])
+    occ_geo = occ.OCCGeometry(geo)
+    return Mesh(occ_geo.GenerateMesh(maxh=maxh))
