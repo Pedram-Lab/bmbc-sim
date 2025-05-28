@@ -39,7 +39,26 @@ class Recorder:
             potential (if applicable).
         :param start_time: The initial time of the simulation.
         """
-        # Record the initial state
+        # Record indicator functions for each compartment/region
+        indicator_functions = {}
+        for compartment in compartments:
+            for region in compartment.get_region_names(full_names=True):
+                indicator_functions[region] = mesh.MaterialCF({region: 1.0})
+
+        absolute_path = os.path.abspath(directory)
+        os.makedirs(absolute_path, exist_ok=True)
+        indicator_function_path = os.path.join(absolute_path, "compartments")
+        logger.info("Writing compartment info to %s*.vtu", indicator_function_path)
+
+        self._vtk_output = ngs.VTKOutput(
+            mesh,
+            filename=indicator_function_path,
+            coefs=list(indicator_functions.values()),
+            names=list(indicator_functions.keys()),
+            floatsize='single'
+        ).Do()
+
+        # Set up coefficient functions for recording
         # GridFunctions in multi-component spaces cannot automatically be converted
         # to values on the mesh, so we need to set up MaterialCFs manually by a mapping
         #   mesh material -> concentration (i.e., the component of the compartment that
@@ -59,9 +78,8 @@ class Recorder:
                 for region in compartment.get_region_names(full_names=True)
             })
 
-        # Create a VTK writer for a subfolder in the specified directory
-        file_template = os.path.join(directory, "snapshot")
-        os.makedirs(os.path.dirname(file_template), exist_ok=True)
+        # Create a writer that records snapshots in a VTK time series
+        file_template = os.path.join(absolute_path, "snapshot")
         logger.info("Writing VTK output to %s*.vtu", file_template)
 
         self._vtk_output = ngs.VTKOutput(
