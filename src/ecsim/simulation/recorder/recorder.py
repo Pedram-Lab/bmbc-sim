@@ -97,5 +97,4 @@ class Recorder:
         time_since_last_record = end_time - self._last_recorded_time
         if time_since_last_record > self.recording_interval / 2:
             # If we haven't recorded near the end time, do one last recording
-            self._record(end_time)
-        self._finalize()
+            self.record(end_time)
