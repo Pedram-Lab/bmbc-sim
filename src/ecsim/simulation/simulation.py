@@ -7,7 +7,7 @@ import ngsolve as ngs
 from tqdm import trange
 
 from ecsim.logging import logger
-from ecsim.simulation.recorder import Recorder
+from ecsim.simulation.result_io import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
