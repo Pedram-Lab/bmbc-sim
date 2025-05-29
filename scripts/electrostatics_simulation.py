@@ -8,7 +8,6 @@ import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
 
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder  # Tools for data recording and transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
 
 
@@ -62,6 +61,5 @@ buffer_2 = simulation.add_species('buffer_2', valence=-1)
 dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
 dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
 
-# Define recording points and run simulation
-simulation.add_recorder(recorder.FullSnapshot(2 * u.us))
-simulation.run(end_time=1 * u.ms, time_step=10 * u.ns)
+# Run simulation
+simulation.run(end_time=1 * u.ms, time_step=10 * u.ns, output_interval=2 * u.us)

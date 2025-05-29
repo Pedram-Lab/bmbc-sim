@@ -8,9 +8,8 @@ experiment), considering:
 
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
-import numpy as np
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder, transport  # Tools for data recording and transport
+from ecsim.simulation import transport  # Tools for transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
 
 # Initial and target Ca concentrations
@@ -91,7 +90,5 @@ def efflux(t):
 tran = transport.GeneralFlux(flux=efflux)
 outside.add_transport(ca, transport=tran, source=dish, target=None)
 
-# Define recording points and run simulation
-points = [[150.0, 150.0, float(z)] for z in np.linspace(0, 10, 1500)]
-simulation.add_recorder(recorder.FullSnapshot(10 * u.s))
-simulation.run(end_time=5 * u.min, time_step=0.01 * u.s)
+# Run simulation
+simulation.run(end_time=5 * u.min, time_step=0.01 * u.s, output_interval=10 * u.s)
