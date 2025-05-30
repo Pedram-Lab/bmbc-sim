@@ -9,6 +9,22 @@ authors = [
   {name = "Michael Innerberger", email = "innerbergerm@hhmi.org"},
   {name = "Norma Perez", email = "perezrosasn@janelia.hhmi.org"},
 ]
+dependencies = [
+  "astropy",
+  "jupyter",
+  "matplotlib",
+  "networkx",
+  "numpy==2.1.3",
+  "pytest",
+  "pytest-cov",
+  "pyvista",
+  "scipy",
+  "tqdm",
+  "xarray",
+  "zarr",
+  "ngsolve==6.2.2406",
+  "webgui_jupyter_widgets",
+]
 
 [build-system]
 requires = ["setuptools"]
@@ -16,7 +32,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.jupytext.formats]
-"notebooks/" = "ipynb"
-"scripts/" = "py:percent"
