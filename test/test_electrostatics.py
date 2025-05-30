@@ -5,19 +5,18 @@ import ngsolve as ngs
 from netgen import occ
 from matplotlib import pyplot as plt
 import astropy.units as u
+import xarray as xr
 
 import ecsim
-from ecsim.simulation import recorder
-from conftest import get_point_values, get_substance_values
 
 
 def create_simulation(tmp_path):
     """Create a simple test geometry with two compartments that are connected
     by a membrane.
     """
-    left = occ.Box((0, 0, 0), (1, 1, 1)).mat('left').bc('reflective')
-    middle = occ.Box((1, 0, 0), (2, 1, 1)).mat('comp:middle').bc('reflective')
-    right = occ.Box((2, 0, 0), (3, 1, 1)).mat('comp:right').bc('reflective')
+    left = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, 1)).mat('left').bc('reflective')
+    middle = occ.Box(occ.Pnt(1, 0, 0), occ.Pnt(2, 1, 1)).mat('comp:middle').bc('reflective')
+    right = occ.Box(occ.Pnt(2, 0, 0), occ.Pnt(3, 1, 1)).mat('comp:right').bc('reflective')
     left.faces[1].bc('interface')
 
     geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
@@ -25,13 +24,10 @@ def create_simulation(tmp_path):
 
     simulation = ecsim.Simulation(
         'electrostatics_test',
+        mesh,
         result_root=tmp_path,
         electrostatics=True
     )
-    simulation.setup_geometry(mesh)
-    points = [(0.5, 0.5, 0.5), (1.5, 0.5, 0.5), (2.5, 0.5, 0.5)]
-    simulation.add_recorder(recorder.PointValues(10 * u.us, points=points))
-    simulation.add_recorder(recorder.CompartmentSubstance(10 * u.us))
 
     return simulation
 
@@ -65,81 +61,92 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     comp.add_diffusion(eq2, 1 * u.um**2 / u.s)
 
     # Run the simulation
-    simulation.run(end_time=1.0 * u.ms, time_step=1.0 * u.us)
+    simulation.run(end_time=1.0 * u.ms, time_step=1.0 * u.us, record_interval=1.0 * u.us)
 
-    # Test point values
-    pl, time = get_point_values(simulation.result_directory, point_id=0)
-    pm, _ = get_point_values(simulation.result_directory, point_id=1)
-    pr, _ = get_point_values(simulation.result_directory, point_id=2)
-    assert pl['eq1'][0] == pytest.approx(0.6)
-    assert pm['eq1'][0] == pytest.approx(0.4)
-    assert pr['eq1'][0] == pytest.approx(0.6)
-    assert pl['eq2'][0] == pytest.approx(1.1)
-    assert pm['eq2'][0] == pytest.approx(1.0)
-    assert pr['eq2'][0] == pytest.approx(1.0)
+    # Test point values (new ResultLoader syntax)
+    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    assert len(result_loader) == 1001
+    points = [(0.5, 0.5, 0.5), (1.5, 0.5, 0.5), (2.5, 0.5, 0.5)]
+    point_values = xr.concat([result_loader.load_point_values(i, points=points) for i in range(len(result_loader))], dim='time')
+    pl = point_values.isel(point=0)
+    pm = point_values.isel(point=1)
+    pr = point_values.isel(point=2)
 
-    assert pl['eq1'][-1] == pytest.approx(0.6)
-    assert pm['eq1'][-1] == pytest.approx(0.4)
-    assert pr['eq1'][-1] == pytest.approx(0.6)
-    assert pl['eq2'][-1] == pytest.approx(1.1)
-    assert pm['eq2'][-1] < 0.9
-    assert pr['eq2'][-1] > 1.1
+    eq1_left = pl.sel(species="eq1")
+    eq1_middle = pm.sel(species="eq1")
+    eq1_right = pr.sel(species="eq1")
+    eq2_left = pl.sel(species="eq2")
+    eq2_middle = pm.sel(species="eq2")
+    eq2_right = pr.sel(species="eq2")
 
-    # Test total substance values (0 = right compartment, 1 = left compartment)
-    sl, _ = get_substance_values(simulation.result_directory, compartment_name='left')
-    sr, _ = get_substance_values(simulation.result_directory, compartment_name='comp')
-    assert sl['eq1'][0] == pytest.approx(0.6, rel=1e-3)
-    assert sr['eq1'][0] == pytest.approx(1.0, rel=1e-3)
-    assert sl['eq2'][0] == pytest.approx(1.1, rel=1e-3)
-    assert sr['eq2'][0] == pytest.approx(2.0, rel=1e-3)
+    assert eq1_left.isel(time=0) == pytest.approx(0.6)
+    assert eq1_middle.isel(time=0) == pytest.approx(0.4)
+    assert eq1_right.isel(time=0) == pytest.approx(0.6)
+    assert eq2_left.isel(time=0) == pytest.approx(1.1)
+    assert eq2_middle.isel(time=0) == pytest.approx(1.0)
+    assert eq2_right.isel(time=0) == pytest.approx(1.0)
 
-    assert sl['eq1'][-1] == pytest.approx(0.6, rel=1e-3)
-    assert sr['eq1'][-1] == pytest.approx(1.0, rel=1e-3)
-    assert sl['eq2'][-1] == pytest.approx(1.1, rel=1e-3)
-    assert sr['eq2'][-1] == pytest.approx(2.0, rel=1e-3)
+    assert eq1_left.isel(time=-1) == pytest.approx(0.6)
+    assert eq1_middle.isel(time=-1) == pytest.approx(0.4)
+    assert eq1_right.isel(time=-1) == pytest.approx(0.6)
+    assert eq2_left.isel(time=-1) == pytest.approx(1.1)
+    assert eq2_middle.isel(time=-1) < 0.9
+    assert eq2_right.isel(time=-1) > 1.1
+
+    # Test total substance values (new ResultLoader syntax)
+    total_substance = xr.concat(
+        [result_loader.load_total_substance(i) for i in range(len(result_loader))],
+        dim="time"
+    )
+    left = total_substance.sel(region="left")
+    comp = total_substance.sel(region="comp:middle") + total_substance.sel(region="comp:right")
+    eq1_left_s = left.sel(species="eq1")
+    eq1_comp_s = comp.sel(species="eq1")
+    eq2_left_s = left.sel(species="eq2")
+    eq2_comp_s = comp.sel(species="eq2")
+
+    assert eq1_left_s.isel(time=0) == pytest.approx(0.6, rel=1e-3)
+    assert eq1_comp_s.isel(time=0) == pytest.approx(1.0, rel=1e-3)
+    assert eq2_left_s.isel(time=0) == pytest.approx(1.1, rel=1e-3)
+    assert eq2_comp_s.isel(time=0) == pytest.approx(2.0, rel=1e-3)
+
+    assert eq1_left_s.isel(time=-1) == pytest.approx(0.6, rel=1e-3)
+    assert eq1_comp_s.isel(time=-1) == pytest.approx(1.0, rel=1e-3)
+    assert eq2_left_s.isel(time=-1) == pytest.approx(1.1, rel=1e-3)
+    assert eq2_comp_s.isel(time=-1) == pytest.approx(2.0, rel=1e-3)
 
     if visualize:
-        # Create a single figure with two side-by-side panels sharing the same y-axis.
         species = ['eq1', 'eq2']
-        _, ((ax1, ax2, ax3), (ax4, ax5, _)) = \
-            plt.subplots(2, 3, figsize=(15, 10), sharey=True, gridspec_kw={'wspace': 0})
-
-        # Top row: point values in left, middle, right regions
+        time = pl.coords['time'].values / 1000
+        _, ((ax1, ax2, ax3), (ax4, ax5, _)) = plt.subplots(2, 3, figsize=(15, 10), sharey=True, gridspec_kw={'wspace': 0})
         for s in species:
-            ax1.plot(time / 1000, pl[s].T, label=s)
+            ax1.plot(time, pl.sel(species=s), label=s)
         ax1.set_xlabel("Time [s]")
         ax1.set_ylabel("Concentration [mM]")
         ax1.set_title("Left region")
         ax1.grid(True)
         ax1.legend()
-
         for s in species:
-            ax2.plot(time / 1000, pm[s].T, label=s)
+            ax2.plot(time, pm.sel(species=s), label=s)
         ax2.set_xlabel("Time [s]")
         ax2.set_title("Middle region")
         ax2.grid(True)
-
         for s in species:
-            ax3.plot(time / 1000, pr[s].T, label=s)
+            ax3.plot(time, pr.sel(species=s), label=s)
         ax3.set_xlabel("Time [s]")
         ax3.set_title("Right region")
         ax3.grid(True)
-
-        # Bottom row: total substance in left/middle and right regions
         for s in species:
-            ax4.plot(time / 1000, sl[s].T, label=s)
+            ax4.plot(time, left.sel(species=s), label=s)
         ax4.set_xlabel("Time [s]")
-        ax4.set_ylabel("Total substance [amol]")
-        ax4.set_title("Total substance in left and middle regions")
+        ax4.set_ylabel("Substance [amol]")
+        ax4.set_title("Left region (substance)")
         ax4.grid(True)
-
         for s in species:
-            ax5.plot(time / 1000, sr[s].T, label=s)
+            ax5.plot(time, comp.sel(species=s), label=s)
         ax5.set_xlabel("Time [s]")
-        ax5.set_title("Total substance in right region")
+        ax5.set_title("Comp region (substance)")
         ax5.grid(True)
-        plt.tight_layout()
-
         plt.show()
 
 

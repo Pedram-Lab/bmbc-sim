@@ -5,10 +5,10 @@ import ngsolve as ngs
 from netgen import occ
 from matplotlib import pyplot as plt
 import astropy.units as u
+import xarray as xr
 
 import ecsim
-from ecsim.simulation import recorder, transport
-from conftest import get_point_values
+from ecsim.simulation import transport
 
 
 def create_simulation(tmp_path):
@@ -23,10 +23,7 @@ def create_simulation(tmp_path):
     geo = occ.OCCGeometry(occ.Glue([left, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    simulation = ecsim.Simulation('multi_region_test', result_root=tmp_path)
-    simulation.setup_geometry(mesh)
-    points = [(0.2, 0.5, 0.5), (1.8, 0.5, 0.5)]
-    simulation.add_recorder(recorder.PointValues(10 * u.ms, points=points))
+    simulation = ecsim.Simulation('multi_region_test', mesh, result_root=tmp_path)
 
     return simulation
 
@@ -79,45 +76,62 @@ def test_multi_region_dynamics(tmp_path, visualize=False):
     )
 
     # Run the simulation
-    simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
+    simulation.run(end_time=1 * u.s, time_step=1 * u.ms, record_interval=10 * u.ms)
 
-    # Test point values
-    p0, time = get_point_values(simulation.result_directory, point_id=0)
-    p1, time = get_point_values(simulation.result_directory, point_id=1)
-    assert p0['fixed'][0] == pytest.approx(1.1)
-    assert p1['fixed'][0] == pytest.approx(1.1)
-    assert p0['fixed'][-1] == pytest.approx(1.1)
-    assert p1['fixed'][-1] == pytest.approx(1.1)
+    # Test point values (new ResultLoader syntax)
+    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    assert len(result_loader) == 101
+    points = [(0.2, 0.5, 0.5), (1.8, 0.5, 0.5)]
+    point_values = xr.concat([result_loader.load_point_values(i, points=points) for i in range(len(result_loader))], dim='time')
+    p0 = point_values.isel(point=0)
+    p1 = point_values.isel(point=1)
 
-    left_final, right_final = p0['gradient'][-1], p1['gradient'][-1]
-    assert p0['gradient'][0] == pytest.approx(1)
-    assert p1['gradient'][0] == pytest.approx(1)
+    fixed_0 = p0.sel(species="fixed")
+    fixed_1 = p1.sel(species="fixed")
+    gradient_0 = p0.sel(species="gradient")
+    gradient_1 = p1.sel(species="gradient")
+    equilibrium_0 = p0.sel(species="equilibrium")
+    equilibrium_1 = p1.sel(species="equilibrium")
+    mobile_0 = p0.sel(species="mobile")
+    mobile_1 = p1.sel(species="mobile")
+    immobile_0 = p0.sel(species="immobile")
+    immobile_1 = p1.sel(species="immobile")
+
+    assert fixed_0.isel(time=0) == pytest.approx(1.1)
+    assert fixed_1.isel(time=0) == pytest.approx(1.1)
+    assert fixed_0.isel(time=-1) == pytest.approx(1.1)
+    assert fixed_1.isel(time=-1) == pytest.approx(1.1)
+
+    left_final, right_final = gradient_0.isel(time=-1), gradient_1.isel(time=-1)
+    assert gradient_0.isel(time=0) == pytest.approx(1)
+    assert gradient_1.isel(time=0) == pytest.approx(1)
     assert left_final < 1
     assert right_final > 1
     assert (1 - left_final) < (right_final - 1)
 
-    assert p0['equilibrium'][0] == pytest.approx(1.0)
-    assert p1['equilibrium'][0] == pytest.approx(1.4)
-    assert p0['equilibrium'][-1] == pytest.approx(1.2, rel=1e-2)
-    assert p1['equilibrium'][-1] == pytest.approx(1.2, rel=1e-2)
+    assert equilibrium_0.isel(time=0) == pytest.approx(1.0)
+    assert equilibrium_1.isel(time=0) == pytest.approx(1.4)
+    assert equilibrium_0.isel(time=-1) == pytest.approx(1.2, rel=1e-2)
+    assert equilibrium_1.isel(time=-1) == pytest.approx(1.2, rel=1e-2)
 
-    assert p0['mobile'][0] == pytest.approx(1.3)
-    assert p1['mobile'][0] == pytest.approx(1.3)
-    assert p0['immobile'][0] == pytest.approx(0)
-    assert p1['immobile'][0] == pytest.approx(0.6)
-    assert p0['mobile'][-1] == pytest.approx(1.0, rel=1e-2)
-    assert p1['mobile'][-1] == pytest.approx(1.0, rel=1e-2)
-    assert p0['immobile'][-1] == pytest.approx(0, abs=1e-2)
-    assert p1['immobile'][-1] == pytest.approx(0, abs=1e-2)
+    assert mobile_0.isel(time=0) == pytest.approx(1.3)
+    assert mobile_1.isel(time=0) == pytest.approx(1.3)
+    assert immobile_0.isel(time=0) == pytest.approx(0)
+    assert immobile_1.isel(time=0) == pytest.approx(0.6)
+    assert mobile_0.isel(time=-1) == pytest.approx(1.0, rel=1e-2)
+    assert mobile_1.isel(time=-1) == pytest.approx(1.0, rel=1e-2)
+    assert immobile_0.isel(time=-1) == pytest.approx(0, abs=1e-2)
+    assert immobile_1.isel(time=-1) == pytest.approx(0, abs=1e-2)
 
     if visualize:
         # Create a single figure with two side-by-side panels sharing the same y-axis.
         species = ['fixed', 'gradient', 'equilibrium', 'mobile', 'immobile']
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), sharey=True, gridspec_kw={'wspace': 0})
+        time = point_values.coords['time'].values
 
         # Left panel: Value in the left region
         for s in species:
-            ax1.plot(time / 1000, p0[s].T, label=s)
+            ax1.plot(time / 1000, p0.sel(species=s).T, label=s)
         ax1.set_xlabel("Time [s]")
         ax1.set_title("Value in the left region")
         ax1.grid(True)
@@ -125,7 +139,7 @@ def test_multi_region_dynamics(tmp_path, visualize=False):
 
         # Right panel: Value in the right region
         for s in species:
-            ax2.plot(time / 1000, p1[s].T, label=s)
+            ax2.plot(time / 1000, p1.sel(species=s).T, label=s)
         ax2.set_xlabel("Time [s]")
         ax2.set_title("Value in the right region")
         ax2.grid(True)

@@ -5,26 +5,23 @@ import ngsolve as ngs
 from netgen import occ
 from matplotlib import pyplot as plt
 import astropy.units as u
+import xarray as xr
 
 import ecsim
-from ecsim.simulation import recorder, transport
-from conftest import get_point_values, get_substance_values
+from ecsim.simulation import transport
 
 
 def create_simulation(tmp_path, width):
     """Create a simple test geometry with one compartment and two named membranes.
     """
-    box = occ.Box((0, 0, 0), (1, 1, width)).mat('cell').bc('reflective')
+    box = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, width)).mat('cell').bc('reflective')
     box.faces[0].bc('left')
     box.faces[1].bc('right')
 
     geo = occ.OCCGeometry(box)
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    simulation = ecsim.Simulation(f'outside_fluxes_{width}_test', result_root=tmp_path)
-    simulation.setup_geometry(mesh)
-    simulation.add_recorder(recorder.PointValues(10 * u.ms, points=[(0.5, 0.5, 0.5)]))
-    simulation.add_recorder(recorder.CompartmentSubstance(10 * u.ms))
+    simulation = ecsim.Simulation(f'outside_fluxes_{width}_test', mesh, result_root=tmp_path)
 
     return simulation
 
@@ -79,66 +76,79 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
     right_membrane.add_transport(species=variable_influx, transport=t, source=None, target=cell)
 
     # Run the simulation
-    simulation.run(end_time=1 * u.s, time_step=1 * u.ms)
+    simulation.run(end_time=1 * u.s, time_step=1 * u.ms, record_interval=10 * u.ms)
 
-    # Test point values
-    pnt_values, time = get_point_values(simulation.result_directory)
-    too_low_results = pnt_values['too-low']
-    assert too_low_results[0] == pytest.approx(0.5)
-    assert too_low_results[-1] == pytest.approx(0.7, rel=1e-3)
+    # Test point values (new ResultLoader syntax)
+    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    assert len(result_loader) == 101
+    point = (0.5, 0.5, 0.5)
+    point_values = xr.concat(
+        [result_loader.load_point_values(i, points=point) for i in range(len(result_loader))],
+        dim='time'
+    )
 
-    too_high_results = pnt_values['too-high']
-    assert too_high_results[0] == pytest.approx(0.8)
-    assert too_high_results[-1] == pytest.approx(0.7, rel=1e-3)
+    too_low_results = point_values.sel(species="too-low")
+    assert too_low_results.isel(time=0) == pytest.approx(0.5)
+    assert too_low_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
 
-    deplete_results = pnt_values['deplete']
-    assert deplete_results[0] == pytest.approx(0.4)
-    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
+    too_high_results = point_values.sel(species="too-high")
+    assert too_high_results.isel(time=0) == pytest.approx(0.8)
+    assert too_high_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
 
-    influx_results = pnt_values['constant-influx']
-    assert influx_results[0] == pytest.approx(0.1)
-    assert influx_results[-1] == pytest.approx(1 / width + 0.1, rel=1e-3)
+    deplete_results = point_values.sel(species="deplete")
+    assert deplete_results.isel(time=0) == pytest.approx(0.4)
+    assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
 
-    limited_influx_results = pnt_values['variable-influx']
-    assert limited_influx_results[0] == pytest.approx(0.2)
-    assert limited_influx_results[-1] == pytest.approx(1 / width + 0.2, rel=1e-3)
+    influx_results = point_values.sel(species="constant-influx")
+    assert influx_results.isel(time=0) == pytest.approx(0.1)
+    assert influx_results.isel(time=-1) == pytest.approx(1 / width + 0.1, rel=1e-3)
 
-    # Test substance values
-    sbst_values, _ = get_substance_values(simulation.result_directory, compartment_name='cell')
-    too_low_results = sbst_values['too-low']
-    assert too_low_results[0] == pytest.approx(0.5 * width)
-    assert too_low_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
+    limited_influx_results = point_values.sel(species="variable-influx")
+    assert limited_influx_results.isel(time=0) == pytest.approx(0.2)
+    assert limited_influx_results.isel(time=-1) == pytest.approx(1 / width + 0.2, rel=1e-3)
 
-    too_high_results = sbst_values['too-high']
-    assert too_high_results[0] == pytest.approx(0.8 * width)
-    assert too_high_results[-1] == pytest.approx(0.7 * width, rel=1e-3)
+    # Test substance values (new ResultLoader syntax)
+    total_substance = xr.concat(
+        [result_loader.load_total_substance(i) for i in range(len(result_loader))],
+        dim="time"
+    )
+    region = "cell"
+    too_low_results = total_substance.sel(species="too-low", region=region)
+    assert too_low_results.isel(time=0) == pytest.approx(0.5 * width)
+    assert too_low_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
 
-    deplete_results = sbst_values['deplete']
-    assert deplete_results[0] == pytest.approx(0.4 * width)
-    assert deplete_results[-1] == pytest.approx(0.0, abs=1e-3)
+    too_high_results = total_substance.sel(species="too-high", region=region)
+    assert too_high_results.isel(time=0) == pytest.approx(0.8 * width)
+    assert too_high_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
 
-    influx_results = sbst_values['constant-influx']
-    assert influx_results[0] == pytest.approx(0.1 * width)
-    assert influx_results[-1] == pytest.approx(1 + 0.1 * width, rel=1e-3)
+    deplete_results = total_substance.sel(species="deplete", region=region)
+    assert deplete_results.isel(time=0) == pytest.approx(0.4 * width)
+    assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
 
-    limited_influx_results = sbst_values['variable-influx']
-    assert limited_influx_results[0] == pytest.approx(0.2 * width)
-    assert limited_influx_results[-1] == pytest.approx(1 + 0.2 * width, rel=1e-3)
+    influx_results = total_substance.sel(species="constant-influx", region=region)
+    assert influx_results.isel(time=0) == pytest.approx(0.1 * width)
+    assert influx_results.isel(time=-1) == pytest.approx((1 / width + 0.1) * width, rel=1e-3)
+
+    limited_influx_results = total_substance.sel(species="variable-influx", region=region)
+    assert limited_influx_results.isel(time=0) == pytest.approx(0.2 * width)
+    assert limited_influx_results.isel(time=-1) == pytest.approx((1 / width + 0.2) * width, rel=1e-3)
 
     if visualize:
         species = ['too-low', 'too-high', 'deplete', 'constant-influx', 'variable-influx']
         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, gridspec_kw={'wspace': 0})
         fig.suptitle(f"Volume: {cell.volume}")
+        time = point_values.coords['time'].values
+        point_values = point_values.isel(point=0)
 
         for s in species:
-            ax1.plot(time / 1000, pnt_values[s].T, label=s)
+            ax1.plot(time / 1000, point_values.sel(species=s).T, label=s)
         ax1.set_xlabel("Time [s]")
         ax1.set_title('Concentration [mM]')
         ax1.grid(True)
         ax1.legend()
 
         for s in species:
-            ax2.plot(time / 1000, sbst_values[s].T, label=s)
+            ax2.plot(time / 1000, point_values.sel(species=s).T, label=s)
         ax2.set_xlabel("Time [s]")
         ax2.set_title('Substance [amol]')
         ax2.grid(True)

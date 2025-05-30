@@ -109,9 +109,9 @@ class Simulation:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
             raise ValueError(f"Time step must be positive, not {time_step}.")
+        record_interval = record_interval if record_interval is not None else 10 * time_step
         if record_interval < 0 * u.s:
             raise ValueError(f"Record interval must be non-negative, not {record_interval}.")
-        record_interval = record_interval if record_interval is not None else 10 * time_step
 
         n_steps = int((end_time - start_time) / time_step)
         if n_steps < 1:
