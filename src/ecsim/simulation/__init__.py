@@ -1,7 +1,8 @@
-from .simulation import Simulation, find_latest_results
+from .simulation import Simulation
 from .utils import SimulationClock
 from .geometry.simulation_geometry import SimulationGeometry
 from .simulation_agents import ChemicalSpecies
+from .result_io import ResultLoader
 
 
 __all__ = [
@@ -9,5 +10,5 @@ __all__ = [
     "SimulationClock",
     "SimulationGeometry",
     "ChemicalSpecies",
-    "find_latest_results",
+    "ResultLoader",
 ]

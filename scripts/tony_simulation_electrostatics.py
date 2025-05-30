@@ -8,9 +8,8 @@ experiment), considering:
 
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
-import numpy as np
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder, transport  # Tools for data recording and transport
+from ecsim.simulation import transport  # Tools for transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
 
 # Initial and target Ca concentrations
@@ -34,8 +33,8 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('tony', result_root='results', electrostatics=True)
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('tony', mesh, result_root='results', electrostatics=True)
+geometry = simulation.simulation_geometry
 
 # Access compartments and membrane
 dish = geometry.compartments['dish']
@@ -76,7 +75,5 @@ def efflux(t):
 tran = transport.GeneralFlux(flux=efflux)
 outside.add_transport(ca, transport=tran, source=dish, target=None)
 
-# Define recording points and run simulation
-simulation.add_recorder(recorder.FullSnapshot(20 * u.s))
-simulation.add_recorder(recorder.PointValues(20 * u.s, points=[(300, 5, 100), (300, 5, 1400)]))
-simulation.run(end_time=10 * u.min, time_step=0.1 * u.s, n_threads=4)
+# Run simulation
+simulation.run(end_time=10 * u.min, time_step=0.1 * u.s, n_threads=4, record_interval=20 * u.s)
