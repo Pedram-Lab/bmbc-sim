@@ -34,7 +34,11 @@ class ResultLoader:
 
     @classmethod
     def find(
-        cls, simulation_name: str, results_root: str, time_stamp: str | None = None
+        cls,
+        *,
+        simulation_name: str,
+        results_root: str,
+        time_stamp: str | None = None
     ) -> "ResultLoader":
         """Find the latest results folder with a given name in a directory.
 
