@@ -11,9 +11,9 @@ def simulation(tmp_path_factory):
     """Create a simple test simulation with three regions that are sorted into two
     compartments."
     """
-    left = occ.Box((0, 0, 0), (1, 1, 1)).mat('ecm:left').bc('reflective')
-    middle = occ.Box((1, 0, 0), (2, 1, 1)).mat('ecm:right').bc('reflective')
-    right = occ.Box((2, 0, 0), (3, 1, 1)).mat('cell').bc('reflective')
+    left = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, 1)).mat('ecm:left').bc('reflective')
+    middle = occ.Box(occ.Pnt(1, 0, 0), occ.Pnt(2, 1, 1)).mat('ecm:right').bc('reflective')
+    right = occ.Box(occ.Pnt(2, 0, 0), occ.Pnt(3, 1, 1)).mat('cell').bc('reflective')
 
     geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.5))
@@ -23,9 +23,7 @@ def simulation(tmp_path_factory):
     mesh.ngmesh.SetBCName(6, 'right_membrane')
 
     tmp_path = tmp_path_factory.mktemp("results")
-    simulation = ecsim.Simulation('test_simulation', result_root=tmp_path)
-    simulation.setup_geometry(mesh)
-    return simulation
+    return ecsim.Simulation('test_simulation', mesh, result_root=tmp_path)
 
 
 def test_added_species_are_present(simulation):
