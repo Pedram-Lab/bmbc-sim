@@ -21,6 +21,7 @@ class Simulation:
     def __init__(
             self,
             name: str,
+            mesh: ngs.Mesh,
             *,
             result_root: str,
             electrostatics: bool = False,
@@ -28,12 +29,14 @@ class Simulation:
         """Initialize a new simulation.
 
         :param name: The name of the simulation (used for naming the result directory).
+        :param mesh: The mesh representing the geometry of the simulation.
         :param result_root: The directory under which simulation results will be
             stored.
         :param electrostatics: Whether to include electrostatics in the simulation. If
             yes, compartments must have a permeability.
         """
-        self.simulation_geometry = None
+        self.simulation_geometry = SimulationGeometry(mesh)
+
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
 
@@ -57,22 +60,6 @@ class Simulation:
         self._potential: PnpPotential = None
         self._lhs: dict[ChemicalSpecies, FemLhs] = {}
         self._rhs: dict[ChemicalSpecies, FemRhs] = {}
-
-
-    def setup_geometry(
-            self,
-            mesh: ngs.Mesh,
-    ) -> SimulationGeometry:
-        """Add a mesh and set up the simulation geometry.
-
-        :param mesh: The mesh representing the geometry of the simulation.
-        :returns: The :class:`SimulationGeometry` obtained from the mesh.
-        :raises ValueError: If the geometry has already been set.
-        """
-        if self.simulation_geometry is not None:
-            raise ValueError("Geometry has already been set.")
-        self.simulation_geometry = SimulationGeometry(mesh)
-        return self.simulation_geometry
 
 
     def add_species(

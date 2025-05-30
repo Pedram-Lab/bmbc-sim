@@ -31,8 +31,8 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('electrostatics', result_root='results', electrostatics=True)
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('electrostatics', mesh, result_root='results', electrostatics=True)
+geometry = simulation.simulation_geometry
 
 # Access compartments and membrane
 dish = geometry.compartments['dish']

@@ -17,8 +17,8 @@ mesh = ngs.Mesh(geo.GenerateMesh(maxh=2))
 # Draw(mesh)
 
 # Initialize the simulation
-simulation = ecsim.Simulation('sala', result_root='results')
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('sala', mesh, result_root='results')
+geometry = simulation.simulation_geometry
 # geometry.visualize()
 
 # Get the compartments and membranes

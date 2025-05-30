@@ -25,8 +25,8 @@ mesh = create_ca_depletion_mesh(
     channel_mesh_size=50 * u.nm
 )
 
-simulation = ecsim.Simulation('tsien', result_root='results')
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('tsien', mesh, result_root='results')
+geometry = simulation.simulation_geometry
 print(f"Compartments: {geometry.compartment_names}")
 print(f"Membranes: {geometry.membrane_names}")
 geometry.visualize(resolve_regions=False)
