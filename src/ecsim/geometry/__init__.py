@@ -12,6 +12,7 @@ from ._utils import create_mesh
 __all__ = [
     "create_ca_depletion_mesh",
     "create_dish_geometry",
+    "create_sensor_geometry",
     "create_rusakov_geometry",
     "TissueGeometry",
     "LineEvaluator",
