@@ -2,33 +2,33 @@ import astropy.units as u
 
 import ecsim
 from ecsim.geometry import create_sensor_geometry
-from ecsim.units import mM, uM
+from ecsim.units import mM, uM, nM
 
 
 ### Simulation Parameters
 SENSOR_ACTIVE = False  # Switch if sensor actively bind Ca or not
+SENSOR_LEFT = True  # Switch if sensor is present in the left compartment or the right
 
 # Geometry parameters
 SIDE_LENGTH = 200 * u.um  # 200x200x200 µm cube
 COMPARTMENT_RATIO = 0.5   # Divide the cube in half along the x axis
-#SPHERE_POSITION_X = 50 * u.um  # Centered in the first compartment
-SPHERE_POSITION_X = 150 * u.um  # Centered in the second compartment
+SPHERE_POSITION_X = 50 * u.um if SENSOR_LEFT else 150 * u.um  # Centered in one of the compartments
 SPHERE_RADIUS = 30 * u.um      # Sphere radius
 MESH_SIZE = 5 * u.um          # Mesh size
 
 # Calcium parameters
-CA_INIT = 0.5 * mM
+CA_INIT = 1 * mM
 
 # Buffer parameters
-BUFFER_INIT = 1.5 * mM  # Total buffer
-BUFFER_KD = 0.05 * mM  # Dissociation constant
-KF_B = 0.01 / (uM * u.s)  # Forward rate
+BUFFER_INIT = 600 * uM  # Total buffer
+BUFFER_KD = 400 * nM  # Dissociation constant
+KF_B = 50 / (mM * u.s)  # Forward rate
 KR_B = KF_B * BUFFER_KD  # Reverse rate
 
 # Sensor parameters
-SENSOR_INIT = 0.5 * mM  # Total sensor
-SENSOR_KD = 0.01 * mM  # Dissociation constant
-KF_S = 0.001 / (uM * u.s)  # Forward rate
+SENSOR_INIT = 100 * uM  # Total sensor
+SENSOR_KD = 420 * nM  # Dissociation constant
+KF_S = 100 / (uM * u.s)  # Forward rate
 KR_S = KF_S * SENSOR_KD  # Reverse rate
 
 
@@ -56,7 +56,10 @@ cube.add_diffusion(ca, 600 * u.um**2 / u.s)
 # Add buffer species (non-diffusive)
 buffer = simulation.add_species('buffer', valence=-1)
 cube.add_diffusion(buffer, 0 * u.um**2 / u.s)
-cube.initialize_species(buffer, {'left': BUFFER_INIT, 'right': 0 * mM, 'sphere': 0 * mM})
+if SENSOR_LEFT:
+    cube.initialize_species(buffer, {'left': 0 * mM, 'right': BUFFER_INIT, 'sphere': 0 * mM})
+else:
+    cube.initialize_species(buffer, {'left': 0 * mM, 'right': BUFFER_INIT, 'sphere': BUFFER_INIT})
 
 # Add buffer complex species (non-diffusive)
 ca_buffer = simulation.add_species('ca_buffer', valence=0)
