@@ -62,4 +62,9 @@ dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
 dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
 
 # Run simulation
-simulation.run(end_time=1 * u.ms, time_step=10 * u.ns, output_interval=2 * u.us)
+simulation.run(
+    end_time=10 * u.ms,
+    time_step=50 * u.ns,
+    record_interval=5 * u.us,
+    n_threads=4
+)

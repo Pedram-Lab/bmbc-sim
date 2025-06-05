@@ -31,12 +31,14 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('chelation', mesh, result_root='results')
+simulation = ecsim.Simulation('chelation', mesh, result_root='results', electrostatics=True)
 geometry = simulation.simulation_geometry
 
 # Access compartments and membrane
 dish = geometry.compartments['dish']
 outside = geometry.membranes['side']
+
+dish.add_relative_permittivity(80)
 
 # Add Ca species and set diffusion
 ca = simulation.add_species('ca', valence=2)
@@ -56,11 +58,11 @@ ca_b_init = buffer_tot - free_buffer_init
 # Add buffer species (non-diffusive)
 buffer = simulation.add_species('buffer', valence=-1)
 dish.add_diffusion(buffer, 0 * u.um**2 / u.s)
-dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': free_buffer_init})
+dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': buffer_tot})
 
 # Add complex species (non-diffusive)
 cab_complex = simulation.add_species('complex', valence=0)
-dish.initialize_species(cab_complex, {'free': 0 * u.mmol / u.L, 'substrate': ca_b_init})
+dish.initialize_species(cab_complex, {'free': 0 * u.mmol / u.L, 'substrate': 0 * u.mmol / u.L})
 dish.add_diffusion(cab_complex, 0 * u.um**2 / u.s)
 
 # Add reversible binding reaction: Ca + buffer ↔ complex
@@ -79,15 +81,20 @@ ca_b_init_2 = buffer_tot_2 - free_buffer_init_2
 # Add buffer species (diffusive)
 buffer_2 = simulation.add_species('buffer_2', valence=-1)
 dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
-dish.initialize_species(buffer_2, {'free': free_buffer_init_2, 'substrate': 0 * u.mmol / u.L})
+dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
 
 # Add complex species (diffusive)
 cab_complex_2 = simulation.add_species('complex_2', valence=0)
-dish.initialize_species(cab_complex_2, {'free': ca_b_init_2, 'substrate': 0 * u.mmol / u.L})
+dish.initialize_species(cab_complex_2, {'free': 0 * u.mmol / u.L, 'substrate': 0 * u.mmol / u.L})
 dish.add_diffusion(cab_complex_2, 50 * u.um**2 / u.s)
 
 # Add reversible binding reaction: Ca + buffer ↔ complex
 dish.add_reaction(reactants=[ca, buffer_2], products=[cab_complex_2], k_f=kf_2, k_r=kr_2)
 
 # Run simulation
-simulation.run(end_time=2 * u.ms, time_step=10 * u.us, record_interval=0.5 * u.ms)
+simulation.run(
+    end_time=10 * u.ms,
+    time_step=50 * u.ns,
+    record_interval=5 * u.us,
+    n_threads=4
+)
