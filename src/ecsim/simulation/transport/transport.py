@@ -31,7 +31,7 @@ class Transport(abc.ABC):
         All of the arguments can be None, in which case the flux is assumed to
         connect the domain to the outside.
         The following term is added to left-hand side of the PDE:
-        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        :math:`\\int_{\\partial \\Omega} J \\, (v_t - v_s) \\, ds`, where :math:`J` is
         the flux density that's implemented by this method in terms of test
         functions and concentrations of the source and target compartments.
 
@@ -59,7 +59,7 @@ class Transport(abc.ABC):
         All of the arguments can be None, in which case the flux is assumed to
         connect the domain to the outside.
         The following term is added to right-hand side of the PDE:
-        :math:`\int_{\partial \Omega} J \, (v_t - v_s) \\, ds`, where :math:`J` is
+        :math:`\\int_{\\partial \\Omega} J \\, (v_t - v_s) \\, ds`, where :math:`J` is
         the flux density that's implemented by this method in terms of the
         concentrations of the source and target compartments.
 

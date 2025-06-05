@@ -6,10 +6,8 @@ unevenly across the regions.
 """
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
-import numpy as np
 
 import ecsim  # Simulation framework
-from ecsim.simulation import recorder  # Tools for data recording and transport
 from ecsim.geometry import create_dish_geometry  # Geometry generator
 
 
@@ -33,8 +31,8 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('chelation', result_root='results')
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('chelation', mesh, result_root='results')
+geometry = simulation.simulation_geometry
 
 # Access compartments and membrane
 dish = geometry.compartments['dish']
@@ -91,7 +89,5 @@ dish.add_diffusion(cab_complex_2, 50 * u.um**2 / u.s)
 # Add reversible binding reaction: Ca + buffer ↔ complex
 dish.add_reaction(reactants=[ca, buffer_2], products=[cab_complex_2], k_f=kf_2, k_r=kr_2)
 
-# Define recording points and run simulation
-points = [[0.5, 0.5, float(z)] for z in np.linspace(0, 1, 100)]
-simulation.add_recorder(recorder.FullSnapshot(0.5 * u.ms))
-simulation.run(end_time=20 * u.ms, time_step=10 * u.us)
+# Run simulation
+simulation.run(end_time=2 * u.ms, time_step=10 * u.us, record_interval=0.5 * u.ms)

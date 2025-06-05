@@ -2,11 +2,10 @@
 from collections import namedtuple
 
 import astropy.units as u
-import numpy as np
 
 import ecsim
 from ecsim.geometry import create_ca_depletion_mesh
-from ecsim.simulation import recorder, transport
+from ecsim.simulation import transport
 from ecsim.units import mM, uM
 
 
@@ -26,8 +25,8 @@ mesh = create_ca_depletion_mesh(
     channel_mesh_size=50 * u.nm
 )
 
-simulation = ecsim.Simulation('tsien', result_root='results')
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('tsien', mesh, result_root='results')
+geometry = simulation.simulation_geometry
 print(f"Compartments: {geometry.compartment_names}")
 print(f"Membranes: {geometry.membrane_names}")
 geometry.visualize(resolve_regions=False)
@@ -89,11 +88,5 @@ ecs_top.add_transport(
     target=None
 )
 
-# Add recorders to capture simulation data
-points = [[float(x), 0.0, 2.995] for x in np.linspace(0, 0.6, 300)]
-simulation.add_recorder(recorder.FullSnapshot(1 * u.ms))
-simulation.add_recorder(recorder.CompartmentSubstance(1 * u.ms))
-simulation.add_recorder(recorder.PointValues(20 * u.ms, points))
-
 # Run the simulation
-simulation.run(end_time=20 * u.ms, time_step=1 * u.us, n_threads=8)
+simulation.run(end_time=20 * u.ms, time_step=1 * u.us, n_threads=8, record_interval=1 * u.ms)

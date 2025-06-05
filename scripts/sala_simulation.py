@@ -4,7 +4,7 @@ from netgen import occ
 import astropy.units as u
 
 import ecsim
-from ecsim.simulation import recorder, transport
+from ecsim.simulation import transport
 from ecsim.units import M, uM
 
 
@@ -17,8 +17,8 @@ mesh = ngs.Mesh(geo.GenerateMesh(maxh=2))
 # Draw(mesh)
 
 # Initialize the simulation
-simulation = ecsim.Simulation('sala', result_root='results')
-geometry = simulation.setup_geometry(mesh)
+simulation = ecsim.Simulation('sala', mesh, result_root='results')
+geometry = simulation.simulation_geometry
 # geometry.visualize()
 
 # Get the compartments and membranes
@@ -121,12 +121,5 @@ membrane.add_transport(
     target=cell
 )
 
-
-# Add recorders to capture simulation data
-points = [[x, 0, 0] for x in [0.25, 5.25, 10.25, 19.75]]
-simulation.add_recorder(recorder.FullSnapshot(100 * u.ms))
-simulation.add_recorder(recorder.CompartmentSubstance(100 * u.ms))
-simulation.add_recorder(recorder.PointValues(0.1 * u.ms, points))
-
 # Run the simulation
-simulation.run(end_time=2 * u.s, time_step=0.01 * u.ms)
+simulation.run(end_time=2 * u.s, time_step=0.01 * u.ms, record_interval=100 * u.ms)

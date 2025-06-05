@@ -2,12 +2,30 @@
 name = "ecsim"
 version = "0.2.0"
 description = "Extracellular Matrix Simulations"
-requires-python = ">= 3.12"
+requires-python = ">= 3.12,<3.13"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
   {name = "Michael Innerberger", email = "innerbergerm@hhmi.org"},
   {name = "Norma Perez", email = "perezrosasn@janelia.hhmi.org"},
+]
+dependencies = [
+  'astropy',
+  'jupyter',
+  'matplotlib',
+  'networkx',
+  'numpy==2.1.3',
+  'pytest',
+  'pytest-cov',
+  'pyvista',
+  "scipy",
+  "tqdm",
+  'xarray',
+  "zarr",
+  'ngsolve==6.2.2406',
+  'webgui_jupyter_widgets',
+  'intel-openmp>=2025.1.1; sys_platform == "linux"',
+  'mkl>=2025.1.0; sys_platform == "linux"',
 ]
 
 [build-system]
@@ -16,7 +34,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.jupytext.formats]
-"notebooks/" = "ipynb"
-"scripts/" = "py:percent"

@@ -17,7 +17,7 @@ def test_derived_unit_conversion_is_correct():
     """Test that conversion of a derived unit is correct (m/s^2 to um/ms^2)."""
     acceleration = 9.81 * u.m / u.s**2
 
-    acceleration_sim = to_simulation_units(acceleration, 'acceleration')
+    acceleration_sim = to_simulation_units(acceleration, "acceleration")
 
     assert acceleration_sim == 9.81
 
@@ -26,7 +26,9 @@ def test_named_unit_conversion_is_correct():
     """Test that conversion of a named unit is correct (nM to amol/um^3 = mM)."""
     concentration = 3 * u.nmol / u.L
 
-    concentration_sim = to_simulation_units(concentration, physical_name='molar concentration')
+    concentration_sim = to_simulation_units(
+        concentration, physical_name="molar concentration"
+    )
 
     assert concentration_sim == 3e-6
 
@@ -36,4 +38,4 @@ def test_invalid_physical_quantity_raises_error():
     concentration = 3 * u.nmol / u.L
 
     with pytest.raises(ValueError):
-        to_simulation_units(concentration, physical_name='invalid_physical_quantity')
+        to_simulation_units(concentration, physical_name="invalid_physical_quantity")

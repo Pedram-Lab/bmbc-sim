@@ -7,7 +7,7 @@ import ngsolve as ngs
 from tqdm import trange
 
 from ecsim.logging import logger
-from ecsim.simulation.recorder import Recorder
+from ecsim.simulation.result_io import Recorder
 from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
@@ -21,6 +21,7 @@ class Simulation:
     def __init__(
             self,
             name: str,
+            mesh: ngs.Mesh,
             *,
             result_root: str,
             electrostatics: bool = False,
@@ -28,12 +29,14 @@ class Simulation:
         """Initialize a new simulation.
 
         :param name: The name of the simulation (used for naming the result directory).
+        :param mesh: The mesh representing the geometry of the simulation.
         :param result_root: The directory under which simulation results will be
             stored.
         :param electrostatics: Whether to include electrostatics in the simulation. If
             yes, compartments must have a permeability.
         """
-        self.simulation_geometry = None
+        self.simulation_geometry = SimulationGeometry(mesh)
+
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
 
@@ -57,24 +60,6 @@ class Simulation:
         self._potential: PnpPotential = None
         self._lhs: dict[ChemicalSpecies, FemLhs] = {}
         self._rhs: dict[ChemicalSpecies, FemRhs] = {}
-
-        self._recorders: list[Recorder] = []
-
-
-    def setup_geometry(
-            self,
-            mesh: ngs.Mesh,
-    ) -> SimulationGeometry:
-        """Add a mesh and set up the simulation geometry.
-
-        :param mesh: The mesh representing the geometry of the simulation.
-        :returns: The :class:`SimulationGeometry` obtained from the mesh.
-        :raises ValueError: If the geometry has already been set.
-        """
-        if self.simulation_geometry is not None:
-            raise ValueError("Geometry has already been set.")
-        self.simulation_geometry = SimulationGeometry(mesh)
-        return self.simulation_geometry
 
 
     def add_species(
@@ -101,25 +86,13 @@ class Simulation:
         return species
 
 
-    def add_recorder(
-            self,
-            recorder: Recorder,
-    ) -> None:
-        """Add a recorder to the simulation to record data during the simulation.
-
-        :param recorder: An instance of a subclass of :class:`Recorder`.
-        """
-        if not isinstance(recorder, Recorder):
-            raise TypeError("Recorder must be an instance of a subclass of Recorder")
-        self._recorders.append(recorder)
-
-
     def run(
             self,
             *,
             end_time: u.Quantity,
             time_step: u.Quantity,
             start_time: u.Quantity = 0 * u.s,
+            record_interval: u.Quantity | None = None,
             n_threads: int = 4,
     ) -> None:
         """Run the simulation until a given end time.
@@ -127,6 +100,8 @@ class Simulation:
         :param end_time: The end time of the simulation.
         :param time_step: The time step to use for the simulation.
         :param start_time: The start time of the simulation.
+        :param record_interval: The interval at which to record data. If None, a record
+            is taken every 10 time steps.
         :param n_threads: The number of threads to use for the simulation.
         :raises ValueError: If the end time is not greater than the start time.
         """
@@ -134,6 +109,9 @@ class Simulation:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
             raise ValueError(f"Time step must be positive, not {time_step}.")
+        record_interval = record_interval if record_interval is not None else 10 * time_step
+        if record_interval < 0 * u.s:
+            raise ValueError(f"Record interval must be non-negative, not {record_interval}.")
 
         n_steps = int((end_time - start_time) / time_step)
         if n_steps < 1:
@@ -148,15 +126,15 @@ class Simulation:
             self._setup(dt)
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
-            for recorder in self._recorders:
-                recorder.setup(
-                    directory=self.result_directory,
-                    mesh=self.simulation_geometry.mesh,
-                    compartments=self.simulation_geometry.compartments.values(),
-                    concentrations=name_to_concentration,
-                    potential=self._potential.potential if self.electrostatics else None,
-                    start_time=start_time.copy()
-                )
+            recorder = Recorder(record_interval)
+            recorder.setup(
+                directory=self.result_directory,
+                mesh=self.simulation_geometry.mesh,
+                compartments=self.simulation_geometry.compartments.values(),
+                concentrations=name_to_concentration,
+                potential=self._potential.potential if self.electrostatics else None,
+                start_time=start_time.copy()
+            )
 
             t = start_time.copy()
             residual = {}
@@ -177,11 +155,9 @@ class Simulation:
                     c.vec.data += lhs.time_stepping * residual[species]
 
                 t += time_step
-                for recorder in self._recorders:
-                    recorder.record(current_time=t)
+                recorder.record(current_time=t)
 
-            for recorder in self._recorders:
-                recorder.finalize(end_time=t)
+            recorder.finalize(end_time=t)
 
 
     def _update_transport(self, t: u.Quantity) -> None:
@@ -258,21 +234,3 @@ class Simulation:
             self.simulation_geometry,
             self._concentrations,
         )
-
-
-def find_latest_results(name: str, results_root: str) -> str:
-    """Find the latest results folder with a given name in a directory."
-
-    :param name: The name of the simulation of interest.
-    :param results_root: The directory in which to search for results folders.
-    :returns: The full path of the latest results folder for the given simulation.
-    """
-    result_folders = [
-        d for d in os.listdir(results_root)
-        if d.startswith(name) and os.path.isdir(os.path.join(results_root, d))
-    ]
-    if not result_folders:
-        raise RuntimeError(f"No folders with name {name} found in {results_root}.")
-
-    latest = max(result_folders, key=lambda d: os.path.getctime(os.path.join(results_root, d)))
-    return os.path.join(results_root, latest)
