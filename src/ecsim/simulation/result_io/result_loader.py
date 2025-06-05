@@ -84,10 +84,24 @@ class ResultLoader:
         """Return the number of snapshots available."""
         return len(self.snapshots)
 
-    def load_compartments(self) -> pv.UnstructuredGrid:
-        """Load the geometry of the simulation containing all compartments."""
-        path = os.path.join(self.results_root, "compartments.vtu")
-        return pv.read(path)
+    # Compute region sizes (volumes)
+    def load_regions(self) -> pv.UnstructuredGrid:
+        """Load the geometry of the simulation containing all regions."""
+        return pv.read(os.path.join(self.results_root, "compartments.vtu"))
+
+    def compute_region_sizes(self) -> dict[str, float]:
+        """Compute the sizes (volumes) of each region."""
+        compartments = self.load_regions()
+
+        # Integrate volumes over regions
+        volumes = -compartments.compute_cell_sizes(
+            length=False, area=False, vertex_count=False
+        )["Volume"]
+        region_sizes = np.bincount(
+            self.cell_to_region, weights=volumes
+        )
+
+        return {n: s for n, s in zip(self.regions, region_sizes)}
 
     def load_snapshot(self, step: int) -> pv.UnstructuredGrid:
         """Load a snapshot file for a given step.
@@ -191,7 +205,7 @@ class ResultLoader:
         name of all regions.
         """
         # Load compartments and accumulate region information per cell
-        compartments = self.load_compartments().point_data_to_cell_data()
+        compartments = self.load_regions().point_data_to_cell_data()
         cell_to_region = np.ndarray(compartments.n_cells, dtype=int)
         regions = list(compartments.cell_data.keys())
 
