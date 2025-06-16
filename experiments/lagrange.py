@@ -38,7 +38,7 @@ u_t.AddMultiDimComponent(gfu.vec)
 
 n = 0
 res = gfu.vec.CreateVector()
-ngs.SetNumThreads(8)
+ngs.SetNumThreads(4)
 integrals = []
 with ngs.TaskManager():
     start = time()
