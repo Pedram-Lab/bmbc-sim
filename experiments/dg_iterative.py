@@ -5,7 +5,7 @@ from ngsolve.webgui import Draw
 import numpy as np
 import matplotlib.pyplot as plt
 
-mesh = ngs.Mesh(ngs.unit_square.GenerateMesh(maxh=0.02))
+mesh = ngs.Mesh(ngs.unit_square.GenerateMesh(maxh=0.05))
 
 order=1
 dt = 0.001
@@ -20,16 +20,10 @@ mean_dudn = 0.5 * n * (ngs.grad(u) + ngs.grad(u.Other()))
 mean_dvdn = 0.5 * n * (ngs.grad(v) + ngs.grad(v.Other()))
 
 alpha = 4
-def create_diffusion(mat, coeff):
-    diff = coeff * ngs.grad(u) * ngs.grad(v) * ngs.dx(mat)
-    reg = alpha * order**2 / h if order > 0 else alpha / h
-    reg = reg * coeff * jump_u * jump_v * ngs.dx(mat, skeleton=True)
-    bnd = coeff * (mean_dudn * jump_v + mean_dvdn * jump_u) * ngs.dx(mat, skeleton=True)
-    return (diff + reg - bnd).Compile()
-diffusion = create_diffusion("default", 1)
-# diffusion = ngs.grad(u) * ngs.grad(v) * ngs.dx \
-#     + reg * jump_u * jump_v * ngs.dx(skeleton=True) \
-#     - (mean_dudn * jump_v + mean_dvdn * jump_u) * ngs.dx(skeleton=True) \
+reg = alpha * order**2 / h if order > 0 else alpha / h
+diffusion = ngs.grad(u) * ngs.grad(v) * ngs.dx \
+    + reg * jump_u * jump_v * ngs.dx(skeleton=True) \
+    - (mean_dudn * jump_v + mean_dvdn * jump_u) * ngs.dx(skeleton=True) \
     # The following lines vanish because of the Neumann boundary condition
     # + reg * u * v * ngs.ds(skeleton=True) \
     # - (n * ngs.grad(u) * v + n * ngs.grad(v) * u) * ngs.ds(skeleton=True)
@@ -58,15 +52,12 @@ with ngs.TaskManager():
     start = time()
     m_star = m.mat.CreateMatrix()
     m_star.AsVector().data = m.mat.AsVector() + dt * a.mat.AsVector()
-    # pre = m_star.CreateSmoother(fes.FreeDofs(), GS=True)
-    # m_star_inv = ngs.krylovspace.GMResSolver(m_star, pre=pre)
-    # m_star_inv = ngs.GMRESSolver(m_star, pre=pre)
-    m_star_inv = m_star.Inverse(fes.FreeDofs(), inverse="umfpack")
+    pre = m_star.CreateSmoother(fes.FreeDofs(), GS=True)
+    m_star_inv = ngs.GMRESSolver(m_star, pre=pre)
 
     while n * dt < 1:
         n += 1
         a.Apply(gfu.vec, res)
-        # gfu.vec.data += -dt * ngs.krylovspace.GMRes(m_star, res, pre=pre, printrates=False)
         gfu.vec.data += -dt * (m_star_inv * res)
         if n % 10 == 0:
             u_t.AddMultiDimComponent(gfu.vec)
