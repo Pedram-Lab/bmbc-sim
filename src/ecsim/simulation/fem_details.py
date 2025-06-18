@@ -1,6 +1,7 @@
 import ngsolve as ngs
 import astropy.units as u
 import astropy.constants as const
+import numpy as np
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -9,12 +10,13 @@ from ecsim.units import to_simulation_units
 class FemLhs:
     """Left-hand side of the finite element equations for a single species."""
 
-    def __init__(self, a, transport, m_star, pre, dt):
+    def __init__(self, a, transport, m_star, pre, lumped_mass_inv, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
         self._pre = pre
         self._dt = dt
+        self._lumped_mass_inv = lumped_mass_inv
 
 
     @classmethod
@@ -124,6 +126,13 @@ class FemLhs:
         mass.Assemble()
         stiffness.Assemble()
 
+        # Create a lumped mass matrix for chemical reactions
+        v = mass.mat.CreateVector()
+        w = mass.mat.CreateVector()
+        v.FV().NumPy()[:] = 1
+        w.data = mass.mat * v
+        lumped_mass_inv = 1 / w.FV().NumPy()
+
         # Invert the matrix for the implicit Euler integrator
         # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
@@ -136,6 +145,7 @@ class FemLhs:
             transport_term,
             mass,
             smoother,
+            lumped_mass_inv,
             dt
         )
 
@@ -150,6 +160,12 @@ class FemLhs:
     def stiffness(self) -> ngs.BaseMatrix:
         """The stiffness matrix."""
         return self._a - self._transport.mat
+
+
+    @property
+    def lumped_mass_inv(self) -> np.ndarray:
+        """The inverse of the lumped mass matrix."""
+        return self._lumped_mass_inv
 
 
     @property
@@ -181,6 +197,12 @@ class FemRhs:
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
+        mass_lumping_rule = {
+            ngs.ET.TET: ngs.IntegrationRule(
+                points=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                weights=[1 / 4, 1 / 4, 1 / 4, 1 / 4],
+            )
+        }
 
         # Handle reaction terms
         for i, compartment in enumerate(compartments):
@@ -193,18 +215,18 @@ class FemRhs:
                     all_reactants *= concentrations[reactant].components[i]
                 forward_reaction = (kf * all_reactants * test).Compile()
                 for reactant in reactants:
-                    source_terms[reactant] += -forward_reaction * ngs.dx
+                    source_terms[reactant] += -forward_reaction * ngs.dx(intrules=mass_lumping_rule)
                 for product in products:
-                    source_terms[product] += forward_reaction * ngs.dx
+                    source_terms[product] += forward_reaction * ngs.dx(intrules=mass_lumping_rule)
 
                 all_products = ngs.CoefficientFunction(1.0)
                 for product in products:
                     all_products *= concentrations[product].components[i]
                 reverse_reaction = (kr * all_products * test).Compile()
                 for reactant in reactants:
-                    source_terms[reactant] += reverse_reaction * ngs.dx
+                    source_terms[reactant] += reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
                 for product in products:
-                    source_terms[product] += -reverse_reaction * ngs.dx
+                    source_terms[product] += -reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
 
         # Handle explicit transport terms
         for membrane in simulation_geometry.membranes.values():

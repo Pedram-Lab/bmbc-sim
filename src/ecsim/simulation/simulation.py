@@ -94,6 +94,7 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
+            chemical_substeps: int = 1,
     ) -> None:
         """Run the simulation until a given end time.
 
@@ -103,6 +104,8 @@ class Simulation:
         :param record_interval: The interval at which to record data. If None, a record
             is taken every 10 time steps.
         :param n_threads: The number of threads to use for the simulation.
+        :param chemical_substeps: The number of substeps to use for the chemical
+            reactions within each time step.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -144,10 +147,15 @@ class Simulation:
                 self._update_transport(t)
                 if self.electrostatics:
                     self._potential.update()
+                for _ in range(chemical_substeps):
+                    rhs = {s: self._rhs[s].assemble() for s in self._concentrations}
+                    tau = dt / chemical_substeps
+                    for species, c in self._concentrations.items():
+                        m_inv = self._lhs[species].lumped_mass_inv
+                        c.vec.FV().NumPy()[:] += tau * (m_inv * rhs[species].vec.FV().NumPy())
                 for species, c in self._concentrations.items():
                     lhs = self._lhs[species].assemble()
-                    rhs = self._rhs[species].assemble()
-                    residual[species] = dt * (rhs.vec - lhs.stiffness * c.vec)
+                    residual[species] = -dt * (lhs.stiffness * c.vec)
 
                 # Diffusion + some transport (implicit)
                 for species, c in self._concentrations.items():
