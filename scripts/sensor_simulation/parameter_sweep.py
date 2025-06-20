@@ -70,4 +70,4 @@ for path, (buffer_kd, sensor_kd) in zip(simulation_results, params_list):
     ] = np.array([free_ca.values, total_ca.values]).T
 
 # Save the dataset to disk as a zarr file
-results.to_zarr("results/parameter_sweep.zarr", mode="w")
+results.to_zarr("results/sensor_parameter_sweep.zarr", mode="w")
