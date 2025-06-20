@@ -93,20 +93,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--buffer_kd",
         type=float,
-        default=400,
-        help="Buffer dissociation constant in nM.",
+        default=400e-6,
+        help="Buffer dissociation constant in mM.",
     )
     parser.add_argument(
         "--sensor_kd",
         type=float,
-        default=420,
-        help="Sensor dissociation constant in nM.",
+        default=420e-6,
+        help="Sensor dissociation constant in mM.",
     )
 
     args = parser.parse_args()
 
     # Convert command-line arguments to appropriate units
     run_sensor_simulation(
-        buffer_kd=args.buffer_kd * nM,
-        sensor_kd=args.sensor_kd * nM,
+        buffer_kd=args.buffer_kd * mM,
+        sensor_kd=args.sensor_kd * mM,
     )
