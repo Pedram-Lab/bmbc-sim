@@ -1,4 +1,6 @@
 import argparse
+import yaml
+from pathlib import Path
 
 import astropy.units as u
 
@@ -8,8 +10,8 @@ from ecsim.units import mM, uM, nM
 
 
 def run_sensor_simulation(
-    sensor_active=False,
-    sensor_left=True,
+    sensor_active=True,
+    sensor_left=False,
     side_length=200 * u.um,
     compartment_ratio=0.5,
     sphere_position_x=None,
@@ -34,6 +36,9 @@ def run_sensor_simulation(
     kr_b = kf_b * buffer_kd  # Reverse rate
     kr_s = kf_s * sensor_kd  # Reverse rate
 
+    # Get a snapshot of the current variables to store them
+    paramters = locals().copy()
+
     # Create the mesh
     mesh = create_sensor_geometry(
         side_length=side_length,
@@ -44,7 +49,13 @@ def run_sensor_simulation(
     )
 
     # Create simulation
-    simulation = ecsim.Simulation('sensor', mesh, result_root='results')
+    simulation = ecsim.Simulation("sensor", mesh, result_root="results")
+
+    # Save the variables to the simulation directory as yaml
+    simulation_dir = Path(simulation.result_directory)
+    yaml_file = simulation_dir / "variables.yaml"
+    with open(yaml_file, 'w', encoding="utf8") as f:
+        yaml.dump({k: str(v) for k, v in paramters.items()}, f, default_flow_style=False)
 
     # Compartments
     cube = simulation.simulation_geometry.compartments['cube']
