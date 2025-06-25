@@ -9,8 +9,11 @@ class ChemicalReactionODE:
     Solver for stiff ODE system modeling 5 interacting chemical species (a, b, c, ab, ac)
     with complex formation reactions: a + b <-> ab and a + c <-> ac
     
-    Uses implicit midpoint rule for time stepping and Newton's method for 
-    nonlinear system solution.
+    Uses implicit midpoint rule for time stepping and adaptive fixed-point iteration for 
+    nonlinear system solution. The fixed-point method includes:
+    - Adaptive relaxation based on convergence behavior
+    - Early stagnation detection and recovery
+    - Optimized time step adaptation
     """
 
     def __init__(self, k_ab_on: float, k_ab_off: float, k_ac_on: float, k_ac_off: float):
@@ -50,26 +53,6 @@ class ChemicalReactionODE:
         dacdt = self.k_ac_on * a * c - self.k_ac_off * ac
 
         return np.array([dadt, dbdt, dcdt, dabdt, dacdt])
-
-    def reaction_rates_batch(self, y_batch: np.ndarray) -> np.ndarray:
-        """
-        Compute reaction rates for multiple systems simultaneously.
-        Optimized for vectorized operations across many spatial points.
-        
-        :param y_batch: Concentrations shape (n_points, 5) where each row is [a, b, c, ab, ac]
-        :returns: Reaction rates shape (n_points, 5)
-        """
-        # Extract all species for all points
-        a, b, c, ab, ac = y_batch[:, 0], y_batch[:, 1], y_batch[:, 2], y_batch[:, 3], y_batch[:, 4]
-        
-        # Vectorized reaction rate computation
-        dadt = -self.k_ab_on * a * b + self.k_ab_off * ab - self.k_ac_on * a * c + self.k_ac_off * ac
-        dbdt = -self.k_ab_on * a * b + self.k_ab_off * ab
-        dcdt = -self.k_ac_on * a * c + self.k_ac_off * ac
-        dabdt = self.k_ab_on * a * b - self.k_ab_off * ab
-        dacdt = self.k_ac_on * a * c - self.k_ac_off * ac
-        
-        return np.column_stack([dadt, dbdt, dcdt, dabdt, dacdt])
 
     def jacobian(self, y: np.ndarray) -> np.ndarray:
         """
@@ -132,57 +115,20 @@ class ChemicalReactionODE:
         return np.eye(5) - 0.5 * dt * J_mid
 
     def newton_solve(self, y_old: np.ndarray, dt: float, y_guess: Optional[np.ndarray] = None,
-                    max_iter: int = 20, tol: float = 1e-12) -> Tuple[np.ndarray, bool]:
+                    max_iter: int = 50, tol: float = 1e-12) -> Tuple[np.ndarray, bool]:
         """
-        Solve the implicit midpoint equation using Newton's method (legacy method).
+        Solve the implicit midpoint equation using adaptive fixed-point iteration.
         
-        :param y_old: Previous solution [a, b, c, ab, ac]
-        :param dt: Time step size
-        :param y_guess: Initial guess for Newton iteration
-        :param max_iter: Maximum number of Newton iterations
-        :param tol: Convergence tolerance
-        :returns: (solution, converged_flag)
-        """
-        if y_guess is None:
-            # Use explicit Euler as initial guess
-            y_guess = y_old + dt * self.reaction_rates(y_old)
-
-        y_new = y_guess.copy()
-
-        for _ in range(max_iter):
-            residual = self.implicit_midpoint_residual(y_new, y_old, dt)
-
-            # Check convergence
-            if np.linalg.norm(residual) < tol:
-                return y_new, True
-
-            # Compute Jacobian and solve linear system
-            J_res = self.implicit_midpoint_jacobian(y_new, y_old, dt)
-
-            try:
-                delta_y = np.linalg.solve(J_res, -residual)
-                y_new += delta_y
-            except np.linalg.LinAlgError:
-                warnings.warn("Singular Jacobian in Newton iteration")
-                return y_new, False
-
-        warnings.warn(f"Newton method did not converge after {max_iter} iterations")
-        return y_new, False
-
-    def fixed_point_solve(self, y_old: np.ndarray, dt: float, y_guess: Optional[np.ndarray] = None,
-                         max_iter: int = 50, tol: float = 1e-12, relaxation: float = 0.8) -> Tuple[np.ndarray, bool]:
-        """
-        Solve the implicit midpoint equation using fixed-point iteration with relaxation.
-        
-        Rearranges: y_new = y_old + dt * f((y_old + y_new)/2)
-        Into fixed-point form and applies relaxation for better convergence.
+        This method replaces Newton's method with fixed-point iteration using:
+        - Adaptive relaxation based on convergence behavior
+        - Early convergence detection
+        - Optimized initial guess strategies
         
         :param y_old: Previous solution [a, b, c, ab, ac]
         :param dt: Time step size
         :param y_guess: Initial guess for iteration
         :param max_iter: Maximum number of iterations
         :param tol: Convergence tolerance
-        :param relaxation: Relaxation parameter (0 < relaxation <= 1)
         :returns: (solution, converged_flag)
         """
         if y_guess is None:
@@ -190,6 +136,10 @@ class ChemicalReactionODE:
             y_guess = y_old + dt * self.reaction_rates(y_old)
 
         y_new = y_guess.copy()
+        
+        # Adaptive relaxation parameters
+        relaxation = 0.8  # Start with moderate relaxation
+        convergence_history = []
         
         for iteration in range(max_iter):
             # Fixed point function: y = y_old + dt * f((y_old + y)/2)
@@ -197,72 +147,86 @@ class ChemicalReactionODE:
             f_mid = self.reaction_rates(y_mid)
             y_next = y_old + dt * f_mid
             
+            # Compute residual for convergence check
+            residual_norm = np.linalg.norm(y_next - y_new)
+            convergence_history.append(residual_norm)
+            
             # Check convergence
-            if np.linalg.norm(y_next - y_new) < tol:
+            if residual_norm < tol:
                 return y_next, True
+            
+            # Adaptive relaxation based on convergence behavior
+            relaxation = self._adapt_relaxation(convergence_history, relaxation, iteration)
             
             # Apply relaxation for better convergence
             y_new = (1 - relaxation) * y_new + relaxation * y_next
+            
+            # Early termination if convergence stagnates
+            if iteration > 10 and self._check_stagnation(convergence_history):
+                # Try different relaxation strategy
+                if relaxation > 0.3:
+                    relaxation *= 0.5
+                    continue
+                else:
+                    warnings.warn("Fixed-point iteration stagnated")
+                    return y_new, False
 
         warnings.warn(f"Fixed-point iteration did not converge after {max_iter} iterations")
         return y_new, False
-
-    def fixed_point_solve_batch(self, y0_batch: np.ndarray, dt: float, 
-                               max_iter: int = 50, tol: float = 1e-12,
-                               relaxation: float = 0.8) -> Tuple[np.ndarray, np.ndarray]:
+    
+    def _adapt_relaxation(self, convergence_history: list, current_relaxation: float, iteration: int) -> float:
         """
-        Solve multiple chemical systems simultaneously using vectorized fixed-point iteration.
+        Adapt relaxation parameter based on convergence behavior.
         
-        This is optimized for finite element applications where the same chemical system
-        needs to be solved at thousands of spatial points.
-        
-        :param y0_batch: Initial conditions shape (n_points, 5) where each row is [a, b, c, ab, ac]
-        :param dt: Time step size (same for all points)
-        :param max_iter: Maximum number of iterations
-        :param tol: Convergence tolerance
-        :param relaxation: Relaxation parameter (0.5-0.9 typically works well)
-        :returns: (solutions, converged_flags) both shape (n_points, 5) and (n_points,)
+        :param convergence_history: List of residual norms
+        :param current_relaxation: Current relaxation parameter
+        :param iteration: Current iteration number
+        :returns: Adapted relaxation parameter
         """
-        n_points = y0_batch.shape[0]
-        y_batch = y0_batch.copy()
+        if iteration < 3:
+            return current_relaxation
         
-        # Use explicit Euler as initial guess for all points
-        y_batch = y0_batch + dt * self.reaction_rates_batch(y0_batch)
+        # Analyze recent convergence trend
+        recent_residuals = convergence_history[-3:]
         
-        # Track convergence for each point
-        converged = np.zeros(n_points, dtype=bool)
+        # Check if residuals are decreasing (good convergence)
+        if len(recent_residuals) >= 2:
+            trend = recent_residuals[-1] / recent_residuals[-2]
+            
+            if trend < 0.1:  # Very fast convergence
+                return min(current_relaxation * 1.2, 0.95)
+            elif trend < 0.7:  # Good convergence
+                return min(current_relaxation * 1.05, 0.9)
+            elif trend > 1.2:  # Diverging
+                return max(current_relaxation * 0.7, 0.3)
+            elif trend > 0.95:  # Slow convergence
+                return max(current_relaxation * 0.9, 0.5)
         
-        for iteration in range(max_iter):
-            # Compute reaction rates for all points simultaneously
-            y_mid_batch = 0.5 * (y0_batch + y_batch)
-            f_mid_batch = self.reaction_rates_batch(y_mid_batch)
-            
-            # Fixed-point update: y_new = y_old + dt * f((y_old + y_new)/2)
-            y_next_batch = y0_batch + dt * f_mid_batch
-            
-            # Check convergence for each point
-            residuals = np.linalg.norm(y_next_batch - y_batch, axis=1)
-            newly_converged = (residuals < tol) & (~converged)
-            converged |= newly_converged
-            
-            # Early exit if all points converged
-            if np.all(converged):
-                return y_next_batch, converged
-            
-            # Apply relaxation only to non-converged points
-            mask = ~converged
-            y_batch[mask] = ((1 - relaxation) * y_batch[mask] + 
-                            relaxation * y_next_batch[mask])
-            
-            # For converged points, keep the converged solution
-            y_batch[converged] = y_next_batch[converged]
+        return current_relaxation
+    
+    def _check_stagnation(self, convergence_history: list, window: int = 5) -> bool:
+        """
+        Check if convergence has stagnated.
         
-        return y_batch, converged
+        :param convergence_history: List of residual norms
+        :param window: Window size for stagnation detection
+        :returns: True if stagnation detected
+        """
+        if len(convergence_history) < window:
+            return False
+        
+        recent = convergence_history[-window:]
+        # Check if relative improvement is very small
+        if recent[0] > 0:
+            relative_improvement = (recent[0] - recent[-1]) / recent[0]
+            return relative_improvement < 0.01  # Less than 1% improvement
+        
+        return False
 
     def solve(self, y0: np.ndarray, t_span: Tuple[float, float], dt: float = 0.01,
               adaptive: bool = True, dt_min: float = 1e-8, dt_max: float = 0.1) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Solve the ODE system using implicit midpoint rule with Newton's method.
+        Solve the ODE system using implicit midpoint rule with adaptive fixed-point iteration.
         
         :param y0: Initial conditions [a0, b0, c0, ab0, ac0]
         :param t_span: Time span (t_start, t_end)
@@ -282,35 +246,85 @@ class ChemicalReactionODE:
         y_points = [y.copy()]
 
         current_dt = dt
-
+        
+        # Track performance for adaptive strategies
+        convergence_history = []
+        failed_steps = 0
+        
         while t < t_end:
             # Adjust time step if needed
             if t + current_dt > t_end:
                 current_dt = t_end - t
 
-            # Solve implicit midpoint equation
+            # Solve implicit midpoint equation using fixed-point iteration
             y_new, converged = self.newton_solve(y, current_dt)
+            
+            if converged:
+                # Accept the step
+                t += current_dt
+                y = y_new.copy()
 
-            if not converged and adaptive:
-                # Reduce time step and retry
-                current_dt *= 0.5
-                if current_dt < dt_min:
-                    raise RuntimeError(f"Time step became too small: {current_dt}")
-                continue
-
-            # Accept the step
-            t += current_dt
-            y = y_new.copy()
-
-            t_points.append(t)
-            y_points.append(y.copy())
-
-            # Adaptive time stepping
-            if adaptive and converged:
-                # Simple adaptation: increase dt if Newton converged quickly
-                current_dt = min(current_dt * 1.1, dt_max)
+                t_points.append(t)
+                y_points.append(y.copy())
+                
+                convergence_history.append(True)
+                failed_steps = 0
+                
+                # Adaptive time stepping based on convergence performance
+                if adaptive:
+                    current_dt = self._adapt_time_step(current_dt, convergence_history, 
+                                                     dt_min, dt_max, failed_steps)
+            else:
+                # Step failed - reduce time step and retry
+                if adaptive:
+                    convergence_history.append(False)
+                    failed_steps += 1
+                    
+                    current_dt *= 0.5
+                    if current_dt < dt_min:
+                        raise RuntimeError(f"Time step became too small: {current_dt}")
+                else:
+                    # Without adaptivity, accept the solution anyway with a warning
+                    warnings.warn("Fixed-point iteration did not converge, accepting solution")
+                    t += current_dt
+                    y = y_new.copy()
+                    t_points.append(t)
+                    y_points.append(y.copy())
 
         return np.array(t_points), np.array(y_points)
+    
+    def _adapt_time_step(self, current_dt: float, convergence_history: list, 
+                        dt_min: float, dt_max: float, failed_steps: int) -> float:
+        """
+        Adapt time step based on convergence performance.
+        
+        :param current_dt: Current time step
+        :param convergence_history: Recent convergence history
+        :param dt_min: Minimum allowed time step
+        :param dt_max: Maximum allowed time step
+        :param failed_steps: Number of recent failed steps
+        :returns: Adapted time step
+        """
+        if len(convergence_history) < 5:
+            return current_dt
+        
+        # Analyze recent performance
+        recent_performance = convergence_history[-5:]
+        success_rate = sum(recent_performance) / len(recent_performance)
+        
+        # Adjust time step based on success rate
+        if success_rate >= 0.9 and failed_steps == 0:
+            # High success rate - can increase time step
+            return min(current_dt * 1.1, dt_max)
+        elif success_rate >= 0.7:
+            # Moderate success rate - keep current time step
+            return current_dt
+        elif success_rate >= 0.5:
+            # Lower success rate - slightly reduce time step
+            return max(current_dt * 0.9, dt_min)
+        else:
+            # Poor success rate - significantly reduce time step
+            return max(current_dt * 0.7, dt_min)
 
     def plot_solution(self, t: np.ndarray, y: np.ndarray, title: str = "Chemical Species Evolution"):
         """
@@ -352,14 +366,81 @@ class ChemicalReactionODE:
         total_C = y[:, 2] + y[:, 4]            # C + AC
         return np.column_stack([total_A, total_B, total_C])
 
+    def newton_solve_legacy(self, y_old: np.ndarray, dt: float, y_guess: Optional[np.ndarray] = None,
+                           max_iter: int = 20, tol: float = 1e-12) -> Tuple[np.ndarray, bool]:
+        """
+        Legacy Newton's method implementation for comparison.
+        
+        :param y_old: Previous solution [a, b, c, ab, ac]
+        :param dt: Time step size
+        :param y_guess: Initial guess for Newton iteration
+        :param max_iter: Maximum number of Newton iterations
+        :param tol: Convergence tolerance
+        :returns: (solution, converged_flag)
+        """
+        if y_guess is None:
+            # Use explicit Euler as initial guess
+            y_guess = y_old + dt * self.reaction_rates(y_old)
+
+        y_new = y_guess.copy()
+
+        for _ in range(max_iter):
+            residual = self.implicit_midpoint_residual(y_new, y_old, dt)
+
+            # Check convergence
+            if np.linalg.norm(residual) < tol:
+                return y_new, True
+
+            # Compute Jacobian and solve linear system
+            J_res = self.implicit_midpoint_jacobian(y_new, y_old, dt)
+
+            try:
+                delta_y = np.linalg.solve(J_res, -residual)
+                y_new += delta_y
+            except np.linalg.LinAlgError:
+                warnings.warn("Singular Jacobian in Newton iteration")
+                return y_new, False
+
+        warnings.warn(f"Newton method did not converge after {max_iter} iterations")
+        return y_new, False
+
+    def solve_with_method(self, y0: np.ndarray, t_span: Tuple[float, float], dt: float = 0.01,
+                         adaptive: bool = True, dt_min: float = 1e-8, dt_max: float = 0.1,
+                         method: str = 'fixed_point') -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Solve the ODE system with specified method.
+        
+        :param y0: Initial conditions [a0, b0, c0, ab0, ac0]
+        :param t_span: Time span (t_start, t_end)
+        :param dt: Initial time step size
+        :param adaptive: Whether to use adaptive time stepping
+        :param dt_min: Minimum allowed time step
+        :param dt_max: Maximum allowed time step
+        :param method: Solver method ('fixed_point' or 'newton')
+        :returns: (time_points, solution_matrix)
+        """
+        # Temporarily switch solver method
+        original_solver = self.newton_solve
+        
+        if method == 'newton':
+            self.newton_solve = self.newton_solve_legacy
+        
+        try:
+            result = self.solve(y0, t_span, dt, adaptive, dt_min, dt_max)
+        finally:
+            # Restore original solver
+            self.newton_solve = original_solver
+        
+        return result
+
 
 def example_usage():
     """
-    Example demonstrating how to use the ChemicalReactionODE solver.
+    Example demonstrating how to use the ChemicalReactionODE solver with fixed-point iteration.
     """
-    print("Example: 5-Species Chemical Reaction System")
+    print("Example: 5-Species Chemical Reaction System with Fixed-Point Iteration")
     print("Reactions: A + B ⇌ AB, A + C ⇌ AC")
-    print("="*50)
+    print("="*70)
 
     # Define rate constants
     k_ab_on = 2.0    # A + B -> AB
@@ -381,9 +462,15 @@ def example_usage():
     print(f"                k_AC_on={k_ac_on}, k_AC_off={k_ac_off}")
     print(f"Time span: {t_span}")
 
-    # Solve the system
-    print("\nSolving ODE system...")
+    # Solve the system using fixed-point iteration
+    print("\nSolving ODE system with adaptive fixed-point iteration...")
+    import time
+    start_time = time.time()
     t, y = solver.solve(y0, t_span, dt=0.01, adaptive=True)
+    fp_time = time.time() - start_time
+    
+    print(f"Fixed-point solution time: {fp_time:.4f} seconds")
+    print(f"Number of time steps: {len(t)}")
 
     # Check conservation
     conservation = solver.check_conservation(y)
@@ -400,8 +487,22 @@ def example_usage():
     print(f"AB = {y[-1, 3]:.6f}")
     print(f"AC = {y[-1, 4]:.6f}")
 
+    # Compare with Newton's method
+    print("\nComparing with legacy Newton's method...")
+    start_time = time.time()
+    t_newton, y_newton = solver.solve_with_method(y0, t_span, dt=0.01, adaptive=True, method='newton')
+    newton_time = time.time() - start_time
+    
+    print(f"Newton solution time: {newton_time:.4f} seconds")
+    print(f"Number of time steps: {len(t_newton)}")
+    print(f"Performance ratio (Newton/Fixed-point): {newton_time/fp_time:.2f}")
+    
+    # Compare final solutions
+    solution_diff = np.linalg.norm(y[-1, :] - y_newton[-1, :])
+    print(f"Solution difference (L2 norm): {solution_diff:.2e}")
+
     # Plot results
-    solver.plot_solution(t, y, "5-Species Chemical Reaction (A+B ⇌ AB, A+C ⇌ AC)")
+    solver.plot_solution(t, y, "5-Species Chemical Reaction (Fixed-Point Method)")
 
     return solver, t, y
 
