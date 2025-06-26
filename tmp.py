@@ -527,7 +527,7 @@ def equilibrium_analysis(solver: ChemicalReactionODE, y0: np.ndarray):
     C_total = y0[2] + y0[4]          # C + AC
 
     print("\nEquilibrium Analysis:")
-    print(f"Conservation laws:")
+    print("Conservation laws:")
     print(f"  Total A atoms: {A_total:.6f}")
     print(f"  Total B atoms: {B_total:.6f}")
     print(f"  Total C atoms: {C_total:.6f}")
@@ -539,10 +539,10 @@ def equilibrium_analysis(solver: ChemicalReactionODE, y0: np.ndarray):
     print("      a system of nonlinear equations. Running numerical solution...")
 
     # Run to equilibrium numerically
-    t_eq, y_eq = solver.solve(y0, (0, 100), dt=0.01, adaptive=True)
+    _, y_eq = solver.solve(y0, (0, 100), dt=0.01, adaptive=False)
     equilibrium = y_eq[-1, :]
 
-    print(f"Numerical equilibrium concentrations:")
+    print("Numerical equilibrium concentrations:")
     print(f"  A_eq  = {equilibrium[0]:.6f}")
     print(f"  B_eq  = {equilibrium[1]:.6f}")
     print(f"  C_eq  = {equilibrium[2]:.6f}")
@@ -556,7 +556,7 @@ def equilibrium_analysis(solver: ChemicalReactionODE, y0: np.ndarray):
         K_ab_expected = solver.k_ab_on / solver.k_ab_off
         K_ac_expected = solver.k_ac_on / solver.k_ac_off
 
-        print(f"Equilibrium constant verification:")
+        print("Equilibrium constant verification:")
         print(f"  K_AB calculated: {K_ab_calc:.6f}, expected: {K_ab_expected:.6f}")
         print(f"  K_AC calculated: {K_ac_calc:.6f}, expected: {K_ac_expected:.6f}")
 
