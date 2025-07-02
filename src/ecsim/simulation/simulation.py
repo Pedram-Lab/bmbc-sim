@@ -12,7 +12,7 @@ from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.simulation.fem_details import FemLhs, FemRhs, PnpPotential
+from ecsim.simulation.fem_details import FemLhs, FemRhs, PnpSolver
 
 
 class Simulation:
@@ -57,7 +57,7 @@ class Simulation:
         self ._rd_fes: ngs.FESpace = None
         self ._el_fes: ngs.FESpace = None
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
-        self._potential: PnpPotential = None
+        self._pnp: PnpSolver = None
         self._lhs: dict[ChemicalSpecies, FemLhs] = {}
         self._rhs: dict[ChemicalSpecies, FemRhs] = {}
 
@@ -135,7 +135,7 @@ class Simulation:
                 mesh=self.simulation_geometry.mesh,
                 compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
-                potential=self._potential.potential if self.electrostatics else None,
+                potential=self._pnp.potential if self.electrostatics else None,
                 start_time=start_time.copy()
             )
 
@@ -146,7 +146,7 @@ class Simulation:
                 # Reaction + some transport (explicit)
                 self._update_transport(t)
                 if self.electrostatics:
-                    self._potential.update()
+                    self._pnp.update()
                 for _ in range(chemical_substeps):
                     rhs = {s: self._rhs[s].assemble() for s in self._concentrations}
                     tau = dt / chemical_substeps
@@ -219,7 +219,7 @@ class Simulation:
 
         if self.electrostatics:
             logger.debug("Setting up electrostatic finite element matrices...")
-            self._potential = PnpPotential.for_all_species(
+            self._pnp = PnpSolver.for_all_species(
                 self.species,
                 self._el_fes,
                 self.simulation_geometry,
@@ -232,7 +232,7 @@ class Simulation:
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
-            self._potential,
+            self._pnp,
             dt
         )
         logger.debug("Setting up finite element right-hand sides...")

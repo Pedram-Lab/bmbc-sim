@@ -269,8 +269,8 @@ class FemRhs:
         return self._source_term.vec
 
 
-class PnpPotential:
-    """FEM structures for Poisson-Nernst-Planck equations."""
+class PnpSolver:
+    """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
     def __init__(self, stiffness, inverse, source_term, potential):
         self._stiffness = stiffness
@@ -286,8 +286,7 @@ class PnpPotential:
             simulation_geometry,
             concentrations,
     ):
-        """Set up the right-hand side of the finite element equations for a given species.
-        """
+        """Set up the right-hand side of the finite element equations for a given species."""
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
 
