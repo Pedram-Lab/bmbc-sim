@@ -197,10 +197,14 @@ class FemRhs:
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
+
+        # To decouple the reactions, use mass lumping. NGSolve does not account for the
+        # volume of the reference element in the integration rule, so we need to adjust
+        # the usual [1/4, 1/4, 1/4, 1/4] weights by the volume of the 3D unit simplex.
         mass_lumping_rule = {
             ngs.ET.TET: ngs.IntegrationRule(
                 points=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
-                weights=[1 / 4, 1 / 4, 1 / 4, 1 / 4],
+                weights=[1 / 24, 1 / 24, 1 / 24, 1 / 24],
             )
         }
 
