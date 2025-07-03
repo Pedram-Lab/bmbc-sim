@@ -23,7 +23,7 @@ def create_simulation(tmp_path):
     return simulation
 
 
-def test_single_compartment_dynamics(tmp_path, visualize=False):
+def test_single_compartment_dynamics(tmp_path, visualize=False, skip_assert=False):
     """Test that, in a single compartment:
     - a single species can stay constant
     - reactions can be used to simulate exponential decay
@@ -77,33 +77,34 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
         dim="time",
     )
 
-    fixed_results = point_values.sel(species="fixed")
-    assert len(fixed_results) == 101
-    assert fixed_results.isel(time=0) == pytest.approx(1.1)
-    assert fixed_results.isel(time=-1) == pytest.approx(1.1)
+    if not skip_assert:
+        fixed_results = point_values.sel(species="fixed")
+        assert len(fixed_results) == 101
+        assert fixed_results.isel(time=0) == pytest.approx(1.1)
+        assert fixed_results.isel(time=-1) == pytest.approx(1.1)
 
-    decay_results = point_values.sel(species="decay")
-    assert decay_results.isel(time=0) == pytest.approx(1.2)
-    assert 0.2 < decay_results.isel(time=-1) < 1.2
+        decay_results = point_values.sel(species="decay")
+        assert decay_results.isel(time=0) == pytest.approx(1.2)
+        assert 0.2 < decay_results.isel(time=-1) < 1.2
 
-    growth_results = point_values.sel(species="growth")
-    assert growth_results.isel(time=0) == pytest.approx(1.3)
-    assert growth_results.isel(time=-1) == pytest.approx(2.3)
+        growth_results = point_values.sel(species="growth")
+        assert growth_results.isel(time=0) == pytest.approx(1.3)
+        assert growth_results.isel(time=-1) == pytest.approx(2.3)
 
-    reactant_1_results = point_values.sel(species="reactant_1")
-    assert reactant_1_results.isel(time=0) == pytest.approx(1.4)
-    assert reactant_1_results.isel(time=-1) < 1.4
+        reactant_1_results = point_values.sel(species="reactant_1")
+        assert reactant_1_results.isel(time=0) == pytest.approx(1.4)
+        assert reactant_1_results.isel(time=-1) < 1.4
 
-    reactant_2_results = point_values.sel(species="reactant_2")
-    assert reactant_2_results.isel(time=0) == pytest.approx(1.5)
-    assert reactant_2_results.isel(time=-1) < 1.5
-    assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
+        reactant_2_results = point_values.sel(species="reactant_2")
+        assert reactant_2_results.isel(time=0) == pytest.approx(1.5)
+        assert reactant_2_results.isel(time=-1) < 1.5
+        assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
 
-    product_results = point_values.sel(species="product")
-    assert product_results.isel(time=0) == pytest.approx(0)
-    assert product_results.isel(time=-1) > 0
-    assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
-    assert all(p < r2 for p, r2 in zip(product_results, reactant_2_results))
+        product_results = point_values.sel(species="product")
+        assert product_results.isel(time=0) == pytest.approx(0)
+        assert product_results.isel(time=-1) > 0
+        assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
+        assert all(p < r2 for p, r2 in zip(product_results, reactant_2_results))
 
     # Test substance values
     total_substance = xr.concat(
@@ -113,33 +114,34 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
     # Select the region corresponding to the compartment 'cell'
     region = "cell"
 
-    fixed_results = total_substance.sel(species="fixed", region=region)
-    assert len(fixed_results) == 101
-    assert fixed_results.isel(time=0) == pytest.approx(1.1)
-    assert fixed_results.isel(time=-1) == pytest.approx(1.1)
+    if not skip_assert:
+        fixed_results = total_substance.sel(species="fixed", region=region)
+        assert len(fixed_results) == 101
+        assert fixed_results.isel(time=0) == pytest.approx(1.1)
+        assert fixed_results.isel(time=-1) == pytest.approx(1.1)
 
-    decay_results = total_substance.sel(species="decay", region=region)
-    assert decay_results.isel(time=0) == pytest.approx(1.2)
-    assert 0.2 < decay_results.isel(time=-1) < 1.2
+        decay_results = total_substance.sel(species="decay", region=region)
+        assert decay_results.isel(time=0) == pytest.approx(1.2)
+        assert 0.2 < decay_results.isel(time=-1) < 1.2
 
-    growth_results = total_substance.sel(species="growth", region=region)
-    assert growth_results.isel(time=0) == pytest.approx(1.3)
-    assert growth_results.isel(time=-1) == pytest.approx(2.3)
+        growth_results = total_substance.sel(species="growth", region=region)
+        assert growth_results.isel(time=0) == pytest.approx(1.3)
+        assert growth_results.isel(time=-1) == pytest.approx(2.3)
 
-    reactant_1_results = total_substance.sel(species="reactant_1", region=region)
-    assert reactant_1_results.isel(time=0) == pytest.approx(1.4)
-    assert reactant_1_results.isel(time=-1) < 1.4
+        reactant_1_results = total_substance.sel(species="reactant_1", region=region)
+        assert reactant_1_results.isel(time=0) == pytest.approx(1.4)
+        assert reactant_1_results.isel(time=-1) < 1.4
 
-    reactant_2_results = total_substance.sel(species="reactant_2", region=region)
-    assert reactant_2_results.isel(time=0) == pytest.approx(1.5)
-    assert reactant_2_results.isel(time=-1) < 1.5
-    assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
+        reactant_2_results = total_substance.sel(species="reactant_2", region=region)
+        assert reactant_2_results.isel(time=0) == pytest.approx(1.5)
+        assert reactant_2_results.isel(time=-1) < 1.5
+        assert all(r1 < r2 for r1, r2 in zip(reactant_1_results, reactant_2_results))
 
-    product_results = total_substance.sel(species="product", region=region)
-    assert product_results.isel(time=0) == pytest.approx(0)
-    assert product_results.isel(time=-1) > 0
-    assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
-    assert all(p < r2 for p, r2 in zip(product_results, reactant_2_results))
+        product_results = total_substance.sel(species="product", region=region)
+        assert product_results.isel(time=0) == pytest.approx(0)
+        assert product_results.isel(time=-1) > 0
+        assert all(p < r1 for p, r1 in zip(product_results, reactant_1_results))
+        assert all(p < r2 for p, r2 in zip(product_results, reactant_2_results))
 
     if visualize:
         # Create a single figure with two side-by-side panels sharing the same y-axis.
@@ -171,4 +173,4 @@ def test_single_compartment_dynamics(tmp_path, visualize=False):
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmpdir:
-        test_single_compartment_dynamics(tmpdir, visualize=True)
+        test_single_compartment_dynamics(tmpdir, visualize=True, skip_assert=True)
