@@ -10,7 +10,6 @@ from ngsolve.webgui import Draw  # Mesh visualization
 import ecsim  # Simulation framework
 from ecsim.geometry import create_dish_geometry  # Geometry generator
 
-
 # Initial and target Ca concentrations
 CA_INIT = 1 * u.mmol / u.L
 
@@ -45,25 +44,25 @@ ca = simulation.add_species('ca', valence=2)
 dish.initialize_species(ca, CA_INIT)
 dish.add_diffusion(ca, 600 * u.um**2 / u.s)
 
-# Buffer 1 parameters
-buffer_tot = 2.0 * u.mmol / u.L  # Total buffer
+# Immobile buffer parameters
+immobile_total_buffer = 2.0 * u.mmol / u.L  # Total buffer
 
 # Add buffer species (non-diffusive)
-buffer = simulation.add_species('buffer', valence=-1)
-dish.add_diffusion(buffer, 0 * u.um**2 / u.s)
-dish.initialize_species(buffer, {'free': 0 * u.mmol / u.L, 'substrate': buffer_tot})
+immobile_buffer = simulation.add_species('immobile_buffer', valence=-1)
+dish.add_diffusion(immobile_buffer, 0 * u.um**2 / u.s)
+dish.initialize_species(immobile_buffer, {'free': 0 * u.mmol / u.L, 'substrate': immobile_total_buffer})
 
-# Buffer2 parameters
-buffer_tot_2 = 2.0 * u.mmol / u.L  # Total buffer
+# Mobile buffer parameters
+mobile_total_buffer = 1.0 * u.mmol / u.L  # Total buffer
 
 # Add buffer species (diffusive)
-buffer_2 = simulation.add_species('buffer_2', valence=-1)
-dish.add_diffusion(buffer_2, 50 * u.um**2 / u.s)
-dish.initialize_species(buffer_2, {'free': buffer_tot_2, 'substrate': 0 * u.mmol / u.L})
+mobile_buffer = simulation.add_species('mobile_buffer', valence=-1)
+dish.add_diffusion(mobile_buffer, 50 * u.um**2 / u.s)
+dish.initialize_species(mobile_buffer, {'free': mobile_total_buffer, 'substrate': mobile_total_buffer})
 
 # Run simulation
 simulation.run(
-    end_time=10 * u.ms,
+    end_time=4 * u.ms,
     time_step=50 * u.ns,
     record_interval=5 * u.us,
     n_threads=4
