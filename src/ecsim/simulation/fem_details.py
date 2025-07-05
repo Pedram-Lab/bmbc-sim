@@ -173,10 +173,8 @@ class DiffusionSolver:
     def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression):
         """Apply the implicit Euler step to the concentration vector."""
         # Scale the transport terms
-        # TODO: avoid allocating a new matrix here?
-        scaled_transport = self._transport.mat.CreateMatrix()
-        scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
-        scaled_transport = scaled_transport.DeleteZeroElements(1e-10)
+        scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
+        scaled_transport.AsVector().FV().NumPy()[:] *= self._dt
         mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
 
         # Update the concentration
