@@ -12,7 +12,7 @@ from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.simulation.fem_details import FemLhs, FemRhs, PnpSolver
+from ecsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
 
 
 class Simulation:
@@ -58,8 +58,8 @@ class Simulation:
         self ._el_fes: ngs.FESpace = None
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._pnp: PnpSolver = None
-        self._lhs: dict[ChemicalSpecies, FemLhs] = {}
-        self._rhs: dict[ChemicalSpecies, FemRhs] = {}
+        self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
+        self._reaction: dict[ChemicalSpecies, ReactionSolver] = {}
 
 
     def add_species(
@@ -142,25 +142,29 @@ class Simulation:
             t = start_time.copy()
             residual = {}
             for _ in trange(n_steps):
-                # Update the concentrations via IMEX approach:
-                # Reaction + some transport (explicit)
-                self._update_transport(t)
+                # Update the concentrations via a first-order splitting approach:
+                # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
                     self._pnp.update()
+
+                # 2. Independently update the concentrations via reaction kinetics (explicit)
                 for _ in range(chemical_substeps):
-                    rhs = {s: self._rhs[s].assemble() for s in self._concentrations}
+                    reaction = {s: self._reaction[s].assemble() for s in self._concentrations}
                     tau = dt / chemical_substeps
                     for species, c in self._concentrations.items():
-                        m_inv = self._lhs[species].lumped_mass_inv
-                        c.vec.FV().NumPy()[:] += tau * (m_inv * rhs[species].vec.FV().NumPy())
-                for species, c in self._concentrations.items():
-                    lhs = self._lhs[species].assemble()
-                    residual[species] = -dt * (lhs.stiffness * c.vec)
+                        m_inv = self._reaction[species].lumped_mass_inv
+                        c.vec.FV().NumPy()[:] += tau * (m_inv * reaction[species].vec.FV().NumPy())
 
-                # Diffusion + some transport (implicit)
+                # 3. Diffuse and transport the concentrations (implicit)
+                self._update_transport(t)
                 for species, c in self._concentrations.items():
-                    lhs = self._lhs[species]
-                    c.vec.data += lhs.time_stepping * residual[species]
+                    diffusion = self._diffusion[species].assemble()
+                    source = self._diffusion[species]._source_term.vec
+                    residual[species] = dt * (source - diffusion.stiffness * c.vec)
+
+                for species, c in self._concentrations.items():
+                    diffusion = self._diffusion[species]
+                    c.vec.data += diffusion.time_stepping * residual[species]
 
                 t += time_step
                 recorder.record(current_time=t)
@@ -200,7 +204,7 @@ class Simulation:
                     self._rd_fes.ndof)
 
         if self.electrostatics:
-            self._el_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments] 
+            self._el_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments]
                                         + [ngs.FESpace("number", mesh) for _ in compartments])
             logger.info("Total number of degrees of freedom for electrostatics: %d.",
                         self._el_fes.ndof)
@@ -227,7 +231,7 @@ class Simulation:
             )
 
         logger.debug("Setting up finite element matrices...")
-        self._lhs = FemLhs.for_all_species(
+        self._diffusion = DiffusionSolver.for_all_species(
             self.species,
             self._rd_fes,
             self.simulation_geometry,
@@ -236,7 +240,7 @@ class Simulation:
             dt
         )
         logger.debug("Setting up finite element right-hand sides...")
-        self._rhs = FemRhs.for_all_species(
+        self._reaction = ReactionSolver.for_all_species(
             self.species,
             self._rd_fes,
             self.simulation_geometry,
