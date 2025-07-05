@@ -31,7 +31,7 @@ def create_simulation(tmp_path, width):
 
 
 @pytest.mark.parametrize("width", [1, 2])
-def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
+def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=False):
     """Test that, in a single compartment:
     - linear flux drives a species to a constant value (from above and below)
     - Michaelis-Menten efflux depletes a species
@@ -98,27 +98,28 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
         dim="time",
     )
 
-    too_low_results = point_values.sel(species="too-low")
-    assert too_low_results.isel(time=0) == pytest.approx(0.5)
-    assert too_low_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
+    if not skip_assert:
+        too_low_results = point_values.sel(species="too-low")
+        assert too_low_results.isel(time=0) == pytest.approx(0.5)
+        assert too_low_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
 
-    too_high_results = point_values.sel(species="too-high")
-    assert too_high_results.isel(time=0) == pytest.approx(0.8)
-    assert too_high_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
+        too_high_results = point_values.sel(species="too-high")
+        assert too_high_results.isel(time=0) == pytest.approx(0.8)
+        assert too_high_results.isel(time=-1) == pytest.approx(0.7, rel=1e-3)
 
-    deplete_results = point_values.sel(species="deplete")
-    assert deplete_results.isel(time=0) == pytest.approx(0.4)
-    assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
+        deplete_results = point_values.sel(species="deplete")
+        assert deplete_results.isel(time=0) == pytest.approx(0.4)
+        assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
 
-    influx_results = point_values.sel(species="constant-influx")
-    assert influx_results.isel(time=0) == pytest.approx(0.1)
-    assert influx_results.isel(time=-1) == pytest.approx(1 / width + 0.1, rel=1e-3)
+        influx_results = point_values.sel(species="constant-influx")
+        assert influx_results.isel(time=0) == pytest.approx(0.1)
+        assert influx_results.isel(time=-1) == pytest.approx(1 / width + 0.1, rel=1e-3)
 
-    limited_influx_results = point_values.sel(species="variable-influx")
-    assert limited_influx_results.isel(time=0) == pytest.approx(0.2)
-    assert limited_influx_results.isel(time=-1) == pytest.approx(
-        1 / width + 0.2, rel=1e-3
-    )
+        limited_influx_results = point_values.sel(species="variable-influx")
+        assert limited_influx_results.isel(time=0) == pytest.approx(0.2)
+        assert limited_influx_results.isel(time=-1) == pytest.approx(
+            1 / width + 0.2, rel=1e-3
+        )
 
     # Test substance values (new ResultLoader syntax)
     total_substance = xr.concat(
@@ -126,31 +127,33 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
         dim="time",
     )
     region = "cell"
-    too_low_results = total_substance.sel(species="too-low", region=region)
-    assert too_low_results.isel(time=0) == pytest.approx(0.5 * width)
-    assert too_low_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
 
-    too_high_results = total_substance.sel(species="too-high", region=region)
-    assert too_high_results.isel(time=0) == pytest.approx(0.8 * width)
-    assert too_high_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
+    if not skip_assert:
+        too_low_results = total_substance.sel(species="too-low", region=region)
+        assert too_low_results.isel(time=0) == pytest.approx(0.5 * width)
+        assert too_low_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
 
-    deplete_results = total_substance.sel(species="deplete", region=region)
-    assert deplete_results.isel(time=0) == pytest.approx(0.4 * width)
-    assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
+        too_high_results = total_substance.sel(species="too-high", region=region)
+        assert too_high_results.isel(time=0) == pytest.approx(0.8 * width)
+        assert too_high_results.isel(time=-1) == pytest.approx(0.7 * width, rel=1e-3)
 
-    influx_results = total_substance.sel(species="constant-influx", region=region)
-    assert influx_results.isel(time=0) == pytest.approx(0.1 * width)
-    assert influx_results.isel(time=-1) == pytest.approx(
-        (1 / width + 0.1) * width, rel=1e-3
-    )
+        deplete_results = total_substance.sel(species="deplete", region=region)
+        assert deplete_results.isel(time=0) == pytest.approx(0.4 * width)
+        assert deplete_results.isel(time=-1) == pytest.approx(0.0, abs=1e-3)
 
-    limited_influx_results = total_substance.sel(
-        species="variable-influx", region=region
-    )
-    assert limited_influx_results.isel(time=0) == pytest.approx(0.2 * width)
-    assert limited_influx_results.isel(time=-1) == pytest.approx(
-        (1 / width + 0.2) * width, rel=1e-3
-    )
+        influx_results = total_substance.sel(species="constant-influx", region=region)
+        assert influx_results.isel(time=0) == pytest.approx(0.1 * width)
+        assert influx_results.isel(time=-1) == pytest.approx(
+            (1 / width + 0.1) * width, rel=1e-3
+        )
+
+        limited_influx_results = total_substance.sel(
+            species="variable-influx", region=region
+        )
+        assert limited_influx_results.isel(time=0) == pytest.approx(0.2 * width)
+        assert limited_influx_results.isel(time=-1) == pytest.approx(
+            (1 / width + 0.2) * width, rel=1e-3
+        )
 
     if visualize:
         species = [
@@ -183,4 +186,4 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False):
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmpdir:
-        test_fluxes_from_to_outside(tmpdir, 2, visualize=True)
+        test_fluxes_from_to_outside(tmpdir, 2, visualize=True, skip_assert=True)
