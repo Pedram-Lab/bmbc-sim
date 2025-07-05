@@ -147,12 +147,12 @@ class Simulation:
 
                 # 2. Independently update the concentrations via reaction kinetics (explicit)
                 # Compute the reaction updates for all species
-                reaction = {
-                    s: self._reaction[s].compute_update() for s in self._concentrations
+                residual = {
+                    s: self._reaction[s].compute_residual() for s in self._concentrations
                 }
                 # Apply the updates to the concentrations
                 for species, c in self._concentrations.items():
-                    self._reaction[species].step(c, reaction[species])
+                    self._reaction[species].step(c, residual[species])
 
                 # 3. Diffuse and transport the concentrations (implicit)
                 # Update all transport mechanisms to the current simulation time

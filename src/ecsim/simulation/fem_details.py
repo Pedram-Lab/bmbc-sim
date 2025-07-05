@@ -203,6 +203,9 @@ class ReactionSolver:
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
 
+        # Make the concentrations variables so one can differentiate in their direction
+        concentrations = {s: concentrations[s].MakeVariable() for s in species}
+
         # To decouple the reactions, use mass lumping. NGSolve does not account for the
         # volume of the reference element in the integration rule, so we need to adjust
         # the usual [1/4, 1/4, 1/4, 1/4] weights by the volume of the 3D unit simplex.
@@ -218,24 +221,28 @@ class ReactionSolver:
             coefficients = compartment.coefficients
             test = test_functions[i]
 
+            cf = {s: ngs.CoefficientFunction(0.0) for s in species}
             for (reactants, products), (kf, kr) in coefficients.reactions.items():
                 all_reactants = ngs.CoefficientFunction(1.0)
                 for reactant in reactants:
                     all_reactants *= concentrations[reactant].components[i]
-                forward_reaction = (kf * all_reactants * test).Compile()
+                forward_reaction = kf * all_reactants
                 for reactant in reactants:
-                    source_terms[reactant] += -forward_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[reactant] += -forward_reaction
                 for product in products:
-                    source_terms[product] += forward_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[product] += forward_reaction
 
                 all_products = ngs.CoefficientFunction(1.0)
                 for product in products:
                     all_products *= concentrations[product].components[i]
-                reverse_reaction = (kr * all_products * test).Compile()
+                reverse_reaction = kr * all_products
                 for reactant in reactants:
-                    source_terms[reactant] += reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[reactant] += reverse_reaction
                 for product in products:
-                    source_terms[product] += -reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[product] += -reverse_reaction
+
+            for s in species:
+                source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping_rule)
 
         # Create a lumped mass matrix for decoupled time stepping
         trial_and_test = tuple(zip(*fes.TnT()))
@@ -252,7 +259,7 @@ class ReactionSolver:
 
         return {s: cls(source_terms[s], lumped_mass_inv, dt) for s in species}
 
-    def compute_update(self) -> ngs.BaseVector:
+    def compute_residual(self) -> ngs.BaseVector:
         """Compute the update vector for the reaction terms."""
         self._source_term.Assemble()
         return self._source_term.vec
