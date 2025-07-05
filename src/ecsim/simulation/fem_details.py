@@ -163,32 +163,35 @@ class DiffusionSolver:
             dt
         )
 
-    def assemble(self) -> 'DiffusionSolver':
-        """Update the transport matrix."""
+    def compute_residual(self, c: ngs.GridFunction) -> ngs.BaseVector:
+        """One time step of the implicit Euler integrator."""
+        # Update the transport terms (implicit and explicit)
         self._transport.Assemble()
         self._source_term.Assemble()
-        return self
+        stiffness = self._a - self._transport.mat
 
-    @property
-    def stiffness(self) -> ngs.BaseMatrix:
-        """The stiffness matrix."""
-        return self._a - self._transport.mat
+        return self._dt * (self._source_term.vec - stiffness * c.vec)
 
-    @property
-    def time_stepping(self) -> ngs.BaseMatrix:
-        """The matrix for the implicit Euler rule."""
+    def step(self, c: ngs.GridFunction, res: ngs.BaseVector):
+        """One time step of the implicit Euler integrator."""
+        # Scale the transport terms
+        # TODO: avoid allocating a new matrix here?
         scaled_transport = self._transport.mat.CreateMatrix()
         scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
         scaled_transport = scaled_transport.DeleteZeroElements(1e-10)
-        return ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
+        mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
+
+        # Update the concentration
+        c.vec.data += mstar_inv * res
 
 
 class ReactionSolver:
     """Right-hand side of the finite element equations for a single species."""
 
-    def __init__(self, source_term, lumped_mass_inv):
+    def __init__(self, source_term, lumped_mass_inv, dt):
         self._source_term = source_term
         self.lumped_mass_inv = lumped_mass_inv
+        self._dt = dt
 
     @classmethod
     def for_all_species(
@@ -197,6 +200,7 @@ class ReactionSolver:
             fes,
             simulation_geometry,
             concentrations,
+            dt
     ):
         """Set up the right-hand side of the finite element equations for a given species."""
         source_terms = {s: ngs.LinearForm(fes) for s in species}
@@ -250,17 +254,16 @@ class ReactionSolver:
         w.data = mass.mat * v
         lumped_mass_inv = 1 / w.FV().NumPy()
 
-        return {s: cls(source_terms[s], lumped_mass_inv) for s in species}
+        return {s: cls(source_terms[s], lumped_mass_inv, dt) for s in species}
 
-    def assemble(self) -> 'ReactionSolver':
+    def compute_update(self) -> ngs.BaseVector:
         """Update the source term."""
         self._source_term.Assemble()
-        return self
-
-    @property
-    def vec(self) -> ngs.BaseVector:
-        """The vector of the right-hand side."""
         return self._source_term.vec
+
+    def step(self, c, update: ngs.BaseVector):
+        """The vector of the right-hand side."""
+        c.vec.FV().NumPy()[:] += self._dt * (self.lumped_mass_inv * update.FV().NumPy())
 
 
 class PnpSolver:

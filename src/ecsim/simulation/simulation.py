@@ -94,7 +94,6 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
-            chemical_substeps: int = 1,
     ) -> None:
         """Run the simulation until a given end time.
 
@@ -140,7 +139,6 @@ class Simulation:
             )
 
             t = start_time.copy()
-            residual = {}
             for _ in trange(n_steps):
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
@@ -148,39 +146,32 @@ class Simulation:
                     self._pnp.update()
 
                 # 2. Independently update the concentrations via reaction kinetics (explicit)
-                for _ in range(chemical_substeps):
-                    reaction = {s: self._reaction[s].assemble() for s in self._concentrations}
-                    tau = dt / chemical_substeps
-                    for species, c in self._concentrations.items():
-                        m_inv = self._reaction[species].lumped_mass_inv
-                        c.vec.FV().NumPy()[:] += tau * (m_inv * reaction[species].vec.FV().NumPy())
+                # Compute the reaction updates for all species
+                reaction = {
+                    s: self._reaction[s].compute_update() for s in self._concentrations
+                }
+                # Apply the updates to the concentrations
+                for species, c in self._concentrations.items():
+                    self._reaction[species].step(c, reaction[species])
 
                 # 3. Diffuse and transport the concentrations (implicit)
-                self._update_transport(t)
+                # Update all transport mechanisms to the current simulation time
+                for membrane in self.simulation_geometry.membranes.values():
+                    for _, _, _, transport in membrane.get_transport():
+                        transport.update_flux(t)
+                # Compute the residual for each species given the current concentrations
+                residual = {
+                    species: self._diffusion[species].compute_residual(c)
+                    for species, c in self._concentrations.items()
+                }
+                # Update each species by solving the implicit diffusion equation
                 for species, c in self._concentrations.items():
-                    diffusion = self._diffusion[species].assemble()
-                    source = self._diffusion[species]._source_term.vec
-                    residual[species] = dt * (source - diffusion.stiffness * c.vec)
-
-                for species, c in self._concentrations.items():
-                    diffusion = self._diffusion[species]
-                    c.vec.data += diffusion.time_stepping * residual[species]
+                    self._diffusion[species].step(c, residual[species])
 
                 t += time_step
                 recorder.record(current_time=t)
 
             recorder.finalize(end_time=t)
-
-
-    def _update_transport(self, t: u.Quantity) -> None:
-        """Update the transport mechanisms based on the current time.
-
-        :param t: The current time in the simulation.
-        """
-        # Update all transport mechanisms
-        for membrane in self.simulation_geometry.membranes.values():
-            for _, _, _, transport in membrane.get_transport():
-                transport.update_flux(t)
 
 
     def _setup(self, dt) -> None:
@@ -237,7 +228,7 @@ class Simulation:
             self.simulation_geometry,
             self._concentrations,
             self._pnp,
-            dt
+            dt,
         )
         logger.debug("Setting up finite element right-hand sides...")
         self._reaction = ReactionSolver.for_all_species(
@@ -245,4 +236,5 @@ class Simulation:
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
+            dt,
         )
