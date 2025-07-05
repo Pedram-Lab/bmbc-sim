@@ -7,7 +7,7 @@ from ecsim.units import to_simulation_units
 
 
 class DiffusionSolver:
-    """FEM solver for diffusion equations, computing """
+    """FEM solver for diffusion and transport equations."""
 
     def __init__(self, a, transport, m_star, pre, source_term, dt):
         self._a = a
@@ -28,15 +28,13 @@ class DiffusionSolver:
             potential,
             dt
     ) -> dict[ChemicalSpecies, 'DiffusionSolver']:
-        """Set up the left-hand side of the finite element equations for all
-        species.
-        """
-        species_to_lhs = {}
+        """Set up the solver for all given species."""
+        species_to_solver = {}
         for s in species:
-            species_to_lhs[s] = cls._for_single_species(
+            species_to_solver[s] = cls._for_single_species(
                 s, fes, simulation_geometry, concentrations[s], potential, dt
             )
-        return species_to_lhs
+        return species_to_solver
 
 
     @classmethod
@@ -49,7 +47,7 @@ class DiffusionSolver:
             potential,
             dt
     ):
-        """Set up the left-hand side of the finite element equations for a given species."""
+        """Set up the solver for a single given species."""
         compartments = simulation_geometry.compartments.values()
         mass = ngs.BilinearForm(fes, check_unused=False)
         stiffness = ngs.BilinearForm(fes, check_unused=False)
@@ -163,8 +161,8 @@ class DiffusionSolver:
             dt
         )
 
-    def compute_residual(self, c: ngs.GridFunction) -> ngs.BaseVector:
-        """One time step of the implicit Euler integrator."""
+    def compute_residual(self, c: ngs.GridFunction) -> ngs.la.DynamicVectorExpression:
+        """Compute the residual vector for the implicit Euler integrator."""
         # Update the transport terms (implicit and explicit)
         self._transport.Assemble()
         self._source_term.Assemble()
@@ -172,8 +170,8 @@ class DiffusionSolver:
 
         return self._dt * (self._source_term.vec - stiffness * c.vec)
 
-    def step(self, c: ngs.GridFunction, res: ngs.BaseVector):
-        """One time step of the implicit Euler integrator."""
+    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression):
+        """Apply the implicit Euler step to the concentration vector."""
         # Scale the transport terms
         # TODO: avoid allocating a new matrix here?
         scaled_transport = self._transport.mat.CreateMatrix()
@@ -186,7 +184,7 @@ class DiffusionSolver:
 
 
 class ReactionSolver:
-    """Right-hand side of the finite element equations for a single species."""
+    """FEM solver for the reaction terms."""
 
     def __init__(self, source_term, lumped_mass_inv, dt):
         self._source_term = source_term
@@ -202,7 +200,7 @@ class ReactionSolver:
             concentrations,
             dt
     ):
-        """Set up the right-hand side of the finite element equations for a given species."""
+        """Set up the solver for all given species."""
         source_terms = {s: ngs.LinearForm(fes) for s in species}
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
@@ -217,7 +215,7 @@ class ReactionSolver:
             )
         }
 
-        # Handle reaction terms
+        # Set up the reaction terms for each compartment and species
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
             test = test_functions[i]
@@ -257,12 +255,12 @@ class ReactionSolver:
         return {s: cls(source_terms[s], lumped_mass_inv, dt) for s in species}
 
     def compute_update(self) -> ngs.BaseVector:
-        """Update the source term."""
+        """Compute the update vector for the reaction terms."""
         self._source_term.Assemble()
         return self._source_term.vec
 
     def step(self, c, update: ngs.BaseVector):
-        """The vector of the right-hand side."""
+        """Apply the update to the concentration vector."""
         c.vec.FV().NumPy()[:] += self._dt * (self.lumped_mass_inv * update.FV().NumPy())
 
 
@@ -283,7 +281,7 @@ class PnpSolver:
             simulation_geometry,
             concentrations,
     ):
-        """Set up the right-hand side of the finite element equations for a given species."""
+        """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
 
@@ -324,7 +322,7 @@ class PnpSolver:
         return cls(a, inverse, f, potential)
 
 
-    def update(self):
+    def step(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
         self.potential.vec.data = self._inverse * self._source_term.vec

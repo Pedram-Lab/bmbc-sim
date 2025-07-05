@@ -143,7 +143,7 @@ class Simulation:
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
-                    self._pnp.update()
+                    self._pnp.step()
 
                 # 2. Independently update the concentrations via reaction kinetics (explicit)
                 # Compute the reaction updates for all species
@@ -213,7 +213,7 @@ class Simulation:
                     c.Set(coefficients.initial_conditions[species])
 
         if self.electrostatics:
-            logger.debug("Setting up electrostatic finite element matrices...")
+            logger.debug("Setting up electrostatics solver...")
             self._pnp = PnpSolver.for_all_species(
                 self.species,
                 self._el_fes,
@@ -221,7 +221,7 @@ class Simulation:
                 self._concentrations,
             )
 
-        logger.debug("Setting up finite element matrices...")
+        logger.debug("Setting up diffusion solver...")
         self._diffusion = DiffusionSolver.for_all_species(
             self.species,
             self._rd_fes,
@@ -230,7 +230,7 @@ class Simulation:
             self._pnp,
             dt,
         )
-        logger.debug("Setting up finite element right-hand sides...")
+        logger.debug("Setting up reaction solver...")
         self._reaction = ReactionSolver.for_all_species(
             self.species,
             self._rd_fes,
