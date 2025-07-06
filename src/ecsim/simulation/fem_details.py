@@ -187,9 +187,8 @@ class ReactionSolver:
 
     def __init__(self, source_term, derivative, lumped_mass_inv, dt):
         self._source_term = source_term
-        self._lumped_mass_inv = lumped_mass_inv
+        self._dt_m_inv = dt * lumped_mass_inv
         self._derivative = derivative
-        self._dt = dt
 
     @classmethod
     def for_all_species(
@@ -275,9 +274,8 @@ class ReactionSolver:
         cumulative_update: np.ndarray,
     ) -> np.ndarray:
         """Apply one step of a diagonal Newton method to the concentration vector."""
-        dt_m_inv = self._dt * self._lumped_mass_inv
-        jac = 1 - dt_m_inv * self._derivative.vec.FV().NumPy()
-        res = dt_m_inv * self._source_term.vec.FV().NumPy() - cumulative_update
+        jac = 1 - self._dt_m_inv * self._derivative.vec.FV().NumPy()
+        res = self._dt_m_inv * self._source_term.vec.FV().NumPy() - cumulative_update
         delta = res / jac
         c.vec.FV().NumPy()[:] += delta
 

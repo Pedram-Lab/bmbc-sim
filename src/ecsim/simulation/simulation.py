@@ -150,7 +150,9 @@ class Simulation:
                 if self.electrostatics:
                     self._pnp.step()
 
-                # 2. Independently update the concentrations via reaction kinetics (explicit)
+                # 2. Independently apply reaction kinetics using diagonal newton (implicit)
+                # TODO: Consider full Newton step or mass projection if
+                # stability / mass conservation is an issue
                 is_converged = False
                 r_updates.fill(0.0)
 
