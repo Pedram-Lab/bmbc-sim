@@ -5,6 +5,7 @@ from datetime import datetime
 import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
+import numpy as np
 
 from ecsim.logging import logger
 from ecsim.simulation.result_io import Recorder
@@ -94,6 +95,7 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
+            newton_tol: float = 1e-8,
     ) -> None:
         """Run the simulation until a given end time.
 
@@ -105,6 +107,8 @@ class Simulation:
         :param n_threads: The number of threads to use for the simulation.
         :param chemical_substeps: The number of substeps to use for the chemical
             reactions within each time step.
+        :param newton_tol: The tolerance for the Newton solver used in the reaction
+            kinetics.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -139,6 +143,7 @@ class Simulation:
             )
 
             t = start_time.copy()
+            r_updates = np.empty((len(self.species), self._rd_fes.ndof), dtype=np.float64)
             for _ in trange(n_steps):
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
@@ -146,13 +151,19 @@ class Simulation:
                     self._pnp.step()
 
                 # 2. Independently update the concentrations via reaction kinetics (explicit)
-                # Compute the reaction updates for all species
-                residual = {
-                    s: self._reaction[s].compute_residual() for s in self._concentrations
-                }
-                # Apply the updates to the concentrations
-                for species, c in self._concentrations.items():
-                    self._reaction[species].step(c, residual[species])
+                is_converged = False
+                r_updates.fill(0.0)
+
+                while not is_converged:
+                    is_converged = True
+                    # Compute the reaction updates for all species
+                    for s in self.species:
+                        self._reaction[s].assemble_linearization()
+                    # Apply the updates to the concentrations, stop when the updates are small
+                    for i, (species, c) in enumerate(self._concentrations.items()):
+                        delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
+                        r_updates[i, :] += delta
+                        is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
 
                 # 3. Diffuse and transport the concentrations (implicit)
                 # Update all transport mechanisms to the current simulation time

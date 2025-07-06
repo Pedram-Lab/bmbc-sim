@@ -1,6 +1,7 @@
 import ngsolve as ngs
 import astropy.units as u
 import astropy.constants as const
+import numpy as np
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -184,9 +185,10 @@ class DiffusionSolver:
 class ReactionSolver:
     """FEM solver for the reaction terms."""
 
-    def __init__(self, source_term, lumped_mass_inv, dt):
+    def __init__(self, source_term, derivative, lumped_mass_inv, dt):
         self._source_term = source_term
-        self.lumped_mass_inv = lumped_mass_inv
+        self._lumped_mass_inv = lumped_mass_inv
+        self._derivative = derivative
         self._dt = dt
 
     @classmethod
@@ -200,6 +202,7 @@ class ReactionSolver:
     ):
         """Set up the solver for all given species."""
         source_terms = {s: ngs.LinearForm(fes) for s in species}
+        derivatives = {s: ngs.LinearForm(fes) for s in species}
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
 
@@ -209,7 +212,7 @@ class ReactionSolver:
         # To decouple the reactions, use mass lumping. NGSolve does not account for the
         # volume of the reference element in the integration rule, so we need to adjust
         # the usual [1/4, 1/4, 1/4, 1/4] weights by the volume of the 3D unit simplex.
-        mass_lumping_rule = {
+        mass_lumping = {
             ngs.ET.TET: ngs.IntegrationRule(
                 points=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
                 weights=[1 / 24, 1 / 24, 1 / 24, 1 / 24],
@@ -242,7 +245,9 @@ class ReactionSolver:
                     cf[product] += -reverse_reaction
 
             for s in species:
-                source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping_rule)
+                c = concentrations[s]
+                source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
+                derivatives[s] += (cf[s].Diff(c) * test).Compile() * ngs.dx(intrules=mass_lumping)
 
         # Create a lumped mass matrix for decoupled time stepping
         trial_and_test = tuple(zip(*fes.TnT()))
@@ -257,16 +262,26 @@ class ReactionSolver:
         w.data = mass.mat * v
         lumped_mass_inv = 1 / w.FV().NumPy()
 
-        return {s: cls(source_terms[s], lumped_mass_inv, dt) for s in species}
+        return {s: cls(source_terms[s], derivatives[s], lumped_mass_inv, dt) for s in species}
 
-    def compute_residual(self) -> ngs.BaseVector:
-        """Compute the update vector for the reaction terms."""
+    def assemble_linearization(self) -> ngs.BaseVector:
+        """Assemble function value and derivative from the current state."""
         self._source_term.Assemble()
-        return self._source_term.vec
+        self._derivative.Assemble()
 
-    def step(self, c, update: ngs.BaseVector):
-        """Apply the update to the concentration vector."""
-        c.vec.FV().NumPy()[:] += self._dt * (self.lumped_mass_inv * update.FV().NumPy())
+    def diagonal_newton_step(
+        self,
+        c: ngs.GridFunction,
+        cumulative_update: np.ndarray,
+    ) -> np.ndarray:
+        """Apply one step of a diagonal Newton method to the concentration vector."""
+        dt_m_inv = self._dt * self._lumped_mass_inv
+        jac = 1 - dt_m_inv * self._derivative.vec.FV().NumPy()
+        res = dt_m_inv * self._source_term.vec.FV().NumPy() - cumulative_update
+        delta = res / jac
+        c.vec.FV().NumPy()[:] += delta
+
+        return delta
 
 
 class PnpSolver:
