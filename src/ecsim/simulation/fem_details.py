@@ -224,27 +224,31 @@ class ReactionSolver:
             test = test_functions[i]
 
             cf = {s: ngs.CoefficientFunction(0.0) for s in species}
+            d_cf = {s: ngs.CoefficientFunction(0.0) for s in species}
             for (reactants, products), (kf, kr) in coefficients.reactions.items():
                 forward_reaction = kf
                 for reactant in reactants:
                     forward_reaction *= concentrations[reactant].components[i]
                 for reactant in reactants:
                     cf[reactant] += -forward_reaction
+                    d_cf[reactant] += -forward_reaction.Diff(concentrations[reactant].components[i])
                 for product in products:
                     cf[product] += forward_reaction
+                    d_cf[product] += forward_reaction.Diff(concentrations[product].components[i])
 
                 reverse_reaction = kr
                 for product in products:
                     reverse_reaction *= concentrations[product].components[i]
                 for reactant in reactants:
                     cf[reactant] += reverse_reaction
+                    d_cf[reactant] += reverse_reaction.Diff(concentrations[reactant].components[i])
                 for product in products:
                     cf[product] += -reverse_reaction
+                    d_cf[product] += -reverse_reaction.Diff(concentrations[product].components[i])
 
             for s in species:
-                c = concentrations[s]
                 source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
-                derivatives[s] += (cf[s].Diff(c) * test).Compile() * ngs.dx(intrules=mass_lumping)
+                derivatives[s] += (d_cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
 
         # Create a lumped mass matrix for decoupled time stepping
         trial_and_test = tuple(zip(*fes.TnT()))
