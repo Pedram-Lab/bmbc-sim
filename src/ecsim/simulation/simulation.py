@@ -96,6 +96,7 @@ class Simulation:
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
             newton_tol: float = 1e-8,
+            max_newton_iterations: int = 20,
     ) -> None:
         """Run the simulation until a given end time.
 
@@ -109,6 +110,8 @@ class Simulation:
             reactions within each time step.
         :param newton_tol: The tolerance for the Newton solver used in the reaction
             kinetics.
+        :param max_newton_iterations: The maximum number of iterations for the Newton
+            solver used in the reaction kinetics.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -156,8 +159,10 @@ class Simulation:
                 is_converged = False
                 r_updates.fill(0.0)
 
-                while not is_converged:
+                iteration = 0
+                while not is_converged and iteration < max_newton_iterations:
                     is_converged = True
+                    iteration += 1
                     # Compute the reaction updates for all species
                     for s in self.species:
                         self._reaction[s].assemble_linearization()
@@ -166,6 +171,13 @@ class Simulation:
                         delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
                         r_updates[i, :] += delta
                         is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
+
+                if not is_converged:
+                    logger.warning(
+                        "Reaction kinetics did not converge after %d Newton iterations. "
+                        "Consider increasing the number of iterations or decreasing the time step.",
+                        max_newton_iterations,
+                    )
 
                 # 3. Diffuse and transport the concentrations (implicit)
                 # Update all transport mechanisms to the current simulation time
