@@ -5,6 +5,7 @@ from datetime import datetime
 import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
+import numpy as np
 
 from ecsim.logging import logger
 from ecsim.simulation.result_io import Recorder
@@ -12,7 +13,7 @@ from ecsim.simulation.geometry.compartment import Compartment
 from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from ecsim.units import to_simulation_units
 from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.simulation.fem_details import FemLhs, FemRhs, PnpPotential
+from ecsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
 
 
 class Simulation:
@@ -57,9 +58,9 @@ class Simulation:
         self ._rd_fes: ngs.FESpace = None
         self ._el_fes: ngs.FESpace = None
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
-        self._potential: PnpPotential = None
-        self._lhs: dict[ChemicalSpecies, FemLhs] = {}
-        self._rhs: dict[ChemicalSpecies, FemRhs] = {}
+        self._pnp: PnpSolver = None
+        self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
+        self._reaction: dict[ChemicalSpecies, ReactionSolver] = {}
 
 
     def add_species(
@@ -94,7 +95,8 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
-            chemical_substeps: int = 1,
+            newton_tol: float = 1e-8,
+            max_newton_iterations: int = 20,
     ) -> None:
         """Run the simulation until a given end time.
 
@@ -106,6 +108,10 @@ class Simulation:
         :param n_threads: The number of threads to use for the simulation.
         :param chemical_substeps: The number of substeps to use for the chemical
             reactions within each time step.
+        :param newton_tol: The tolerance for the Newton solver used in the reaction
+            kinetics.
+        :param max_newton_iterations: The maximum number of iterations for the Newton
+            solver used in the reaction kinetics.
         :raises ValueError: If the end time is not greater than the start time.
         """
         if end_time <= start_time:
@@ -135,48 +141,62 @@ class Simulation:
                 mesh=self.simulation_geometry.mesh,
                 compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
-                potential=self._potential.potential if self.electrostatics else None,
+                potential=self._pnp.potential if self.electrostatics else None,
                 start_time=start_time.copy()
             )
 
             t = start_time.copy()
-            residual = {}
+            r_updates = np.empty((len(self.species), self._rd_fes.ndof), dtype=np.float64)
             for _ in trange(n_steps):
-                # Update the concentrations via IMEX approach:
-                # Reaction + some transport (explicit)
-                self._update_transport(t)
+                # Update the concentrations via a first-order splitting approach:
+                # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
-                    self._potential.update()
-                for _ in range(chemical_substeps):
-                    rhs = {s: self._rhs[s].assemble() for s in self._concentrations}
-                    tau = dt / chemical_substeps
-                    for species, c in self._concentrations.items():
-                        m_inv = self._lhs[species].lumped_mass_inv
-                        c.vec.FV().NumPy()[:] += tau * (m_inv * rhs[species].vec.FV().NumPy())
-                for species, c in self._concentrations.items():
-                    lhs = self._lhs[species].assemble()
-                    residual[species] = -dt * (lhs.stiffness * c.vec)
+                    self._pnp.step()
 
-                # Diffusion + some transport (implicit)
+                # 2. Independently apply reaction kinetics using diagonal newton (implicit)
+                # TODO: Consider full Newton step or mass projection if
+                # stability / mass conservation is an issue
+                is_converged = False
+                r_updates.fill(0.0)
+
+                iteration = 0
+                while not is_converged and iteration < max_newton_iterations:
+                    is_converged = True
+                    iteration += 1
+                    # Compute the reaction updates for all species
+                    for s in self.species:
+                        self._reaction[s].assemble_linearization()
+                    # Apply the updates to the concentrations, stop when the updates are small
+                    for i, (species, c) in enumerate(self._concentrations.items()):
+                        delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
+                        r_updates[i, :] += delta
+                        is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
+
+                if not is_converged:
+                    logger.warning(
+                        "Reaction kinetics did not converge after %d Newton iterations. "
+                        "Consider increasing the number of iterations or decreasing the time step.",
+                        max_newton_iterations,
+                    )
+
+                # 3. Diffuse and transport the concentrations (implicit)
+                # Update all transport mechanisms to the current simulation time
+                for membrane in self.simulation_geometry.membranes.values():
+                    for _, _, _, transport in membrane.get_transport():
+                        transport.update_flux(t)
+                # Compute the residual for each species given the current concentrations
+                residual = {
+                    species: self._diffusion[species].compute_residual(c)
+                    for species, c in self._concentrations.items()
+                }
+                # Update each species by solving the implicit diffusion equation
                 for species, c in self._concentrations.items():
-                    lhs = self._lhs[species]
-                    c.vec.data += lhs.time_stepping * residual[species]
+                    self._diffusion[species].step(c, residual[species])
 
                 t += time_step
                 recorder.record(current_time=t)
 
             recorder.finalize(end_time=t)
-
-
-    def _update_transport(self, t: u.Quantity) -> None:
-        """Update the transport mechanisms based on the current time.
-
-        :param t: The current time in the simulation.
-        """
-        # Update all transport mechanisms
-        for membrane in self.simulation_geometry.membranes.values():
-            for _, _, _, transport in membrane.get_transport():
-                transport.update_flux(t)
 
 
     def _setup(self, dt) -> None:
@@ -200,7 +220,7 @@ class Simulation:
                     self._rd_fes.ndof)
 
         if self.electrostatics:
-            self._el_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments] 
+            self._el_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments]
                                         + [ngs.FESpace("number", mesh) for _ in compartments])
             logger.info("Total number of degrees of freedom for electrostatics: %d.",
                         self._el_fes.ndof)
@@ -218,27 +238,28 @@ class Simulation:
                     c.Set(coefficients.initial_conditions[species])
 
         if self.electrostatics:
-            logger.debug("Setting up electrostatic finite element matrices...")
-            self._potential = PnpPotential.for_all_species(
+            logger.debug("Setting up electrostatics solver...")
+            self._pnp = PnpSolver.for_all_species(
                 self.species,
                 self._el_fes,
                 self.simulation_geometry,
                 self._concentrations,
             )
 
-        logger.debug("Setting up finite element matrices...")
-        self._lhs = FemLhs.for_all_species(
+        logger.debug("Setting up diffusion solver...")
+        self._diffusion = DiffusionSolver.for_all_species(
             self.species,
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
-            self._potential,
-            dt
+            self._pnp,
+            dt,
         )
-        logger.debug("Setting up finite element right-hand sides...")
-        self._rhs = FemRhs.for_all_species(
+        logger.debug("Setting up reaction solver...")
+        self._reaction = ReactionSolver.for_all_species(
             self.species,
             self._rd_fes,
             self.simulation_geometry,
             self._concentrations,
+            dt,
         )

@@ -7,16 +7,16 @@ from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
 
 
-class FemLhs:
-    """Left-hand side of the finite element equations for a single species."""
+class DiffusionSolver:
+    """FEM solver for diffusion and transport equations."""
 
-    def __init__(self, a, transport, m_star, pre, lumped_mass_inv, dt):
+    def __init__(self, a, transport, m_star, pre, source_term, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
         self._pre = pre
+        self._source_term = source_term
         self._dt = dt
-        self._lumped_mass_inv = lumped_mass_inv
 
 
     @classmethod
@@ -28,21 +28,14 @@ class FemLhs:
             concentrations,
             potential,
             dt
-    ) -> dict[ChemicalSpecies, 'FemLhs']:
-        """Set up the left-hand side of the finite element equations for all
-        species.
-        """
-        species_to_lhs = {}
+    ) -> dict[ChemicalSpecies, 'DiffusionSolver']:
+        """Set up the solver for all given species."""
+        species_to_solver = {}
         for s in species:
-            species_to_lhs[s] = cls._for_single_species(
-                s,
-                fes,
-                simulation_geometry,
-                concentrations[s],
-                potential,
-                dt
+            species_to_solver[s] = cls._for_single_species(
+                s, fes, simulation_geometry, concentrations[s], potential, dt
             )
-        return species_to_lhs
+        return species_to_solver
 
 
     @classmethod
@@ -55,19 +48,19 @@ class FemLhs:
             potential,
             dt
     ):
-        """Set up the left-hand side of the finite element equations for a given species.
-        """
+        """Set up the solver for a single given species."""
         compartments = simulation_geometry.compartments.values()
         mass = ngs.BilinearForm(fes, check_unused=False)
         stiffness = ngs.BilinearForm(fes, check_unused=False)
-        trial_and_test = list(zip(*fes.TnT()))
+        trial_and_test = tuple(zip(*fes.TnT()))
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
+        source_term = ngs.LinearForm(fes)
 
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
             trial, test = trial_and_test[i]
 
-            # Set up stiffness matrix (diffusion terms)
+            # Set up diffusion stiffness matrix
             if species in coefficients.diffusion and \
                     (diffusivity := coefficients.diffusion[species]) is not None:
                 stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
@@ -82,14 +75,14 @@ class FemLhs:
                 if s != species:
                     continue
 
-                def select(compartment, concentration, tnt):
+                def select_i(compartment, concentration, tnt):
                     if compartment is None:
                         return None, None, None
                     idx = compartment_to_index[compartment]
                     return concentration.components[idx], *tnt[idx]
 
-                src_c, src_trial, src_test = select(source, concentration, trial_and_test)
-                trg_c, trg_trial, trg_test = select(target, concentration, trial_and_test)
+                src_c, src_trial, src_test = select_i(source, concentration, trial_and_test)
+                trg_c, trg_trial, trg_test = select_i(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
                 flux = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
@@ -102,6 +95,33 @@ class FemLhs:
                         transport_term += -flux_density * src_test * ds
                     if trg_trial is not None:
                         transport_term += flux_density * trg_test * ds
+
+        # Handle explicit transport terms
+        for membrane in simulation_geometry.membranes.values():
+            for s, source, target, transport in membrane.get_transport():
+                if s != species:
+                    continue
+
+                def select_e(compartment, concentration, tnt):
+                    if compartment is None:
+                        return None, None
+                    idx = compartment_to_index[compartment]
+                    return concentration.components[idx], tnt[idx][1]
+
+                src_c, src_test = select_e(source, concentration, trial_and_test)
+                trg_c, trg_test = select_e(target, concentration, trial_and_test)
+
+                # Calculate the flux density through the membrane
+                flux = transport.flux_rhs(src_c, trg_c)
+
+                if flux is not None:
+                    area = to_simulation_units(membrane.area, 'area')
+                    flux_density = (flux / area).Compile()
+                    ds = ngs.ds(membrane.name)
+                    if src_test is not None:
+                        source_term += -flux_density * src_test * ds
+                    if trg_test is not None:
+                        source_term += flux_density * trg_test * ds
 
         # Handle potential terms
         if potential is not None and species.valence != 0:
@@ -126,13 +146,6 @@ class FemLhs:
         mass.Assemble()
         stiffness.Assemble()
 
-        # Create a lumped mass matrix for chemical reactions
-        v = mass.mat.CreateVector()
-        w = mass.mat.CreateVector()
-        v.FV().NumPy()[:] = 1
-        w.data = mass.mat * v
-        lumped_mass_inv = 1 / w.FV().NumPy()
-
         # Invert the matrix for the implicit Euler integrator
         # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
@@ -145,43 +158,37 @@ class FemLhs:
             transport_term,
             mass,
             smoother,
-            lumped_mass_inv,
+            source_term,
             dt
         )
 
-
-    def assemble(self) -> 'FemLhs':
-        """Update the transport matrix."""
+    def compute_residual(self, c: ngs.GridFunction) -> ngs.la.DynamicVectorExpression:
+        """Compute the residual vector for the implicit Euler integrator."""
+        # Update the transport terms (implicit and explicit)
         self._transport.Assemble()
-        return self
+        self._source_term.Assemble()
+        stiffness = self._a - self._transport.mat
+
+        return self._dt * (self._source_term.vec - stiffness * c.vec)
+
+    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression):
+        """Apply the implicit Euler step to the concentration vector."""
+        # Scale the transport terms
+        scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
+        scaled_transport.AsVector().FV().NumPy()[:] *= self._dt
+        mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
+
+        # Update the concentration
+        c.vec.data += mstar_inv * res
 
 
-    @property
-    def stiffness(self) -> ngs.BaseMatrix:
-        """The stiffness matrix."""
-        return self._a - self._transport.mat
+class ReactionSolver:
+    """FEM solver for the reaction terms."""
 
-
-    @property
-    def lumped_mass_inv(self) -> np.ndarray:
-        """The inverse of the lumped mass matrix."""
-        return self._lumped_mass_inv
-
-
-    @property
-    def time_stepping(self) -> ngs.BaseMatrix:
-        """The matrix for the implicit Euler rule."""
-        scaled_transport = self._transport.mat.CreateMatrix()
-        scaled_transport.AsVector().data = self._dt * self._transport.mat.AsVector()
-        scaled_transport = scaled_transport.DeleteZeroElements(1e-10)
-        return ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
-
-
-class FemRhs:
-    """Right-hand side of the finite element equations for a single species."""
-
-    def __init__(self, source_term):
+    def __init__(self, source_term, derivative, lumped_mass_inv, dt):
         self._source_term = source_term
+        self._dt_m_inv = dt * lumped_mass_inv
+        self._derivative = derivative
 
     @classmethod
     def for_all_species(
@@ -190,87 +197,95 @@ class FemRhs:
             fes,
             simulation_geometry,
             concentrations,
+            dt
     ):
-        """Set up the right-hand side of the finite element equations for a given species.
-        """
+        """Set up the solver for all given species."""
         source_terms = {s: ngs.LinearForm(fes) for s in species}
+        derivatives = {s: ngs.LinearForm(fes) for s in species}
         test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
-        compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
-        mass_lumping_rule = {
+
+        # Make the concentrations variables so one can differentiate in their direction
+        concentrations = {s: concentrations[s].MakeVariable() for s in species}
+
+        # To decouple the reactions, use mass lumping. NGSolve does not account for the
+        # volume of the reference element in the integration rule, so we need to adjust
+        # the usual [1/4, 1/4, 1/4, 1/4] weights by the volume of the 3D unit simplex.
+        mass_lumping = {
             ngs.ET.TET: ngs.IntegrationRule(
                 points=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
-                weights=[1 / 4, 1 / 4, 1 / 4, 1 / 4],
+                weights=[1 / 24, 1 / 24, 1 / 24, 1 / 24],
             )
         }
 
-        # Handle reaction terms
+        # Set up the reaction terms for each compartment and species
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
             test = test_functions[i]
 
+            cf = {s: ngs.CoefficientFunction(0.0) for s in species}
+            d_cf = {s: ngs.CoefficientFunction(0.0) for s in species}
             for (reactants, products), (kf, kr) in coefficients.reactions.items():
-                all_reactants = ngs.CoefficientFunction(1.0)
+                forward_reaction = kf
                 for reactant in reactants:
-                    all_reactants *= concentrations[reactant].components[i]
-                forward_reaction = (kf * all_reactants * test).Compile()
+                    forward_reaction *= concentrations[reactant].components[i]
                 for reactant in reactants:
-                    source_terms[reactant] += -forward_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[reactant] += -forward_reaction
+                    d_cf[reactant] += -forward_reaction.Diff(concentrations[reactant].components[i])
                 for product in products:
-                    source_terms[product] += forward_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[product] += forward_reaction
+                    d_cf[product] += forward_reaction.Diff(concentrations[product].components[i])
 
-                all_products = ngs.CoefficientFunction(1.0)
+                reverse_reaction = kr
                 for product in products:
-                    all_products *= concentrations[product].components[i]
-                reverse_reaction = (kr * all_products * test).Compile()
+                    reverse_reaction *= concentrations[product].components[i]
                 for reactant in reactants:
-                    source_terms[reactant] += reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[reactant] += reverse_reaction
+                    d_cf[reactant] += reverse_reaction.Diff(concentrations[reactant].components[i])
                 for product in products:
-                    source_terms[product] += -reverse_reaction * ngs.dx(intrules=mass_lumping_rule)
+                    cf[product] += -reverse_reaction
+                    d_cf[product] += -reverse_reaction.Diff(concentrations[product].components[i])
 
-        # Handle explicit transport terms
-        for membrane in simulation_geometry.membranes.values():
-            for s, source, target, transport in membrane.get_transport():
-                concentration = concentrations[s]
+            for s in species:
+                source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
+                derivatives[s] += (d_cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
 
-                def select(compartment, concentration, test):
-                    if compartment is None:
-                        return None, None
-                    idx = compartment_to_index[compartment]
-                    return concentration.components[idx], test[idx]
+        # Create a lumped mass matrix for decoupled time stepping
+        trial_and_test = tuple(zip(*fes.TnT()))
+        mass = ngs.BilinearForm(fes, check_unused=False)
+        for trial, test in trial_and_test:
+            mass += trial * test * ngs.dx
+        mass.Assemble()
 
-                src_c, src_test = select(source, concentration, test_functions)
-                trg_c, trg_test = select(target, concentration, test_functions)
+        v = mass.mat.CreateVector()
+        w = mass.mat.CreateVector()
+        v.FV().NumPy()[:] = 1
+        w.data = mass.mat * v
+        lumped_mass_inv = 1 / w.FV().NumPy()
 
-                # Calculate the flux density through the membrane
-                flux = transport.flux_rhs(src_c, trg_c)
+        return {s: cls(source_terms[s], derivatives[s], lumped_mass_inv, dt) for s in species}
 
-                if flux is not None:
-                    area = to_simulation_units(membrane.area, 'area')
-                    flux_density = (flux / area).Compile()
-                    ds = ngs.ds(membrane.name)
-                    if src_test is not None:
-                        source_terms[s] += -flux_density * src_test * ds
-                    if trg_test is not None:
-                        source_terms[s] += flux_density * trg_test * ds
-
-        return {s: cls(source_terms[s]) for s in species}
-
-
-    def assemble(self) -> 'FemRhs':
-        """Update the source term."""
+    def assemble_linearization(self) -> ngs.BaseVector:
+        """Assemble function value and derivative from the current state."""
         self._source_term.Assemble()
-        return self
+        self._derivative.Assemble()
+
+    def diagonal_newton_step(
+        self,
+        c: ngs.GridFunction,
+        cumulative_update: np.ndarray,
+    ) -> np.ndarray:
+        """Apply one step of a diagonal Newton method to the concentration vector."""
+        jac = 1 - self._dt_m_inv * self._derivative.vec.FV().NumPy()
+        res = self._dt_m_inv * self._source_term.vec.FV().NumPy() - cumulative_update
+        delta = res / jac
+        c.vec.FV().NumPy()[:] += delta
+
+        return delta
 
 
-    @property
-    def vec(self) -> ngs.BaseVector:
-        """The vector of the right-hand side."""
-        return self._source_term.vec
-
-
-class PnpPotential:
-    """FEM structures for Poisson-Nernst-Planck equations."""
+class PnpSolver:
+    """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
     def __init__(self, stiffness, inverse, source_term, potential):
         self._stiffness = stiffness
@@ -286,8 +301,7 @@ class PnpPotential:
             simulation_geometry,
             concentrations,
     ):
-        """Set up the right-hand side of the finite element equations for a given species.
-        """
+        """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
 
@@ -328,7 +342,7 @@ class PnpPotential:
         return cls(a, inverse, f, potential)
 
 
-    def update(self):
+    def step(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
         self.potential.vec.data = self._inverse * self._source_term.vec
