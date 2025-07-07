@@ -225,19 +225,17 @@ class ReactionSolver:
 
             cf = {s: ngs.CoefficientFunction(0.0) for s in species}
             for (reactants, products), (kf, kr) in coefficients.reactions.items():
-                all_reactants = ngs.CoefficientFunction(1.0)
+                forward_reaction = kf
                 for reactant in reactants:
-                    all_reactants *= concentrations[reactant].components[i]
-                forward_reaction = kf * all_reactants
+                    forward_reaction *= concentrations[reactant].components[i]
                 for reactant in reactants:
                     cf[reactant] += -forward_reaction
                 for product in products:
                     cf[product] += forward_reaction
 
-                all_products = ngs.CoefficientFunction(1.0)
+                reverse_reaction = kr
                 for product in products:
-                    all_products *= concentrations[product].components[i]
-                reverse_reaction = kr * all_products
+                    reverse_reaction *= concentrations[product].components[i]
                 for reactant in reactants:
                     cf[reactant] += reverse_reaction
                 for product in products:
