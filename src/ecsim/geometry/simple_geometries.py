@@ -71,19 +71,19 @@ def create_ca_depletion_mesh(
     return Mesh(geo.GenerateMesh(maxh=mesh_size))
 
 
-def create_dish_geometry(
+def create_cube_geometry(
         *,
-        dish_height: Quantity,
+        cube_height: Quantity,
         slice_width: Quantity,
         slice_depth: Quantity,
-        mesh_size: Quantity,
+        mesh_size: Quantity, 
         substrate_height: Quantity = None
 ) -> Mesh:
     """Create a simple columnar geometry with given sidelength and height
-    represeting a slice in the middle of a dish. Optionally, a substrate can be
-    added as a region at the bottom of the dish.
+    represeting a slice in the middle of a cube. Optionally, a substrate can be
+    added as a region at the bottom of the cube.
 
-    :param dish_height: Height of the dish.
+    :param cube_height: Height of the cube.
     :param slice_width: Width of the slice.
     :param slice_depth: Depth of the slice (this controls how fast species
         can reach the boundary and thus be removed from the domain).
@@ -91,27 +91,27 @@ def create_dish_geometry(
     :param substrate_height: Height of the substrate (can be None).
     :return: Mesh of the geometry.
     """
-    h = to_simulation_units(dish_height, 'length')
+    h = to_simulation_units(cube_height, 'length')
     sx = to_simulation_units(slice_width, 'length')
     sy = to_simulation_units(slice_depth, 'length')
 
-    dish = occ.Box((-sx, -sy, 0), (sx, sy, h))
-    dish.mat("dish:free")
+    cube = occ.Box((-sx, -sy, 0), (sx, sy, h))
+    cube.mat("cube:top")
     for i in [0, 1, 4, 5]:
-        dish.faces[i].bc("reflective")
-    dish.faces[2].bc("side")
-    dish.faces[3].bc("side")
+        cube.faces[i].bc("reflective")
+    cube.faces[2].bc("side")
+    cube.faces[3].bc("side")
 
     if substrate_height is not None:
         sh = to_simulation_units(substrate_height, 'length')
         substrate = occ.Box((-2*sx, -2*sy, -sh), (2*sx, 2*sy, sh))
         substrate.faces[5].bc("interface")
-        substrate = dish * substrate
-        substrate.mat("dish:substrate")
+        substrate = cube * substrate
+        substrate.mat("cube:bottom")
         substrate.col = (1, 0, 0)
-        geo = occ.Glue([substrate, dish - substrate])
+        geo = occ.Glue([substrate, cube - substrate])
     else:
-        geo = dish
+        geo = cube
 
     geo = occ.OCCGeometry(geo)
     mesh_size = to_simulation_units(mesh_size, 'length')
