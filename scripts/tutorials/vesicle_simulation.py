@@ -1,8 +1,10 @@
+# %%
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull
 from scipy.optimize import minimize
 
+# %%
 # Simulation parameters
 NUM_VESICLES = 15  # Number of vesicles
 BOX_SIZE = 10  # Size of the cubic box
@@ -10,6 +12,7 @@ INITIAL_RADIUS = 1  # Initial radius of vesicles
 KAPPA = 1.0  # Bending rigidity
 L0 = 1.5  # Maximum link length
 
+# %%
 def generate_sphere(radius, num_points=50):
     """
     Function to generate a sphere using ConvexHull
@@ -27,6 +30,7 @@ def generate_sphere(radius, num_points=50):
     hull = ConvexHull(points)
     return points, hull
 
+# %%
 def curvature_energy(points, hull, kappa):
     """
     Function to calculate the curvature energy of a vesicle
@@ -55,6 +59,7 @@ def curvature_energy(points, hull, kappa):
     energy = kappa * np.sum((mean_curvatures**2) * areas)
     return energy
 
+# %%
 def penalty(points, hull, l0):
     """
     Tethering potential to prevent distances greater than l0
@@ -77,6 +82,7 @@ def penalty(points, hull, l0):
     # Return the total penalty
     return np.sum(penalties)
 
+# %%
 def minimize_vesicle_energy(vesicle, kappa, l0):
     """
     Function to minimize the total energy of a vesicle
@@ -95,6 +101,7 @@ def minimize_vesicle_energy(vesicle, kappa, l0):
     vesicle["hull"] = ConvexHull(vesicle["points"])
     return vesicle
 
+# %%
 def generate_initial_vesicles(num_vesicles, radius, box_size):
     """
     Generate initial vesicles
@@ -111,6 +118,7 @@ def generate_initial_vesicles(num_vesicles, radius, box_size):
         vesicles.append(vesicle)
     return vesicles
 
+# %%
 def plot_vesicles(vesicles):
     """
     Visualization of vesicles
@@ -138,12 +146,17 @@ def plot_vesicles(vesicles):
     ax.set_zlim([-BOX_SIZE / 2, BOX_SIZE / 2])
     plt.show()
 
+# %%
 # Main flow
 vesicles = generate_initial_vesicles(NUM_VESICLES, INITIAL_RADIUS, BOX_SIZE)
 
+# %%
 # Minimize energy for each vesicle
 for i, vesicle in enumerate(vesicles):
     print(f"Minimizing energy of vesicle {i + 1}...")
     vesicle = minimize_vesicle_energy(vesicle, KAPPA, L0)
 
+# %%
 plot_vesicles(vesicles)
+
+# %%

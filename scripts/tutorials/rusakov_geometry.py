@@ -80,3 +80,5 @@ geo = create_rusakov_geometry(
 Draw(geo, clipping=clipping_settings, settings=visualization_settings)
 
 # %%
+
+# %%
