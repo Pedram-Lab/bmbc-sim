@@ -5,7 +5,7 @@ It produces four plots showing the temporal evolution of chemical species concen
 2. **Plot 2**: Mobile buffer and mobile complex concentrations over time.
 3. **Plot 3**: Immobile buffer and immobile complex concentrations over time.
 4. **Plot 4**: All species combined in a single plot to compare their temporal profiles.
-# Optionally, the data can also be saved to .csv files.
+5. **Plot 5**: Potential over time. 
 """
 
 import xarray as xr
@@ -51,7 +51,6 @@ result_loader = ecsim.ResultLoader.find(
 
 # Compose file prefix
 file_prefix = f"{timestamp}_{simulation_name}"
-
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],
@@ -193,7 +192,7 @@ plt.savefig(f"{file_prefix}_all_species.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
-# Plot 4: Potential
+# Plot 5: Potential
 plt.rcParams['lines.linewidth'] = 2
 fig5, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax5, region in zip(axes, regions):
@@ -201,7 +200,7 @@ for ax5, region in zip(axes, regions):
     ax5.plot(
         potential.sel(region=region).time,
         potential.sel(region=region) / region_size,
-        label="Free Ca",
+        label="Potential",
     )
     ax5.set_ylabel("Potential")
     ax5.set_title(f"{region}")
