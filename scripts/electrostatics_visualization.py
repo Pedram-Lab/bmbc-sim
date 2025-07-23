@@ -52,14 +52,6 @@ result_loader = ecsim.ResultLoader.find(
 # Compose file prefix
 file_prefix = f"{timestamp}_{simulation_name}"
 
-# import xarray as xr
-# import matplotlib.pyplot as plt
-# import ecsim
-
-# result_loader = ecsim.ResultLoader.find(
-#     results_root="results",
-#     simulation_name="electrostatics",
-# )
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],
