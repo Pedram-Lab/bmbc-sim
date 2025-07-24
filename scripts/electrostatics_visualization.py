@@ -89,7 +89,7 @@ for ax, region in zip(axes, regions):
     ax.set_title(f"{region}")
     ax.set_xlabel("Time (ms)")
     ax.grid(True)
-    ax.set_ylim(0, 2)
+ #   ax.set_ylim(0, 2)
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
@@ -113,7 +113,7 @@ for ax2, region in zip(axes, regions):
     ax2.set_title(f"{region}")
     ax2.set_xlabel("Time (ms)")
     ax2.grid(True)
-    ax2.set_ylim(0, 2)
+ #   ax2.set_ylim(0, 2)
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
@@ -138,7 +138,7 @@ for ax3, region in zip(axes, regions):
     ax3.set_title(f"{region}")
     ax3.set_xlabel("Time (ms)")
     ax3.grid(True)
-    ax3.set_ylim(0, 2)
+#   ax3.set_ylim(0, 2)
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
@@ -182,7 +182,7 @@ for ax4, region in zip(axes, regions):
     ax4.set_title(f"{region}")
     ax4.set_xlabel("Time (ms)")
     ax4.grid(True)
-    ax4.set_ylim(0, 2)
+ #   ax4.set_ylim(0, 2)
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)

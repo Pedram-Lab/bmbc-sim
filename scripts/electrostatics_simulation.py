@@ -23,7 +23,7 @@ mesh = create_cube_geometry(
     cube_height=CUBE_HEIGHT,
     slice_width=SIDELENGTH,
     slice_depth=0.5 * u.um,
-    mesh_size=SIDELENGTH / 1,
+    mesh_size=SIDELENGTH / 20,
     substrate_height=SUBSTRATE_HEIGHT
 )
 Draw(mesh)
@@ -63,7 +63,7 @@ cube.initialize_species(mobile_buffer, {'top': mobile_total_buffer, 'bottom': mo
 # Run simulation
 simulation.run(
     end_time=4 * u.ms,
-    time_step=1 * u.ns,
+    time_step=1 * u.us,
     record_interval=100 * u.us,
     n_threads=4
 )
