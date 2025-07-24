@@ -1,4 +1,17 @@
-"""This script recreates the simulation of [Sala, Hernández-Cruz; 1990]."""
+"""
+This script simulates the mathematical model published by Sala, F. & Hernández-Cruz, A.
+"Calcium diffusion modeling in a spherical neuron. Relevance of buffering properties" (1990).
+
+The model describes calcium influx through voltage-gated calcium channels and leak channels
+into the cytosol, where it interacts with three buffers:
+
+* B1 - intrinsic natural buffers (mobile, fast, and low capacity)
+* B2 - mimics the properties of the endoplasmic reticulum (immobile, slow, and high capacity)
+* B3 - calcium sensor (mobile, fast, and high affinity)
+
+Calcium is removed from the cytosol via SERCA pumps and the sodium-calcium exchanger (NCX).
+"""
+
 import ngsolve as ngs
 from netgen import occ
 import astropy.units as u
@@ -35,30 +48,41 @@ ca_b2 = simulation.add_species('Ca_Buffer_2', valence=0)
 ca_b3 = simulation.add_species('Ca_Buffer_3', valence=0)
 
 # Initial conditions
-ca_0 = 0.05 * uM
-b1_0 = 100 * uM
-b2_0 = 600 * uM
-b3_0 = 100 * uM
-cell.initialize_species(ca, value=ca_0)
-cell.initialize_species(b1, value=b1_0)
-cell.initialize_species(b2, value=b2_0)
-cell.initialize_species(b3, value=b3_0)
 
-# Assume that the buffers are in equilibrium with the calcium initially
+ca_0 = 0.05 * uM
+
+b1_total = 100 * uM
+b2_total = 600 * uM
+b3_total = 100 * uM
+
 kd_b1 = 1 * uM
 kd_b2 = 0.4 * uM
 kd_b3 = 0.2 * uM
-ca_b1_0 = (ca_0 * b1_0) / (ca_0 + kd_b1)
-ca_b2_0 = (ca_0 * b2_0) / (ca_0 + kd_b2)
-ca_b3_0 = (ca_0 * b3_0) / (ca_0 + kd_b3)
+
+ca_b1_0 = (ca_0 * b1_total) / (ca_0 + kd_b1)
+ca_b2_0 = (ca_0 * b2_total) / (ca_0 + kd_b2)
+ca_b3_0 = (ca_0 * b3_total) / (ca_0 + kd_b3)
+
+b1_free = b1_total - ca_b1_0
+b2_free = b2_total - ca_b2_0
+b3_free = b3_total - ca_b3_0
+
+cell.initialize_species(ca, value=ca_0)
+
+cell.initialize_species(b1, value=b1_free)
+cell.initialize_species(b2, value=b2_free)
+cell.initialize_species(b3, value=b3_free)
+
 cell.initialize_species(ca_b1, value=ca_b1_0)
 cell.initialize_species(ca_b2, value=ca_b2_0)
 cell.initialize_species(ca_b3, value=ca_b3_0)
 
 # Add diffusion to the species (B2 is not diffusing)
 cell.add_diffusion(species=ca, diffusivity=6e-6 * u.cm**2 / u.s)
+
 cell.add_diffusion(species=b1, diffusivity=0.5e-6 * u.cm**2 / u.s)
 cell.add_diffusion(species=ca_b1, diffusivity=0.5e-6 * u.cm**2 / u.s)
+
 cell.add_diffusion(species=b3, diffusivity=2.5e-6 * u.cm**2 / u.s)
 cell.add_diffusion(species=ca_b3, diffusivity=2.5e-6 * u.cm**2 / u.s)
 
@@ -122,4 +146,4 @@ membrane.add_transport(
 )
 
 # Run the simulation
-simulation.run(end_time=2 * u.s, time_step=0.01 * u.ms, record_interval=100 * u.ms)
+simulation.run(end_time=2 * u.s, time_step=0.1 * u.ms, record_interval=1 * u.ms)
