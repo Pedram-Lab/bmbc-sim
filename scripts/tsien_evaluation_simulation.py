@@ -1,55 +1,77 @@
 import os
-
 import pyvista as pv
 import xarray as xr
 import matplotlib.pyplot as plt
+import numpy as np
+import datetime  
 
-from ecsim import find_latest_results
+from ecsim.simulation.result_io.result_loader import ResultLoader
 
-# Find the latest folder with test data
-latest_folder = find_latest_results("tsien", "results")
+custom_theme = {
+    'font.size': 9,
+    'axes.titlesize': 9,
+    'axes.labelsize': 9,
+    'legend.fontsize': 9,
+    'legend.edgecolor': 'black',
+    'legend.frameon': False,
+    'lines.linewidth': 0.5,
+    'font.family': ['Arial', 'sans-serif'],
+    'axes.spines.top': True,
+    'axes.spines.right': True,
+    'axes.spines.left': True,
+    'axes.spines.bottom': True,
+    'axes.linewidth': 0.5,
+    'xtick.major.width': 0.5,
+    'ytick.major.width': 0.5,
+    'xtick.labelsize': 9,
+    'ytick.labelsize': 9
+}
 
-### Full snapshots
-# snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
-# data = pv.read(snapshot_file)
-# data.plot(scalars='Ca', show_edges=True)
+# Apply custom theme
+for key, value in custom_theme.items():
+    plt.rcParams[key] = value
+
+fig_width = 5.36  # inches
+fig_height = 3.27  # inches
+
+# Helper function to load radial concentration profile
+def get_radial_profile(result_path, species_of_interest="Ca", n_points=500):
+    loader = ResultLoader(result_path)
+    step = len(loader) - 1
+    distances = np.linspace(0.0, 0.6, n_points)
+    points = [(0, d, 2.4) for d in distances]
+    ds = loader.load_point_values(step, points)
+
+    if species_of_interest not in ds.coords['species']:
+        raise ValueError(f"Species '{species_of_interest}' not found in {result_path}")
+    values = ds.sel(species=species_of_interest).values.flatten()
+    return distances, values, ds.coords['time'].values[0]  # also returns the time
 
 
-### Compartment substances
-zarr_path = os.path.join(latest_folder, "substance_data.zarr")
-point_data = xr.open_zarr(zarr_path)
+# === Load simulation data ===
+#path1 = "results/tsien_bapta_2025-07-16-104253"
+#path2 = "results/tsien_egta_40_2025-07-16-150535"
+path3 = "results/tsien_egta_2025-07-24-070926"
 
-species_list = point_data.coords['species'].values
-compartment = point_data.coords['compartment'].values[0]
-volume = point_data.attrs['compartment_volume'][0]
+#dist1, values1, time1 = get_radial_profile(path1)
+#dist2, values2, time2 = get_radial_profile(path2)
+dist3, values3, time2 = get_radial_profile(path3)
 
-plt.figure()
-for species in species_list:
-    ts = point_data.sel(species=species, compartment=compartment)
-    ts_array = ts.to_array().values / volume
-    plt.semilogy(ts['time'].values, ts_array.T, label=species)
-plt.xlabel("Time [ms]")
-plt.ylabel("Average concentration [mM]")
-plt.title("Total substance in cell")
+# === Plot ===
+plt.figure(figsize=(fig_width, fig_height))
+#plt.plot(dist1 * 1000, values1, label=f"BAPTA 1 mM", linestyle='--')
+#plt.plot(dist2 * 1000, values2, label=f"EGTA 40 mM", linestyle='--')
+plt.plot(dist3 * 1000, values3, label=f"EGTA 4.5 mM", linestyle='--')
+plt.xlabel("Distance from the channel cluster (nm)")
+plt.ylabel(r"$[\mathrm{Ca}^{2+}]_i$ (mM)")
+plt.title("Tsien simulation, evaluation point (0, (0-0.6), 2.4)")
+plt.grid(True)
 plt.legend()
-plt.show()
+plt.tight_layout()
 
-### Point values
-zarr_path = os.path.join(latest_folder, "point_data_0.zarr")
-point_data = xr.open_zarr(zarr_path)
 
-species_list = point_data.coords['species'].values
-time = point_data.coords['time'].values
-points = point_data.coords['point'].values
-x_coords = [xyz[0] for xyz in point_data.attrs['point_coordinates']]
-
-for species in species_list:
-    plt.figure()
-    final_concentration = point_data.sel(species=species).isel(time=-1)
-    final_concentration = final_concentration.to_dataarray().squeeze()
-    plt.plot(x_coords, final_concentration, label=species)
-    plt.xlabel("Distance from center [µm]")
-    plt.ylabel("Concentration [µM]")
-    plt.title(f"Species: {species} at t={time[-1]} ms")
-    plt.legend()
+# === Save with date and time ===
+now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+filename = f"tsien_simulation_visualization_{now}.pdf"
+plt.savefig(filename, format="pdf")
 plt.show()
