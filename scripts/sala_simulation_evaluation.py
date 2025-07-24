@@ -1,10 +1,7 @@
-import os
-
-import pyvista as pv
 import xarray as xr
 import matplotlib.pyplot as plt
-
-from ecsim import find_latest_results
+import numpy as np
+from ecsim.simulation.result_io.result_loader import ResultLoader
 
 custom_theme = {
     'font.size': 9,
@@ -26,65 +23,79 @@ custom_theme = {
     'ytick.labelsize': 9
 }
 
-# Apply the theme to matplotlib globally
+# Apply custom theme
 for key, value in custom_theme.items():
     plt.rcParams[key] = value
 
-fig_width = 5.36  # pulgadas
-fig_height = 3.27  # pulgadas
+fig_width = 5.36  # inches
+fig_height = 3.27  # inches
 
-fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+# === Load results ===
+loader = ResultLoader.find(simulation_name="sala", results_root="results")
 
-# Find the latest folder with test data
-latest_folder = find_latest_results("sala", "results")
+# === Load total substance by snapshot ===
+total_substance = xr.concat(
+    [loader.load_total_substance(i) for i in range(len(loader))],
+    dim="time"
+)
+total_substance["time"] = [loader.snapshots[i][0].value for i in range(len(loader))]
 
-### Full snapshots
-# snapshot_file = os.path.join(latest_folder, "snapshots", "snapshot_step00010.vtu")
-# data = pv.read(snapshot_file)
-# data.plot(scalars='Ca', show_edges=True)
+species_list = total_substance.coords['species'].values
+regions = total_substance.coords['region'].values
 
+# === Calculate volumes by region (for average concentration) ===
+region_sizes = loader.compute_region_sizes()
 
-### Compartment substances
-zarr_path = os.path.join(latest_folder, "substance_data.zarr")
-point_data = xr.open_zarr(zarr_path)
-
-species_list = point_data.coords['species'].values
-compartment = point_data.coords['compartment'].values[0]
-volume = point_data.attrs['compartment_volume'][0]
-
-plt.figure()
+# === Plot all species in the first region ===
+region = regions[0]
+plt.figure(figsize=(fig_width, fig_height))
 for species in species_list:
-    ts = point_data.sel(species=species, compartment=compartment)
-    ts_array = ts.to_array().values / volume
-    plt.semilogy(ts['time'].values, ts_array.T, label=species)
-plt.xlabel("Time [ms]")
+    data = total_substance.sel(region=region, species=species)
+    volume = region_sizes[region]
+    plt.semilogy(total_substance["time"], data / volume, label=species)
+plt.xlabel("Time [s]")
 plt.ylabel("Average concentration [mM]")
-plt.title("Total substance in cell")
+plt.title(f"Total concentration in region '{region}'")
 plt.legend()
+plt.tight_layout()
+plt.savefig("sala_species_concentrations.pdf", bbox_inches="tight")
 plt.show()
 
-### Point values
-zarr_path = os.path.join(latest_folder, "point_data_0.zarr")
-point_data = xr.open_zarr(zarr_path)
+# === Define points in Cartesian coordinates (x, y, z) ===
+# For example: points along the x axis from near the membrane (20 μm) to the center (0 μm)
+distances = [19.75, 10.25, 5.25, 0.25]  # μm from the center
+points = [(d, 0, 0) for d in distances]  # points along the x axis
 
-species_list = point_data.coords['species'].values
-time = point_data.coords['time'].values
-points = point_data.coords['point'].values
-x_coords = [xyz[0] for xyz in point_data.attrs['point_coordinates']]
+# === Prepare structure to store results ===
+species_of_interest = "Ca"
+times = []
+concentration_data = []
 
-dist = [19.75, 10.25, 5.25, 0.25]
-for species in species_list:
-    plt.figure()
-    for d, point in zip(dist, points):
-        ts = point_data.sel(species=species, point=point)
-        ts_array = ts.to_array().values * 1000
-        plt.semilogy(time, ts_array.T, label=f"Distance {d}")
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Concentration [µM]")
-    plt.xlim(0, 2000)
-    plt.title(f"Species: {species}")
-    plt.legend()
+# === Iterate over snapshots ===
+for step in range(len(loader)):
+    ds = loader.load_point_values(step, points)
+    if species_of_interest not in ds.coords['species']:
+        raise ValueError(f"Species '{species_of_interest}' not found.")
+    values = ds.sel(species=species_of_interest).values.flatten()  # shape: (n_points,)
+    concentration_data.append(values)
+    times.append(ds.coords['time'].values[0])  # in seconds
 
+# === Convert to numpy arrays ===
+concentration_data = np.array(concentration_data)  # shape: (n_steps, n_points)
+times = np.array(times)
+
+# === Plot ===
+plt.figure(figsize=(fig_width, fig_height))
+for i, d in enumerate(distances):
+    plt.semilogy(times / 1000, concentration_data[:, i] * 1000, label=f"{d} µm")
+plt.xlabel("Time [s]")
+plt.ylabel(r"$[\mathrm{Ca}^{2+}]_i$ (μM)")
+#plt.title("Calcium concentration at different radial distances")
+plt.legend()
+# ticks_y = [0.1, 0.3, 1, 3, 10, 30]
+# plt.yticks(ticks_y, [str(t) for t in ticks_y])
+# plt.tick_params(axis='both')
+plt.grid(True)
 plt.tight_layout()
-plt.savefig("sala_simulation.svg", format="svg")
-plt.show() 
+plt.savefig("sala_ca_point_profiles.pdf", format="pdf")
+plt.show()
