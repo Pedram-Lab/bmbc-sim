@@ -65,7 +65,7 @@ immobile_complex = total_substance.sel(species="immobile_complex")
 potential = total_substance.sel(species="potential")
 total_ca = free_ca + immobile_complex + mobile_complex
 
-# Regiones
+# Regions
 regions = ["cube:top", "cube:bottom"]
 region_sizes = result_loader.compute_region_sizes()
 
