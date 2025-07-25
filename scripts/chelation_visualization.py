@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import ecsim
 from datetime import datetime
 
-# Personalización de estilo
+# Customizing the plot style
 custom_theme = {
     'font.size': 9,
     'axes.titlesize': 9,
@@ -170,9 +170,9 @@ for ax5, region in zip(axes, regions):
     ax5.grid(True)
 
 axes[0].legend()
-plt.subplots_adjust(wspace=0.3)
+plt.subplots_adjust(wspace=0)
 plt.suptitle("Chelation simulation - Electrostatics: True", fontsize=9)
-#plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_potential.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
