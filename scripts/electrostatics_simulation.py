@@ -63,7 +63,7 @@ cube.initialize_species(mobile_buffer, {'top': mobile_total_buffer, 'bottom': mo
 # Run simulation
 simulation.run(
     end_time=4 * u.ms,
-    time_step=1 * u.us,
+    time_step=0.1 * u.us,
     record_interval=100 * u.us,
     n_threads=4
 )
