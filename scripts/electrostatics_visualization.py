@@ -71,7 +71,8 @@ region_sizes = result_loader.compute_region_sizes()
 
 # Plot 1: Free and total Ca
 plt.rcParams['lines.linewidth'] = 2
-fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
+fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+#fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax.plot(
@@ -89,18 +90,19 @@ for ax, region in zip(axes, regions):
     ax.set_title(f"{region}")
     ax.set_xlabel("Time (ms)")
     ax.grid(True)
- #   ax.set_ylim(0, 2)
+    ax.set_ylim(0, 2)
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation")
+plt.suptitle("Electrostatics simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_free_total_ca.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 # Plot 2: Mobile buffer
-fig2, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
+fig2, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+#fig2, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax2, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax2.plot(
@@ -117,14 +119,15 @@ for ax2, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation")
+plt.suptitle("Electrostatics simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_mobile_buffer.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 # Plot 3: Immobile buffer
-fig3, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
+fig3, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+#fig3, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax3, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax3.plot(
@@ -142,7 +145,7 @@ for ax3, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation")
+plt.suptitle("Electrostatics simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_immobile_buffer.pdf", bbox_inches="tight")
 plt.show()
@@ -150,7 +153,8 @@ plt.close()
 
 
 # Plot 4: All species
-fig4, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
+fig4, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+#fig4, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax4, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax4.plot(
@@ -186,7 +190,7 @@ for ax4, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation")
+plt.suptitle("Electrostatics simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_all_species.pdf", bbox_inches="tight")
 plt.show()
@@ -194,7 +198,8 @@ plt.close()
 
 # Plot 5: Potential
 plt.rcParams['lines.linewidth'] = 2
-fig5, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
+fig5, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+#fig5, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True)
 for ax5, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax5.plot(
@@ -208,8 +213,8 @@ for ax5, region in zip(axes, regions):
     ax5.grid(True)
 
 axes[0].legend()
-plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation")
+plt.subplots_adjust(wspace=0.3)
+plt.suptitle("Electrostatics simulation", fontsize=9)
 #plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_potential.pdf", bbox_inches="tight")
 plt.show()
