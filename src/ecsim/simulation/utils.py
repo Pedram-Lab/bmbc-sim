@@ -1,5 +1,4 @@
 from math import ceil
-from typing import Dict
 import warnings
 
 try:
@@ -16,26 +15,32 @@ class SimulationClock:
     occur in fixed time intervals. Either a fixed number of time steps or a
     fixed end time can be provided to determine when the simulation should stop.
     """
+
     def __init__(
-            self,
-            *,
-            end_time: float,
-            time_step: float = None,
-            n_steps: int = None,
-            events: Dict[str, int] = None,
-            verbose: bool = False
+        self,
+        *,
+        end_time: float,
+        time_step: float = None,
+        n_steps: int = None,
+        events: dict[str, int] = None,
+        verbose: bool = False,
     ) -> None:
         warnings.warn(
             "SimulationClock is deprecated and will be removed in future releases.",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
         self.end_time = end_time
         self.current_time = 0.0
         self.events = events or {}
         self.counter = 0
 
-        if time_step is None and n_steps is None or time_step is not None and n_steps is not None:
+        if (
+            time_step is None
+            and n_steps is None
+            or time_step is not None
+            and n_steps is not None
+        ):
             raise ValueError("Exactly one of {time_step, n_steps} must be provided.")
 
         if time_step is not None:
@@ -45,7 +50,9 @@ class SimulationClock:
             self.n_steps = n_steps
             self.time_step = end_time / n_steps
 
-        self._progress = tqdm(total=self.n_steps, desc="Simulation time") if verbose else None
+        self._progress = (
+            tqdm(total=self.n_steps, desc="Simulation time") if verbose else None
+        )
 
     def advance(self) -> None:
         """Advance the simulation clock by one time step."""
