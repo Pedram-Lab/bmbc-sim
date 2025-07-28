@@ -71,47 +71,50 @@ def create_ca_depletion_mesh(
     return Mesh(geo.GenerateMesh(maxh=mesh_size))
 
 
-def create_cube_geometry(
+def create_box_geometry(
         *,
-        cube_height: Quantity,
-        slice_width: Quantity,
-        slice_depth: Quantity,
-        mesh_size: Quantity, 
-        substrate_height: Quantity = None
+        dimensions: Quantity | tuple[Quantity, Quantity, Quantity],
+        mesh_size: Quantity,
+        split: Quantity = None
 ) -> Mesh:
-    """Create a simple columnar geometry with given sidelength and height
-    represeting a slice in the middle of a cube. Optionally, a substrate can be
-    added as a region at the bottom of the cube.
+    """Create a simple box geometry with given dimensions. Optionally, the
+    box can be split into two compartments in the z-direction.
 
-    :param cube_height: Height of the cube.
-    :param slice_width: Width of the slice.
-    :param slice_depth: Depth of the slice (this controls how fast species
-        can reach the boundary and thus be removed from the domain).
+    The box has one compartment "box", which has a "box:top" region and an
+    optional "box:bottom" region if split is provided. The top and bottom
+    boundaries are named "top_bnd" and "bottom_bnd", respectively, all other
+    boundaries are named "side". The optional interface between the two
+    regions is named "interface".
+
+    :param dimensions: Dimensions of the box as a Quantity or a tuple of
+        Quantities for each axis (x, y, z).
     :param mesh_size: Size of the mesh.
-    :param substrate_height: Height of the substrate (can be None).
+    :param split: Height of the split (can be None).
     :return: Mesh of the geometry.
     """
-    h = to_simulation_units(cube_height, 'length')
-    sx = to_simulation_units(slice_width, 'length')
-    sy = to_simulation_units(slice_depth, 'length')
+    if isinstance(dimensions, Quantity):
+        dimensions = (dimensions, dimensions, dimensions)
+    sx = to_simulation_units(dimensions[0], 'length')
+    sy = to_simulation_units(dimensions[1], 'length')
+    sz = to_simulation_units(dimensions[2], 'length')
 
-    cube = occ.Box((-sx, -sy, 0), (sx, sy, h))
-    cube.mat("cube:top")
+    box = occ.Box((-sx, -sy, 0), (sx, sy, sz))
+    box.mat("box:top")
     for i in [0, 1, 4, 5]:
-        cube.faces[i].bc("reflective")
-    cube.faces[2].bc("side")
-    cube.faces[3].bc("side")
+        box.faces[i].bc("side")
+    box.faces[2].bc("top_bnd")
+    box.faces[3].bc("bottom_bnd")
 
-    if substrate_height is not None:
-        sh = to_simulation_units(substrate_height, 'length')
-        substrate = occ.Box((-2*sx, -2*sy, -sh), (2*sx, 2*sy, sh))
-        substrate.faces[5].bc("interface")
-        substrate = cube * substrate
-        substrate.mat("cube:bottom")
-        substrate.col = (1, 0, 0)
-        geo = occ.Glue([substrate, cube - substrate])
+    if split is not None:
+        sh = to_simulation_units(split, 'length')
+        bottom = occ.Box((-2*sx, -2*sy, -sh), (2*sx, 2*sy, sh))
+        bottom.faces[5].bc("interface")
+        bottom = box * bottom
+        bottom.mat("box:bottom")
+        bottom.col = (1, 0, 0)
+        geo = occ.Glue([bottom, box - bottom])
     else:
-        geo = cube
+        geo = box
 
     geo = occ.OCCGeometry(geo)
     mesh_size = to_simulation_units(mesh_size, 'length')

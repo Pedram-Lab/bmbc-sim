@@ -5,52 +5,37 @@ It produces four plots showing the temporal evolution of chemical species concen
 2. **Plot 2**: Mobile buffer and mobile complex concentrations over time.
 3. **Plot 3**: Immobile buffer and immobile complex concentrations over time.
 4. **Plot 4**: All species combined in a single plot to compare their temporal profiles.
-5. **Plot 5**: Potential over time. 
+5. **Plot 5**: Potential over time.
 """
+
+from datetime import datetime
 
 import xarray as xr
 import matplotlib.pyplot as plt
 import ecsim
-from datetime import datetime
 
-# Custom theme
-custom_theme = {
-    'font.size': 9,
-    'axes.titlesize': 9,
-    'axes.labelsize': 9,
-    'legend.fontsize': 9,
-    'legend.edgecolor': 'black',
-    'legend.frameon': False,
-    'lines.linewidth': 0.5,
-    'font.family': ['Arial', 'sans-serif'],
-    'axes.spines.top': True,
-    'axes.spines.right': True,
-    'axes.spines.left': True,
-    'axes.spines.bottom': True,
-    'axes.linewidth': 0.5,
-    'xtick.major.width': 0.5,
-    'ytick.major.width': 0.5,
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9
-}
-for key, value in custom_theme.items():
-    plt.rcParams[key] = value
 
-fig_width = 5.36  # inches
-fig_height = 3.27  # inches
+# Switches for electrostatics and chelation
+ELECTROSTATICS = True
+CHELATION = True
 
 # Timestamp and simulation name
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-simulation_name = "electrostatics"
+simulation_name = []
+if CHELATION:
+    simulation_name.append("chelation")
+if ELECTROSTATICS:
+    simulation_name.append("electrostatics")
+if not simulation_name:
+    simulation_name.append("no_interaction")
+simulation_name = "_".join(simulation_name)
+file_prefix = f"{timestamp}_{simulation_name}"
 
 # Load results
 result_loader = ecsim.ResultLoader.find(
     results_root="results",
     simulation_name=simulation_name,
 )
-
-# Compose file prefix
-file_prefix = f"{timestamp}_{simulation_name}"
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],
@@ -62,16 +47,17 @@ free_ca = total_substance.sel(species="ca")
 immobile_buffer = total_substance.sel(species="immobile_buffer")
 mobile_buffer = total_substance.sel(species="mobile_buffer")
 potential = total_substance.sel(species="potential")
-total_ca = free_ca 
+total_ca = free_ca
 
 # Regions
-regions = ["cube:top", "cube:bottom"]
+regions = ["box:top", "box:bottom"]
 region_sizes = result_loader.compute_region_sizes()
 
+figsize = ecsim.plot_style("pedramlab")
 
 # Plot 1: Free and total Ca
-plt.rcParams['lines.linewidth'] = 2
-fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+plt.rcParams["lines.linewidth"] = 2
+fig, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
 for ax, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax.plot(
@@ -93,14 +79,14 @@ for ax, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation", fontsize=9)
+plt.suptitle(f"{simulation_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_free_total_ca.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 # Plot 2: Mobile buffer
-fig2, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+fig2, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
 for ax2, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax2.plot(
@@ -117,14 +103,14 @@ for ax2, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation", fontsize=9)
+plt.suptitle(f"{simulation_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_mobile_buffer.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 # Plot 3: Immobile buffer
-fig3, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+fig3, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
 for ax3, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax3.plot(
@@ -133,7 +119,7 @@ for ax3, region in zip(axes, regions):
         linestyle="--",
         label="Immobile buffer",
     )
-    
+
     ax3.set_ylabel("Average concentration (mM)")
     ax3.set_title(f"{region}")
     ax3.set_xlabel("Time (ms)")
@@ -142,7 +128,7 @@ for ax3, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation", fontsize=9)
+plt.suptitle(f"{simulation_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_immobile_buffer.pdf", bbox_inches="tight")
 plt.show()
@@ -150,7 +136,7 @@ plt.close()
 
 
 # Plot 4: All species
-fig4, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+fig4, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
 for ax4, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax4.plot(
@@ -170,14 +156,14 @@ for ax4, region in zip(axes, regions):
         linestyle="--",
         label="Mobile buffer",
     )
-    
+
     ax4.plot(
         immobile_buffer.sel(region=region).time,
         immobile_buffer.sel(region=region) / region_size,
         linestyle="--",
         label="Immobile buffer",
     )
-    
+
     ax4.set_ylabel("Average concentration (mM)")
     ax4.set_title(f"{region}")
     ax4.set_xlabel("Time (ms)")
@@ -186,15 +172,15 @@ for ax4, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle("Electrostatics simulation", fontsize=9)
+plt.suptitle(f"{simulation_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_all_species.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 # Plot 5: Potential
-plt.rcParams['lines.linewidth'] = 2
-fig5, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
+plt.rcParams["lines.linewidth"] = 2
+fig5, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
 for ax5, region in zip(axes, regions):
     region_size = region_sizes[region]
     ax5.plot(
@@ -209,7 +195,7 @@ for ax5, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0.3)
-plt.suptitle("Electrostatics simulation", fontsize=9)
+plt.suptitle(f"{simulation_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_potential.pdf", bbox_inches="tight")
 plt.show()
