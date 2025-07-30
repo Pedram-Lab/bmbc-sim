@@ -5,7 +5,7 @@ import numpy as np
 
 import ecsim
 
-def get_radial_profile(buffer_name, species_of_interest="Ca", n_points=500):
+def get_radial_profile(buffer_name, *, z, species_of_interest="Ca", n_points=50):
     """Load the concentration profile for a specific buffer and species
     evaluated radially outward from the channel cluster.
 
@@ -19,7 +19,7 @@ def get_radial_profile(buffer_name, species_of_interest="Ca", n_points=500):
     loader = ecsim.ResultLoader.find(simulation_name=sim_name, results_root="results")
     last_step = len(loader) - 1
     distances = np.linspace(0.0, 0.6, n_points)
-    points = [(0, d, 2.4) for d in distances]
+    points = [(0, d, z) for d in distances]
     ds = loader.load_point_values(last_step, points)
 
     if species_of_interest not in ds.coords['species']:
@@ -34,19 +34,20 @@ EXPERIMENTS = [
     ("EGTA_high", "EGTA 40 mM"),
     ("BAPTA", "BAPTA 1 mM"),
 ]
+Z = 2.95
 
 # Plot all buffers
 plt.figure(figsize=figsize)
 for name, label in EXPERIMENTS:
     try:
-        dist, values, time = get_radial_profile(name)
+        dist, values, time = get_radial_profile(name, z=Z)
     except (ValueError, RuntimeError) as e:
         print(f"Skipping {name} (no valid data found)")
         continue
-    plt.plot(dist * 1000, values, label=label)
+    plt.plot(dist * 1000, values, label=label, marker='o')
 plt.xlabel("Distance from the channel cluster (nm)")
 plt.ylabel(r"$[\mathrm{Ca}^{2+}]_i$ (mM)")
-plt.title(f"Tour et al. 2007, evaluation at z=2.4 µm, t={time:.2f} ms")
+plt.title(f"Tour et al. 2007, evaluation at z={Z:.2f} µm, t={time:.2f} ms")
 plt.grid(True)
 plt.legend()
 plt.tight_layout()

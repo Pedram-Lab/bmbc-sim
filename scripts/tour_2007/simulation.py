@@ -48,7 +48,7 @@ side = 3.0 * u.um
 cytosol_height = 3.0 * u.um
 ecs_height = 0.1 * u.um
 channel_radius = 50 * u.nm
-mesh_size = 200 * u.nm
+mesh_size = 100 * u.nm
 
 mesh = create_ca_depletion_mesh(
     side_length_x=side,
