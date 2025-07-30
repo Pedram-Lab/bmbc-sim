@@ -1,11 +1,15 @@
-"""This script simulates the mathematical model described in the paper:
-Tour, O., … Tsien, R.Y. (2007). Calcium Green FlAsH as a genetically targeted small-molecule calcium indicator.
-The model describes calcium transport from the extracellular space into the cytosol through a cluster of calcium channels.
-In the cytosol, calcium binds to one of the following buffers: BAPTA (1 mM), or EGTA (4.5 mM or 40 mM).
-To simulate each buffer, make sure to use the corresponding diffusion constants and reaction rate parameters."""
+"""
+This script simulates the mathematical model described in the paper:
+[Tour, O., … Tsien, R.Y. (2007). Calcium Green FlAsH as a genetically targeted
+small-molecule calcium indicator]. The model describes calcium transport from the
+extracellular space into the cytosol through a cluster of calcium channels. In
+the cytosol, calcium binds to one of the following buffers: BAPTA (1 mM), or
+EGTA (4.5 mM or 40 mM). To simulate each buffer, make sure to use the
+corresponding diffusion constants and reaction rate parameters.
+"""
+from collections import namedtuple
 
 import astropy.units as u
-from collections import namedtuple
 from ngsolve.webgui import Draw
 
 import ecsim
@@ -18,24 +22,33 @@ BufferSpec = namedtuple('BufferSpec', ['name', 'initial_concentration', 'diffusi
 
 # Define the buffer you want to simulate here:
 buffer_spec = BufferSpec(
-    name='EGTA',
-    initial_concentration=4.5 * mM, # or 40 * mM
+    name='EGTA_low',
+    initial_concentration=4.5 * mM,
     diffusivity=113 * u.um**2 / u.s,
     kf=2.7 / (uM * u.s),
     kr=0.5 / u.s
 )
-
-
-# For BAPTA, you could use:
-# buffer_spec = BufferSpec('BAPTA', 1 * mM, 95 * u.um**2 / u.s, 450 / (uM * u.s), 80 / u.s)
-
+# buffer_spec = BufferSpec(
+#     name='EGTA_high',
+#     initial_concentration=40 * mM,
+#     diffusivity=113 * u.um**2 / u.s,
+#     kf=2.7 / (uM * u.s),
+#     kr=0.5 / u.s
+# )
+# buffer_spec = BufferSpec(
+#     name='BAPTA',
+#     initial_concentration=1 * mM,
+#     diffusivity=95 * u.um**2 / u.s,
+#     kf=450 / (uM * u.s),
+#     kr=80 / u.s
+# )
 
 # Geometry
 side = 3.0 * u.um
 cytosol_height = 3.0 * u.um
 ecs_height = 0.1 * u.um
 channel_radius = 50 * u.nm
-mesh_size = 50 * u.nm
+mesh_size = 200 * u.nm
 
 mesh = create_ca_depletion_mesh(
     side_length_x=side,
@@ -50,7 +63,7 @@ Draw(mesh)
 
 
 # Initialize simulation
-simulation = ecsim.Simulation(f"tsien_{buffer_spec.name.lower()}", mesh, result_root='results')
+simulation = ecsim.Simulation(f"tour_{buffer_spec.name.lower()}", mesh, result_root='results')
 geometry = simulation.simulation_geometry
 
 ecs = geometry.compartments['ecs']
@@ -112,5 +125,5 @@ simulation.run(
     end_time=20 * u.ms,
     time_step=1 * u.us,
     record_interval=1 * u.ms,
-    n_threads=8
+    n_threads=4
 )
