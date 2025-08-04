@@ -3,6 +3,7 @@
 results/
 notebooks/
 scratch/
+plots/
 *.ipynb
 *.vol
 *.csv

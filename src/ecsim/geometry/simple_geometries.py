@@ -77,7 +77,8 @@ def create_cube_geometry(
         slice_width: Quantity,
         slice_depth: Quantity,
         mesh_size: Quantity, 
-        substrate_height: Quantity = None
+        substrate_height: Quantity = None,
+        compartments: bool = False,
 ) -> Mesh:
     """Create a simple columnar geometry with given sidelength and height
     represeting a slice in the middle of a cube. Optionally, a substrate can be
@@ -96,7 +97,7 @@ def create_cube_geometry(
     sy = to_simulation_units(slice_depth, 'length')
 
     cube = occ.Box((-sx, -sy, 0), (sx, sy, h))
-    cube.mat("cube:top")
+    cube.mat("top" if compartments else "cube:top")
     for i in [0, 1, 4, 5]:
         cube.faces[i].bc("reflective")
     cube.faces[2].bc("side")
@@ -107,7 +108,7 @@ def create_cube_geometry(
         substrate = occ.Box((-2*sx, -2*sy, -sh), (2*sx, 2*sy, sh))
         substrate.faces[5].bc("interface")
         substrate = cube * substrate
-        substrate.mat("cube:bottom")
+        substrate.mat("bottom" if compartments else "cube:bottom")
         substrate.col = (1, 0, 0)
         geo = occ.Glue([substrate, cube - substrate])
     else:
