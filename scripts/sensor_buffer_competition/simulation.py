@@ -12,121 +12,116 @@ from ngsolve.webgui import Draw
 import ecsim
 from ecsim.geometry import create_box_geometry
 from ecsim.simulation import transport
+import argparse
 
 
-# ===========================
-# USER PARAMETERS
-# ===========================
+def run_simulation(buffer_conc, buffer_kd):
+    """Run simulation with specific buffer concentration and KD."""
+    # Create simulation name based on parameters
+    sim_name = f'sensor_buffer_competition_conc{buffer_conc}_kd{buffer_kd}'
 
-# Geometry
-CA_FREE = 1 * u.mmol / u.L
-CUBE_HEIGHT = 1 * u.um
-SIDELENGTH = 0.5 * u.um
-SUBSTRATE_HEIGHT = 0.5 * u.um
+    # Geometry parameters
+    ca_free = 1 * u.mmol / u.L
+    cube_height = 1 * u.um
+    sidelength = 0.5 * u.um
+    substrate_height = 0.5 * u.um
 
-# Initial concentrations per compartment
-BUFFER_INITIAL = {
-    'top': 0 * u.mmol / u.L,
-    'bottom': 2.0 * u.mmol / u.L,
-}
-SENSOR_INITIAL = 10 * u.umol / u.L
+    # Initial concentrations per compartment
+    buffer_initial = {
+        'top': 0 * u.mmol / u.L,
+        'bottom': buffer_conc * u.mmol / u.L,
+    }
+    sensor_initial = 10 * u.umol / u.L
 
-# Reaction constants
-BUFFER_KD = 1.0 * u.umol / u.L
-BUFFER_KF = 1.0e8 / (u.mol / u.L * u.s)
-BUFFER_KR = BUFFER_KF * BUFFER_KD
+    # Buffer reaction constants
+    buffer_kd = buffer_kd * u.umol / u.L
+    buffer_kf = 1.0e8 / (u.mol / u.L * u.s)
+    buffer_kr = buffer_kf * buffer_kd
 
-SENSOR_KD = 1.0 * u.mmol / u.L
-SENSOR_KF = 1.0e8 / (u.mol / u.L * u.s)
-SENSOR_KR = SENSOR_KF * SENSOR_KD
+    # Sensor reaction constants
+    sensor_kd = 1.0 * u.mmol / u.L
+    sensor_kf = 1.0e8 / (u.mol / u.L * u.s)
+    sensor_kr = sensor_kf * sensor_kd
 
+    # Geometry setup
+    mesh = create_box_geometry(
+        dimensions=(sidelength, sidelength, cube_height),
+        mesh_size=sidelength / 20,
+        split=substrate_height,
+        compartments=True,
+    )
+    Draw(mesh)
 
-# ===========================
-# GEOMETRY SETUP
-# ===========================
+    simulation = ecsim.Simulation(sim_name, mesh, result_root='results')
+    geometry = simulation.simulation_geometry
 
-mesh = create_box_geometry(
-    dimensions=(SIDELENGTH, SIDELENGTH, CUBE_HEIGHT),
-    mesh_size=SIDELENGTH / 20,
-    split=SUBSTRATE_HEIGHT,
-    compartments=True,
-)
-Draw(mesh)
+    compartments = geometry.compartments
+    interface = geometry.membranes['interface']
 
-simulation = ecsim.Simulation('sensor_buffer_competition', mesh, result_root='results')
-geometry = simulation.simulation_geometry
+    # Add calcium species
+    ca = simulation.add_species('ca', valence=2)
+    for comp in compartments.values():
+        comp.initialize_species(ca, ca_free)
+        comp.add_diffusion(ca, 600 * u.um**2 / u.s)
 
-compartments = geometry.compartments
-interface = geometry.membranes['interface']
+    # Mobile buffer
+    buffer = simulation.add_species('buffer')
+    buffer_complex = simulation.add_species('buffer_complex')
 
+    for name, comp in compartments.items():
+        # Initialize buffer and complex per compartment
+        comp.add_diffusion(buffer, 2.5e-6 * u.cm**2 / u.s)
+        comp.initialize_species(buffer, buffer_initial[name])
+        comp.add_diffusion(buffer_complex, 2.5e-6 * u.cm**2 / u.s)
+        comp.initialize_species(buffer_complex, 0 * u.mmol / u.L)
 
-# ===========================
-# ADD CALCIUM SPECIES
-# ===========================
-ca = simulation.add_species('ca', valence=2)
-for comp in compartments.values():
-    comp.initialize_species(ca, CA_FREE)
-    comp.add_diffusion(ca, 600 * u.um**2 / u.s)
+        # Reaction: Ca + buffer <-> buffer_complex
+        comp.add_reaction(
+            reactants=[ca, buffer],
+            products=[buffer_complex],
+            k_f=buffer_kf,
+            k_r=buffer_kr
+        )
 
+    # Mobile sensor
+    sensor = simulation.add_species('sensor')
+    sensor_complex = simulation.add_species('sensor_complex')
 
-# ===========================
-# MOBILE BUFFER
-# ===========================
-buffer = simulation.add_species('buffer')
-buffer_complex = simulation.add_species('buffer_complex')
+    for name, comp in compartments.items():
+        # Initialize sensor and complex per compartment
+        comp.add_diffusion(sensor, 2.5e-6 * u.cm**2 / u.s)
+        comp.initialize_species(sensor, sensor_initial)
+        comp.add_diffusion(sensor_complex, 2.5e-6 * u.cm**2 / u.s)
+        comp.initialize_species(sensor_complex, 0 * u.mmol / u.L)
 
-for name, comp in compartments.items():
-    # Initialize buffer and complex per compartment
-    comp.add_diffusion(buffer, 2.5e-6 * u.cm**2 / u.s)
-    comp.initialize_species(buffer, BUFFER_INITIAL[name])
-    comp.add_diffusion(buffer_complex, 2.5e-6 * u.cm**2 / u.s)
-    comp.initialize_species(buffer_complex, 0 * u.mmol / u.L)
+        # Reaction: Ca + sensor <-> sensor_complex
+        comp.add_reaction(
+            reactants=[ca, sensor],
+            products=[sensor_complex],
+            k_f=sensor_kf,
+            k_r=sensor_kr
+        )
 
-    # Reaction: Ca + buffer <-> buffer_complex
-    comp.add_reaction(
-        reactants=[ca, buffer],
-        products=[buffer_complex],
-        k_f=BUFFER_KF,
-        k_r=BUFFER_KR
+    # Transport
+    t = transport.Passive(permeability=1 * u.um**3 / u.ms)
+    interface.add_transport(species=ca, transport=t,
+                            source=compartments["top"], target=compartments["bottom"])
+
+    # Run simulation
+    simulation.run(
+        end_time=5 * u.us,
+        time_step=5 * u.us,
+        record_interval=100 * u.us,
+        n_threads=4
     )
 
 
-# ===========================
-# MOBILE SENSOR
-# ===========================
-sensor = simulation.add_species('sensor')
-sensor_complex = simulation.add_species('sensor_complex')
+def main():
+    parser = argparse.ArgumentParser(description='Run buffer simulation with specific parameters')
+    parser.add_argument('--buffer_conc', type=float, required=True,
+                        help='Buffer concentration in mM')
+    parser.add_argument('--buffer_kd', type=float, required=True,
+                        help='Buffer KD value in uM')
 
-for name, comp in compartments.items():
-    # Initialize sensor and complex per compartment
-    comp.add_diffusion(sensor, 2.5e-6 * u.cm**2 / u.s)
-    comp.initialize_species(sensor, SENSOR_INITIAL)
-    comp.add_diffusion(sensor_complex, 2.5e-6 * u.cm**2 / u.s)
-    comp.initialize_species(sensor_complex, 0 * u.mmol / u.L)
-
-    # Reaction: Ca + sensor <-> sensor_complex
-    comp.add_reaction(
-        reactants=[ca, sensor],
-        products=[sensor_complex],
-        k_f=SENSOR_KF,
-        k_r=SENSOR_KR
-    )
-
-
-# ===========================
-# TRANSPORT
-# ===========================
-t = transport.Passive(permeability=1 * u.um**3 / u.ms)
-interface.add_transport(species=ca, transport=t,
-                        source=compartments["top"], target=compartments["bottom"])
-
-
-# ===========================
-# RUN SIMULATION
-# ===========================
-simulation.run(
-    end_time=5 * u.ms,
-    time_step=5 * u.us,
-    record_interval=100 * u.us,
-    n_threads=4
-)
+    args = parser.parse_args()
+    run_simulation(args.buffer_conc, args.buffer_kd)
