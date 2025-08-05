@@ -72,8 +72,8 @@ for comp in compartments.values():
 # ===========================
 # MOBILE BUFFER
 # ===========================
-buffer = simulation.add_species('immobile_buffer')
-buffer_complex = simulation.add_species('immobile_buffer_complex')
+buffer = simulation.add_species('buffer')
+buffer_complex = simulation.add_species('buffer_complex')
 
 for name, comp in compartments.items():
     # Initialize buffer and complex per compartment
@@ -94,8 +94,8 @@ for name, comp in compartments.items():
 # ===========================
 # MOBILE SENSOR
 # ===========================
-sensor = simulation.add_species('immobile_sensor', valence=-2)
-sensor_complex = simulation.add_species('immobile_sensor_complex', valence=0)
+sensor = simulation.add_species('sensor')
+sensor_complex = simulation.add_species('sensor_complex')
 
 for name, comp in compartments.items():
     # Initialize sensor and complex per compartment
