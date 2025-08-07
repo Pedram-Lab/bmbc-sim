@@ -7,12 +7,14 @@ Simulation of chemical interactions among:
 Two-region geometry: top and bottom.
 You can configure electrostatics and species initial concentrations per compartment.
 """
+import argparse
+
 import astropy.units as u
 from ngsolve.webgui import Draw
+
 import ecsim
 from ecsim.geometry import create_box_geometry
 from ecsim.simulation import transport
-import argparse
 
 
 def run_simulation(buffer_conc, buffer_kd):
@@ -34,7 +36,7 @@ def run_simulation(buffer_conc, buffer_kd):
     sensor_initial = 10 * u.umol / u.L
 
     # Buffer reaction constants
-    buffer_kd = buffer_kd * u.umol / u.L
+    buffer_kd = buffer_kd * u.mmol / u.L
     buffer_kf = 1.0e8 / (u.mol / u.L * u.s)
     buffer_kr = buffer_kf * buffer_kd
 
@@ -109,14 +111,14 @@ def run_simulation(buffer_conc, buffer_kd):
 
     # Run simulation
     simulation.run(
-        end_time=5 * u.us,
+        end_time=4 * u.ms,
         time_step=5 * u.us,
         record_interval=100 * u.us,
         n_threads=4
     )
 
 
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run buffer simulation with specific parameters')
     parser.add_argument('--buffer_conc', type=float, required=True,
                         help='Buffer concentration in mM')
