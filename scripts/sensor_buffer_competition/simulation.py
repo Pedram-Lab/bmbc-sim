@@ -105,7 +105,7 @@ def run_simulation(buffer_conc, buffer_kd):
         )
 
     # Transport
-    t = transport.Passive(permeability=1 * u.um**3 / u.ms)
+    t = transport.Passive(permeability=lambda t: (0 if t < 1 * u.ms else 10) * u.um**3 / u.ms)
     interface.add_transport(species=ca, transport=t,
                             source=compartments["top"], target=compartments["bottom"])
 
