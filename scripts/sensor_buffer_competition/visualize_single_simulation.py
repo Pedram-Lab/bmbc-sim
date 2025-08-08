@@ -22,19 +22,12 @@ fig_width, fig_height = ecsim.plot_style("pedramlab")
 #sensor_buffer_competition_conc1000.0_kd1e-06_2025-08-07-120447
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 simulation_name = "sensor_buffer_competition_conc1.0_kd1.0_2025-08-08-075312"
-#sensor_buffer_competition_conc1.0_kd1.0_2025-08-08-075312
 
 result_loader = result_loader.ResultLoader.find(
     simulation_name="sensor_buffer_competition_conc1.0_kd1.0",
-    results_root="results",
+    results_root=Path(__file__).resolve().parents[2] / "results",
     time_stamp="2025-08-08-075312"
 )
-# result_loader = ecsim.ResultLoader.find(
-#     results_root=Path("results") / simulation_name,
-#     simulation_name=simulation_name
-# )
-
-#result_loader = ecsim.ResultLoader.find(name="sensor_buffer_competition_conc1000.0_kd1e-06_2025-08-07-120447")
 
 # Compose file prefix
 file_prefix = f"{timestamp}_{simulation_name}"
