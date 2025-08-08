@@ -52,8 +52,7 @@ class ResultLoader:
         result_folders = [
             d
             for d in os.listdir(results_root)
-            if d.startswith(simulation_name)
-            and os.path.isdir(os.path.join(results_root, d))
+            if d.startswith(simulation_name) and os.path.isdir(os.path.join(results_root, d))
         ]
         if not result_folders:
             raise RuntimeError(
@@ -109,7 +108,9 @@ class ResultLoader:
         :param step: The step number of the snapshot to load.
         :returns: The simulation results at the specified step.
         """
-        if step < 0 or step >= len(self):
+        if step < 0:
+            step += len(self)
+        if step >= len(self):
             raise IndexError(f"Step {step} is out of range for available snapshots.")
 
         path = os.path.join(self.results_root, self.snapshots[step][1])
@@ -124,7 +125,9 @@ class ResultLoader:
         :param points: One or more points (x, y, z) to sample at.
         :returns: The path to the point values file.
         """
-        # Prepare points for consumption by PyVista
+        # Prepare points for consumption by PyVista (wrap negative indexing)
+        if step < 0:
+            step += len(self)
         data = self.load_snapshot(step)
         if not isinstance(points[0], (list, tuple)):
             points = [points]
@@ -165,7 +168,9 @@ class ResultLoader:
         :param step: The step number of the snapshot to load.
         :returns: An xarray Dataset containing total substance data.
         """
-        # Prepare data
+        # Prepare data (wrap negative indexing)
+        if step < 0:
+            step += len(self)
         data = self.load_snapshot(step)
         species = _get_species_names(data)
 
