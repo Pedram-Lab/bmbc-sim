@@ -13,18 +13,28 @@ import xarray as xr
 import matplotlib.pyplot as plt
 
 import ecsim
+from ecsim.simulation.result_io import result_loader
 
 # Customizing the plot style
 fig_width, fig_height = ecsim.plot_style("pedramlab")
 
-
+#sensor_buffer_competition_conc1000.0_kd1e-06
+#sensor_buffer_competition_conc1000.0_kd1e-06_2025-08-07-120447
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-simulation_name = "sensor_buffer_competition_conc1000.0_kd1e-06"
-result_loader = ecsim.ResultLoader.find(
-    results_root=Path("results") / simulation_name,
-    simulation_name=simulation_name
-)
+simulation_name = "sensor_buffer_competition_conc1.0_kd1.0_2025-08-08-075312"
+#sensor_buffer_competition_conc1.0_kd1.0_2025-08-08-075312
 
+result_loader = result_loader.ResultLoader.find(
+    simulation_name="sensor_buffer_competition_conc1.0_kd1.0",
+    results_root="results",
+    time_stamp="2025-08-08-075312"
+)
+# result_loader = ecsim.ResultLoader.find(
+#     results_root=Path("results") / simulation_name,
+#     simulation_name=simulation_name
+# )
+
+#result_loader = ecsim.ResultLoader.find(name="sensor_buffer_competition_conc1000.0_kd1e-06_2025-08-07-120447")
 
 # Compose file prefix
 file_prefix = f"{timestamp}_{simulation_name}"
@@ -62,7 +72,8 @@ for ax in axes:
     ax.set_ylim(0, 2)
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
+plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 mM, $Kd_B = 1 mM$", fontsize=9)
+#plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_free_total_ca.pdf", bbox_inches="tight")
 plt.show()
@@ -102,7 +113,8 @@ for ax3 in axes:
     ax3.set_ylim(0, 2)
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
+#plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
+plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 mM, $Kd_B = 1 mM$", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_sensor_complex.pdf", bbox_inches="tight")
 plt.show()
@@ -126,25 +138,25 @@ for ax4 in axes:
     ax4.set_ylim(0, 2)
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
+#plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 nM, $Kd_B = 1.0\,\mu M$", fontsize=9)
+plt.suptitle(r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = 1 mM, $Kd_B = 1 mM$", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_all_species.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
 Kd_sensor = 1
-estimated_ca_sensor = Kd_sensor * sensor_complex / (sensor - sensor_complex)
+estimated_ca = Kd_sensor * sensor_complex / sensor
 # === Plot 5: Compare [Ca] simulated vs estimated ===
 fig5, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
 for ax5, region in zip(axes, compartments):
-    region_size = region_sizes[region]
-    ax5.plot(estimated_ca_sensor.sel(region=region).time, estimated_ca_sensor.sel(region=region) / region_size, linestyle="--", label=r"Estimated $\mathrm{Ca}^{2+}$ (sensor)")
+    ax5.plot(estimated_ca.sel(region=region).time, estimated_ca.sel(region=region), linestyle="--", label=r"Estimated $\mathrm{Ca}^{2+}$ (sensor)")
     ax5.set_ylabel("Average concentration (mM)")
     ax5.set_title(f"{region}")
     ax5.set_xlabel("Time (ms)")
     ax5.grid(True)
-for ax5 in axes:
-    ax5.set_ylim(0, 2)
+# for ax5 in axes:
+#     ax5.set_ylim(0, 2)
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle("Estimated $[Ca^{2+}]$", fontsize=9)
