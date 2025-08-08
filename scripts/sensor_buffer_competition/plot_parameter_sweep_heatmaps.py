@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ecsim.simulation.result_io import result_loader
+import ecsim
 
 # Define the parameter sweep values (from parameter_sweep.py)
 buffer_concs = [1e-6, 1e-3, 1.0, 1e3]  # in mmol/L
@@ -29,21 +29,19 @@ for j, conc in enumerate(buffer_concs):
     for i, kd in enumerate(buffer_kds):
         # Construct simulation name pattern
         running_count += 1
-        # Format conc as 1.0 if it's 1, otherwise use scientific notation
         conc_str = buffer_conc_names[j]
         kd_str = buffer_kd_names[i]
-        # Always use scientific notation for kd
         sim_name = f"s{running_count}_sensor_buffer_competition_conc{conc_str}_kd{kd_str}"
 
         try:
             # Try to load the most recent result for this parameter combination
-            result_loader_obj = result_loader.ResultLoader.find(
+            result_loader = ecsim.ResultLoader.find(
                 simulation_name=sim_name,
                 results_root=results_root
             )
 
             # Load only the last timestep directly
-            last_timestep = result_loader_obj.load_total_substance(-1)
+            last_timestep = result_loader.load_total_substance(-1)
 
             # Extract species
             sensor = last_timestep.sel(species="sensor")
@@ -51,12 +49,15 @@ for j, conc in enumerate(buffer_concs):
             ca = last_timestep.sel(species="ca")
 
             # Calculate estimated calcium
+            region_sizes = result_loader.compute_region_sizes()
             estimated_ca = Kd_sensor * sensor_complex / sensor
 
             # Calculate ratios for both compartments
+            # (actual calcium is substance -> convert to concentration)
             for compartment, ratio_array in [("top", ratios_top), ("bottom", ratios_bottom)]:
-                ratio = estimated_ca.sel(region=compartment) / ca.sel(region=compartment)
-                ratio_array[i, j] = ratio.squeeze().values
+                ca_est = estimated_ca.sel(region=compartment)
+                ca_act = ca.sel(region=compartment) / region_sizes[compartment]
+                ratio_array[i, j] = (ca_est / ca_act).squeeze().values
 
         except Exception as e:
             print(f"Error processing {sim_name}: {e}")
