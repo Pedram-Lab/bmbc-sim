@@ -114,7 +114,8 @@ def run_simulation(buffer_conc, buffer_kd):
         end_time=4 * u.ms,
         time_step=5 * u.us,
         record_interval=100 * u.us,
-        n_threads=4
+        n_threads=4,
+        max_newton_iterations=100,
     )
 
 
