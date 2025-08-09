@@ -171,7 +171,7 @@ class DiffusionSolver:
 
         return self._dt * (self._source_term.vec - stiffness * c.vec)
 
-    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression):
+    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression) -> int:
         """Apply the implicit Euler step to the concentration vector."""
         # Scale the transport terms
         scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
@@ -180,6 +180,7 @@ class DiffusionSolver:
 
         # Update the concentration
         c.vec.data += mstar_inv * res
+        return mstar_inv.GetSteps()
 
 
 class ReactionSolver:
@@ -342,10 +343,11 @@ class PnpSolver:
         return cls(a, inverse, f, potential)
 
 
-    def step(self):
+    def step(self) -> int:
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
         self.potential.vec.data = self._inverse * self._source_term.vec
+        return self._inverse.GetSteps()
 
 
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:

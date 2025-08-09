@@ -151,7 +151,8 @@ class Simulation:
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
-                    self._pnp.step()
+                    n_iter = self._pnp.step()
+                    logger.debug("Electrostatic potential computed in %d iterations.", n_iter)
 
                 # 2. Independently apply reaction kinetics using diagonal newton (implicit)
                 # TODO: Consider full Newton step or mass projection if
@@ -172,9 +173,11 @@ class Simulation:
                         r_updates[i, :] += delta
                         is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
 
-                if not is_converged:
+                if is_converged:
+                    logger.debug("Reaction converged after %d Newton iterations.", iteration)
+                else:
                     logger.warning(
-                        "Reaction kinetics did not converge after %d Newton iterations. "
+                        "Reaction did not converge after %d Newton iterations. "
                         "Consider increasing the number of iterations or decreasing the time step.",
                         max_newton_iterations,
                     )
@@ -190,8 +193,13 @@ class Simulation:
                     for species, c in self._concentrations.items()
                 }
                 # Update each species by solving the implicit diffusion equation
+                n_iter = {}
                 for species, c in self._concentrations.items():
-                    self._diffusion[species].step(c, residual[species])
+                    n_iter[species] = self._diffusion[species].step(c, residual[species])
+                logger.debug(
+                    "Diffusion step completed in %s iterations.",
+                    ", ".join(f"{species.name}: {n}" for species, n in n_iter.items())
+                )
 
                 t += time_step
                 recorder.record(current_time=t)
