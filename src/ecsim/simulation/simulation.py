@@ -164,11 +164,11 @@ class Simulation:
                 while not is_converged and iteration < max_newton_iterations:
                     is_converged = True
                     iteration += 1
-                    # Compute the reaction updates for all species
-                    for s in self.species:
-                        self._reaction[s].assemble_linearization()
-                    # Apply the updates to the concentrations, stop when the updates are small
+                    # Update the concentrations, stop when the updates are small
+                    # Use Gauss-Seidel (compute linearization in every iteration)
+                    # instead of Jacobi (compute linearization once before all iterations)
                     for i, (species, c) in enumerate(self._concentrations.items()):
+                        self._reaction[species].assemble_linearization()
                         delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
                         r_updates[i, :] += delta
                         is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
