@@ -20,7 +20,7 @@ from ecsim.simulation import transport
 def run_simulation(buffer_conc, buffer_kd):
     """Run simulation with specific buffer concentration and KD."""
     # Create simulation name based on parameters
-    sim_name = f'sensor_buffer_competition_conc{buffer_conc}_kd{buffer_kd}'
+    sim_name = f"sensor_buffer_competition_conc{buffer_conc:.0e}_kd{buffer_kd:.0e}"
 
     # Geometry parameters
     ca_free = 1 * u.mmol / u.L
@@ -114,8 +114,7 @@ def run_simulation(buffer_conc, buffer_kd):
         end_time=4 * u.ms,
         time_step=5 * u.us,
         record_interval=100 * u.us,
-        n_threads=4,
-        max_newton_iterations=100,
+        n_threads=4
     )
 
 
