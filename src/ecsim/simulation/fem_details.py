@@ -186,10 +186,10 @@ class DiffusionSolver:
 class ReactionSolver:
     """FEM solver for the reaction terms."""
 
-    def __init__(self, source_term, derivative, lumped_mass_inv, dt):
-        self._source_term = source_term
+    def __init__(self, source_terms, derivatives, lumped_mass_inv, dt):
+        self._source_terms = source_terms
         self._dt_m_inv = dt * lumped_mass_inv
-        self._derivative = derivative
+        self._derivatives = derivatives
 
     @classmethod
     def for_all_species(
@@ -264,23 +264,30 @@ class ReactionSolver:
         w.data = mass.mat * v
         lumped_mass_inv = 1 / w.FV().NumPy()
 
-        return {s: cls(source_terms[s], derivatives[s], lumped_mass_inv, dt) for s in species}
+        return cls(source_terms, derivatives, lumped_mass_inv, dt)
 
-    def assemble_linearization(self) -> ngs.BaseVector:
+    def assemble_linearization(
+        self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]
+    ) -> ngs.BaseVector:
         """Assemble function value and derivative from the current state."""
-        self._source_term.Assemble()
-        self._derivative.Assemble()
+        for s, _ in concentrations.items():
+            self._source_terms[s].Assemble()
+            self._derivatives[s].Assemble()
 
     def diagonal_newton_step(
         self,
-        c: ngs.GridFunction,
+        concentrations: dict[ChemicalSpecies, ngs.GridFunction],
         cumulative_update: np.ndarray,
     ) -> np.ndarray:
         """Apply one step of a diagonal Newton method to the concentration vector."""
-        jac = 1 - self._dt_m_inv * self._derivative.vec.FV().NumPy()
-        res = self._dt_m_inv * self._source_term.vec.FV().NumPy() - cumulative_update
+        jac = np.zeros_like(cumulative_update)
+        res = np.zeros_like(cumulative_update)
+        for i, (s, _) in enumerate(concentrations.items()):
+            jac[i, :] = 1 - self._dt_m_inv * self._derivatives[s].vec.FV().NumPy()
+            res[i, :] = self._dt_m_inv * self._source_terms[s].vec.FV().NumPy() - cumulative_update[i, :]
         delta = res / jac
-        c.vec.FV().NumPy()[:] += delta
+        for i, (_, c) in enumerate(concentrations.items()):
+            c.vec.FV().NumPy()[:] += delta[i, :]
 
         return delta
 

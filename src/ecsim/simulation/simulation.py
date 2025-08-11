@@ -60,7 +60,7 @@ class Simulation:
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._pnp: PnpSolver = None
         self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
-        self._reaction: dict[ChemicalSpecies, ReactionSolver] = {}
+        self._reaction: ReactionSolver = None
 
 
     def add_species(
@@ -165,13 +165,11 @@ class Simulation:
                     is_converged = True
                     iteration += 1
                     # Update the concentrations, stop when the updates are small
-                    # Use Gauss-Seidel (compute linearization in every iteration)
-                    # instead of Jacobi (compute linearization once before all iterations)
-                    for i, (species, c) in enumerate(self._concentrations.items()):
-                        self._reaction[species].assemble_linearization()
-                        delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
-                        r_updates[i, :] += delta
-                        is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
+                    # Use Jacobi variant (compute linearization once before all iterations)
+                    self._reaction.assemble_linearization(self._concentrations)
+                    delta = self._reaction.diagonal_newton_step(self._concentrations, r_updates)
+                    r_updates += delta
+                    is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
 
                 if is_converged:
                     logger.debug("Reaction converged after %d Newton iterations.", iteration)
