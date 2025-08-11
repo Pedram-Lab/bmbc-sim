@@ -176,7 +176,7 @@ class DiffusionSolver:
         # Scale the transport terms
         scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
         scaled_transport.AsVector().FV().NumPy()[:] *= self._dt
-        mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False, precision=1e-7)
+        mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
 
         # Update the concentration
         c.vec.data += mstar_inv * res
@@ -337,7 +337,7 @@ class PnpSolver:
             free_dofs[-i - 1] = False
 
         smoother = a.CreateSmoother(free_dofs, GS=True) + p
-        inverse = ngs.CGSolver(a, pre=smoother, printrates=False, precision=1e-7)
+        inverse = ngs.CGSolver(a, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
         return cls(a, inverse, f, potential)
