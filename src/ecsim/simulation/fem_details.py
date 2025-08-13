@@ -277,7 +277,8 @@ class ReactionSolver:
 
     def diagonal_newton_step(
         self,
-        concentrations: dict[ChemicalSpecies, ngs.GridFunction]
+        concentrations: dict[ChemicalSpecies, ngs.GridFunction],
+        cumulative_updates: np.array,
     ) -> np.array:
         """Apply one step of a diagonal Newton method to the concentration vector."""
         c = [concentrations[s].vec.FV().NumPy() for s in concentrations]
@@ -287,7 +288,7 @@ class ReactionSolver:
         source = self._source_terms(*c, *r)
         deriv = self._derivatives(*c, *r)
         for i, _ in enumerate(concentrations):
-            res[i, :] = self._dt * source[i]
+            res[i, :] = self._dt * source[i] - cumulative_updates[i, :]
             jac[i, :] = 1 - self._dt * deriv[i]
         delta = res / jac
         for i, (_, c) in enumerate(concentrations.items()):
