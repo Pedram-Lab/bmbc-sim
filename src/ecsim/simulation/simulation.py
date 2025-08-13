@@ -166,9 +166,9 @@ class Simulation:
                     is_converged = True
                     iteration += 1
                     # Update the concentrations, stop when the updates are small
-                    delta = self._reaction.diagonal_newton_step(c_previous, c_current)
+                    delta = self._reaction.newton_step(c_previous, c_current)
                     is_converged &= np.all(np.abs(delta) < np.abs(c_current) * newton_tol)
-                    c_current += delta
+                    c_current -= delta
 
                 for i, c in enumerate(self._concentrations.values()):
                     c.vec.FV().NumPy()[:] = c_current[i]

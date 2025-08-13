@@ -286,7 +286,7 @@ class ReactionSolver:
 
         return cls(source_terms, derivatives, rates, dt)
 
-    def diagonal_newton_step(
+    def newton_step(
         self,
         c_previous: np.array,
         c_current: np.array,
@@ -303,7 +303,7 @@ class ReactionSolver:
 
         # Assemble residual and Jacobian
         for i in range(nc):
-            self._res[:, i, 0] = self._dt * source[i] - c_current[i, :] + c_previous[i, :]
+            self._res[:, i, 0] = c_current[i, :] - c_previous[i, :] - self._dt * source[i]
             self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
         for i in range(nc):
             for j in range(i + 1, nc):
