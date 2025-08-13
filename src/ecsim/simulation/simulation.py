@@ -6,6 +6,7 @@ import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
 import numpy as np
+import threadpoolctl
 
 from ecsim.logging import logger
 from ecsim.simulation.result_io import Recorder
@@ -60,7 +61,7 @@ class Simulation:
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._pnp: PnpSolver = None
         self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
-        self._reaction: dict[ChemicalSpecies, ReactionSolver] = {}
+        self._reaction: ReactionSolver = None
 
 
     def add_species(
@@ -95,7 +96,7 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
-            newton_tol: float = 1e-7,
+            newton_tol: float = 1e-8,
             max_newton_iterations: int = 20,
     ) -> None:
         """Run the simulation until a given end time.
@@ -114,6 +115,8 @@ class Simulation:
             solver used in the reaction kinetics.
         :raises ValueError: If the end time is not greater than the start time.
         """
+        threadpoolctl.threadpool_limits(limits=n_threads, user_api="blas")
+
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
@@ -146,7 +149,6 @@ class Simulation:
             )
 
             t = start_time.copy()
-            r_updates = np.empty((len(self.species), self._rd_fes.ndof), dtype=np.float64)
             for _ in trange(n_steps):
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
@@ -155,23 +157,21 @@ class Simulation:
                     logger.debug("Electrostatic potential computed in %d iterations.", n_iter)
 
                 # 2. Independently apply reaction kinetics using diagonal newton (implicit)
-                # TODO: Consider full Newton step or mass projection if
-                # stability / mass conservation is an issue
-                is_converged = False
-                r_updates.fill(0.0)
+                c_previous = np.stack([c.vec.FV().NumPy() for _, c in self._concentrations.items()])
+                c_current = c_previous.copy()
 
                 iteration = 0
+                is_converged = False
                 while not is_converged and iteration < max_newton_iterations:
                     is_converged = True
                     iteration += 1
                     # Update the concentrations, stop when the updates are small
-                    # Use Gauss-Seidel (compute linearization in every iteration)
-                    # instead of Jacobi (compute linearization once before all iterations)
-                    for i, (species, c) in enumerate(self._concentrations.items()):
-                        self._reaction[species].assemble_linearization()
-                        delta = self._reaction[species].diagonal_newton_step(c, r_updates[i, :])
-                        r_updates[i, :] += delta
-                        is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
+                    delta = self._reaction.diagonal_newton_step(c_previous, c_current)
+                    is_converged &= np.all(np.abs(delta) < np.abs(c_current) * newton_tol)
+                    c_current += delta
+
+                for i, c in enumerate(self._concentrations.values()):
+                    c.vec.FV().NumPy()[:] = c_current[i]
 
                 if is_converged:
                     logger.debug("Reaction converged after %d Newton iterations.", iteration)
