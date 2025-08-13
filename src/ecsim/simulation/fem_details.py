@@ -194,6 +194,8 @@ class ReactionSolver:
         self._derivatives = derivatives
         self._rates = rates
         self._dt = dt
+        self._res = None
+        self._jac = None
 
     @classmethod
     def for_all_species(
@@ -236,6 +238,9 @@ class ReactionSolver:
                 kf_gf, kr_gf = rates[(reactants, products)]
                 kf_gf.components[i].Set(kf)
                 kr_gf.components[i].Set(kr)
+
+        # Unpack rates to only store numpy vectors
+        rates = list(map(lambda x: x.vec.FV().NumPy().copy(), itertools.chain(*rates.values())))
 
         # Set up the reaction terms for each reaction
         source_terms = {s.name: sympy.Float(0.0) for s in species}
@@ -283,25 +288,30 @@ class ReactionSolver:
 
     def diagonal_newton_step(
         self,
-        concentrations: dict[ChemicalSpecies, ngs.GridFunction],
-        cumulative_updates: np.array,
+        c_previous: np.array,
+        c_current: np.array,
     ) -> np.array:
         """Apply one step of a diagonal Newton method to the concentration vector."""
-        c = [concentrations[s].vec.FV().NumPy() for s in concentrations]
-        r = list(map(lambda x: x.vec.FV().NumPy(), itertools.chain(*self._rates.values())))
-        nc, nn = len(concentrations), c[0].size
-        res = np.zeros((nn, nc))
-        jac = np.zeros((nn, nc, nc))
-        source = self._source_terms(*c, *r)
-        deriv = self._derivatives(*c, *r)
-        for i, _ in enumerate(concentrations):
-            res[:, i] = self._dt * source[i] - cumulative_updates[i, :]
-            jac[:, i, i] = 1 - self._dt * deriv[i][i]
-        delta = np.squeeze(np.linalg.solve(jac, np.expand_dims(res, 2))).T
-        for i, (_, c) in enumerate(concentrations.items()):
-            c.vec.FV().NumPy()[:] += delta[i, :]
+        # Prepare arguments for source term and derivative evaluations
+        nc, nn = c_previous.shape
+        args = [c_current[i, :] for i in range(nc)] + self._rates
+        if self._res is None or self._jac is None:
+            self._res = np.zeros((nn, nc, 1))
+            self._jac = np.zeros((nn, nc, nc))
+        source = self._source_terms(*args)
+        deriv = self._derivatives(*args)
 
-        return delta
+        # Assemble residual and Jacobian
+        for i in range(nc):
+            self._res[:, i, 0] = self._dt * source[i] - c_current[i, :] + c_previous[i, :]
+            self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
+        for i in range(nc):
+            for j in range(i + 1, nc):
+                self._jac[:, i, j] = -self._dt * deriv[i][j]
+                self._jac[:, j, i] = -self._dt * deriv[j][i]
+
+        # Compute Newton update
+        return np.squeeze(np.linalg.solve(self._jac, self._res)).T
 
 
 class PnpSolver:

@@ -146,7 +146,6 @@ class Simulation:
             )
 
             t = start_time.copy()
-            cumulative_updates = np.empty((len(self.species), self._rd_fes.ndof), dtype=np.float64)
             for _ in trange(n_steps):
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
@@ -155,19 +154,21 @@ class Simulation:
                     logger.debug("Electrostatic potential computed in %d iterations.", n_iter)
 
                 # 2. Independently apply reaction kinetics using diagonal newton (implicit)
-                # TODO: Consider full Newton step or mass projection if
-                # stability / mass conservation is an issue
-                is_converged = False
-                cumulative_updates.fill(0.0)
+                c_previous = np.stack([c.vec.FV().NumPy() for _, c in self._concentrations.items()])
+                c_current = c_previous.copy()
+
                 iteration = 0
+                is_converged = False
                 while not is_converged and iteration < max_newton_iterations:
                     is_converged = True
                     iteration += 1
                     # Update the concentrations, stop when the updates are small
-                    # Use Jacobi variant (compute linearization once before all iterations)
-                    delta = self._reaction.diagonal_newton_step(self._concentrations, cumulative_updates)
-                    cumulative_updates += delta
-                    is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
+                    delta = self._reaction.diagonal_newton_step(c_previous, c_current)
+                    is_converged &= np.all(np.abs(delta) < np.abs(c_current) * newton_tol)
+                    c_current += delta
+
+                for i, c in enumerate(self._concentrations.values()):
+                    c.vec.FV().NumPy()[:] = c_current[i]
 
                 if is_converged:
                     logger.debug("Reaction converged after %d Newton iterations.", iteration)
