@@ -21,6 +21,7 @@ dependencies = [
   "scipy",
   "sympy==1.14.0",
   "tqdm",
+  "threadpoolctl==3.6.0",
   'xarray',
   "zarr",
   'ngsolve==6.2.2406',

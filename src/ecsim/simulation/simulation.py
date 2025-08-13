@@ -6,6 +6,7 @@ import astropy.units as u
 import ngsolve as ngs
 from tqdm import trange
 import numpy as np
+import threadpoolctl
 
 from ecsim.logging import logger
 from ecsim.simulation.result_io import Recorder
@@ -114,6 +115,8 @@ class Simulation:
             solver used in the reaction kinetics.
         :raises ValueError: If the end time is not greater than the start time.
         """
+        threadpoolctl.threadpool_limits(limits=n_threads, user_api="blas")
+
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
