@@ -283,14 +283,15 @@ class ReactionSolver:
         """Apply one step of a diagonal Newton method to the concentration vector."""
         c = [concentrations[s].vec.FV().NumPy() for s in concentrations]
         r = list(map(lambda x: x.vec.FV().NumPy(), itertools.chain(*self._rates.values())))
-        res = np.zeros((len(concentrations), c[0].size))
-        jac = np.zeros((len(concentrations), c[0].size))
+        nc, nn = len(concentrations), c[0].size
+        res = np.zeros((nn, nc))
+        jac = np.zeros((nn, nc, nc))
         source = self._source_terms(*c, *r)
         deriv = self._derivatives(*c, *r)
         for i, _ in enumerate(concentrations):
-            res[i, :] = self._dt * source[i] - cumulative_updates[i, :]
-            jac[i, :] = 1 - self._dt * deriv[i]
-        delta = res / jac
+            res[:, i] = self._dt * source[i] - cumulative_updates[i, :]
+            jac[:, i, i] = 1 - self._dt * deriv[i]
+        delta = np.squeeze(np.linalg.solve(jac, np.expand_dims(res, 2))).T
         for i, (_, c) in enumerate(concentrations.items()):
             c.vec.FV().NumPy()[:] += delta[i, :]
 
