@@ -19,6 +19,7 @@ dependencies = [
   'pytest-cov',
   'pyvista',
   "scipy",
+  "sympy==1.14.0",
   "tqdm",
   'xarray',
   "zarr",
