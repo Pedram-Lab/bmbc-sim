@@ -146,7 +146,6 @@ class Simulation:
             )
 
             t = start_time.copy()
-            r_updates = np.empty((len(self.species), self._rd_fes.ndof), dtype=np.float64)
             for _ in trange(n_steps):
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
@@ -158,17 +157,13 @@ class Simulation:
                 # TODO: Consider full Newton step or mass projection if
                 # stability / mass conservation is an issue
                 is_converged = False
-                r_updates.fill(0.0)
-
                 iteration = 0
                 while not is_converged and iteration < max_newton_iterations:
                     is_converged = True
                     iteration += 1
                     # Update the concentrations, stop when the updates are small
                     # Use Jacobi variant (compute linearization once before all iterations)
-                    self._reaction.assemble_linearization(self._concentrations)
-                    delta = self._reaction.diagonal_newton_step(self._concentrations, r_updates)
-                    r_updates += delta
+                    delta = self._reaction.diagonal_newton_step(self._concentrations)
                     is_converged = is_converged & np.all(np.abs(delta) < newton_tol)
 
                 if is_converged:

@@ -1,7 +1,10 @@
+import itertools
+
 import ngsolve as ngs
 import astropy.units as u
 import astropy.constants as const
 import numpy as np
+import sympy
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -186,10 +189,11 @@ class DiffusionSolver:
 class ReactionSolver:
     """FEM solver for the reaction terms."""
 
-    def __init__(self, source_terms, derivatives, lumped_mass_inv, dt):
+    def __init__(self, source_terms, derivatives, rates, dt):
         self._source_terms = source_terms
-        self._dt_m_inv = dt * lumped_mass_inv
         self._derivatives = derivatives
+        self._rates = rates
+        self._dt = dt
 
     @classmethod
     def for_all_species(
@@ -203,88 +207,88 @@ class ReactionSolver:
         """Set up the solver for all given species."""
         source_terms = {s: ngs.LinearForm(fes) for s in species}
         derivatives = {s: ngs.LinearForm(fes) for s in species}
-        test_functions = fes.TestFunction()
         compartments = list(simulation_geometry.compartments.values())
 
         # Make the concentrations variables so one can differentiate in their direction
         concentrations = {s: concentrations[s].MakeVariable() for s in species}
 
-        # To decouple the reactions, use mass lumping. NGSolve does not account for the
-        # volume of the reference element in the integration rule, so we need to adjust
-        # the usual [1/4, 1/4, 1/4, 1/4] weights by the volume of the 3D unit simplex.
-        mass_lumping = {
-            ngs.ET.TET: ngs.IntegrationRule(
-                points=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
-                weights=[1 / 24, 1 / 24, 1 / 24, 1 / 24],
-            )
-        }
+        variables = {s.name: sympy.Symbol(s.name) for s in species}
+        reactions = {}
+        rates = {}
 
-        # Set up the reaction terms for each compartment and species
+        # Consolidate and evaluate coefficients
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
-            test = test_functions[i]
 
-            cf = {s: ngs.CoefficientFunction(0.0) for s in species}
-            d_cf = {s: ngs.CoefficientFunction(0.0) for s in species}
             for (reactants, products), (kf, kr) in coefficients.reactions.items():
-                forward_reaction = kf
-                for reactant in reactants:
-                    forward_reaction *= concentrations[reactant].components[i]
-                for reactant in reactants:
-                    cf[reactant] += -forward_reaction
-                    d_cf[reactant] += -forward_reaction.Diff(concentrations[reactant].components[i])
-                for product in products:
-                    cf[product] += forward_reaction
-                    d_cf[product] += forward_reaction.Diff(concentrations[product].components[i])
+                if (reactants, products) not in rates:
+                    # Create new symbols and vectors for the reaction rates
+                    rates[(reactants, products)] = (ngs.GridFunction(fes), ngs.GridFunction(fes))
+                    n = len(rates)
+                    variables[f"kf_{n}"] = sympy.Symbol(f"kf_{n}")
+                    variables[f"kr_{n}"] = sympy.Symbol(f"kr_{n}")
+                    reactions[(reactants, products)] = (
+                        variables[f"kf_{n}"],
+                        variables[f"kr_{n}"],
+                    )
 
-                reverse_reaction = kr
-                for product in products:
-                    reverse_reaction *= concentrations[product].components[i]
-                for reactant in reactants:
-                    cf[reactant] += reverse_reaction
-                    d_cf[reactant] += reverse_reaction.Diff(concentrations[reactant].components[i])
-                for product in products:
-                    cf[product] += -reverse_reaction
-                    d_cf[product] += -reverse_reaction.Diff(concentrations[product].components[i])
+                kf_gf, kr_gf = rates[(reactants, products)]
+                kf_gf.components[i].Set(kf)
+                kr_gf.components[i].Set(kr)
 
-            for s in species:
-                source_terms[s] += (cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
-                derivatives[s] += (d_cf[s] * test).Compile() * ngs.dx(intrules=mass_lumping)
+        # Set up the reaction terms for each reaction
+        source_terms = {s.name: 0.0 for s in species}
+        derivatives = {s.name: 0.0 for s in species}
+        for (reactants, products), (kf, kr) in reactions.items():
+            forward_reaction = kf
+            for r in reactants:
+                forward_reaction *= variables[r.name]
+            for r in reactants:
+                source_terms[r.name] -= forward_reaction
+                derivatives[r.name] -= forward_reaction.diff(variables[r.name])
+            for p in products:
+                source_terms[p.name] += forward_reaction
+                derivatives[p.name] += forward_reaction.diff(variables[p.name])
 
-        # Create a lumped mass matrix for decoupled time stepping
-        trial_and_test = tuple(zip(*fes.TnT()))
-        mass = ngs.BilinearForm(fes, check_unused=False)
-        for trial, test in trial_and_test:
-            mass += trial * test * ngs.dx
-        mass.Assemble()
+            reverse_reaction = kr
+            for p in products:
+                reverse_reaction *= variables[p.name]
+            for r in reactants:
+                source_terms[r.name] += reverse_reaction
+                derivatives[r.name] += reverse_reaction.diff(variables[r.name])
+            for p in products:
+                source_terms[p.name] += -reverse_reaction
+                derivatives[p.name] += -reverse_reaction.diff(variables[p.name])
 
-        v = mass.mat.CreateVector()
-        w = mass.mat.CreateVector()
-        v.FV().NumPy()[:] = 1
-        w.data = mass.mat * v
-        lumped_mass_inv = 1 / w.FV().NumPy()
+        source_terms = sympy.lambdify(
+            list(variables.values()),
+            list(source_terms.values()),
+            modules=['numpy'],
+            cse=True
+        )
+        derivatives = sympy.lambdify(
+            list(variables.values()),
+            list(derivatives.values()),
+            modules=['numpy'],
+            cse=True
+        )
 
-        return cls(source_terms, derivatives, lumped_mass_inv, dt)
-
-    def assemble_linearization(
-        self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]
-    ) -> ngs.BaseVector:
-        """Assemble function value and derivative from the current state."""
-        for s, _ in concentrations.items():
-            self._source_terms[s].Assemble()
-            self._derivatives[s].Assemble()
+        return cls(source_terms, derivatives, rates, dt)
 
     def diagonal_newton_step(
         self,
-        concentrations: dict[ChemicalSpecies, ngs.GridFunction],
-        cumulative_update: np.ndarray,
-    ) -> np.ndarray:
+        concentrations: dict[ChemicalSpecies, ngs.GridFunction]
+    ) -> np.array:
         """Apply one step of a diagonal Newton method to the concentration vector."""
-        jac = np.zeros_like(cumulative_update)
-        res = np.zeros_like(cumulative_update)
-        for i, (s, _) in enumerate(concentrations.items()):
-            jac[i, :] = 1 - self._dt_m_inv * self._derivatives[s].vec.FV().NumPy()
-            res[i, :] = self._dt_m_inv * self._source_terms[s].vec.FV().NumPy() - cumulative_update[i, :]
+        c = [concentrations[s].vec.FV().NumPy() for s in concentrations]
+        r = list(map(lambda x: x.vec.FV().NumPy(), itertools.chain(*self._rates.values())))
+        res = np.zeros((len(concentrations), c[0].size))
+        jac = np.zeros((len(concentrations), c[0].size))
+        source = self._source_terms(*c, *r)
+        deriv = self._derivatives(*c, *r)
+        for i, _ in enumerate(concentrations):
+            res[i, :] = self._dt * source[i]
+            jac[i, :] = 1 - self._dt * deriv[i]
         delta = res / jac
         for i, (_, c) in enumerate(concentrations.items()):
             c.vec.FV().NumPy()[:] += delta[i, :]
