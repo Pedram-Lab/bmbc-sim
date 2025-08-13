@@ -232,34 +232,40 @@ class ReactionSolver:
                         variables[f"kr_{n}"],
                     )
 
+                # Interpolate coefficient functions to FE grid to obtain node values
                 kf_gf, kr_gf = rates[(reactants, products)]
                 kf_gf.components[i].Set(kf)
                 kr_gf.components[i].Set(kr)
 
         # Set up the reaction terms for each reaction
-        source_terms = {s.name: 0.0 for s in species}
-        derivatives = {s.name: 0.0 for s in species}
+        source_terms = {s.name: sympy.Float(0.0) for s in species}
         for (reactants, products), (kf, kr) in reactions.items():
             forward_reaction = kf
             for r in reactants:
                 forward_reaction *= variables[r.name]
             for r in reactants:
                 source_terms[r.name] -= forward_reaction
-                derivatives[r.name] -= forward_reaction.diff(variables[r.name])
             for p in products:
                 source_terms[p.name] += forward_reaction
-                derivatives[p.name] += forward_reaction.diff(variables[p.name])
 
             reverse_reaction = kr
             for p in products:
                 reverse_reaction *= variables[p.name]
             for r in reactants:
                 source_terms[r.name] += reverse_reaction
-                derivatives[r.name] += reverse_reaction.diff(variables[r.name])
             for p in products:
                 source_terms[p.name] += -reverse_reaction
-                derivatives[p.name] += -reverse_reaction.diff(variables[p.name])
 
+        # Symbolically differentiate the source terms
+        derivatives = []
+        for s in species:
+            v = variables[s.name]
+            partial_derivative = []
+            for s in species:
+                partial_derivative.append(source_terms[s.name].diff(v))
+            derivatives.append(partial_derivative)
+
+        # Convert source terms and derivatives to callable functions
         source_terms = sympy.lambdify(
             list(variables.values()),
             list(source_terms.values()),
@@ -268,7 +274,7 @@ class ReactionSolver:
         )
         derivatives = sympy.lambdify(
             list(variables.values()),
-            list(derivatives.values()),
+            derivatives,
             modules=['numpy'],
             cse=True
         )
@@ -290,7 +296,7 @@ class ReactionSolver:
         deriv = self._derivatives(*c, *r)
         for i, _ in enumerate(concentrations):
             res[:, i] = self._dt * source[i] - cumulative_updates[i, :]
-            jac[:, i, i] = 1 - self._dt * deriv[i]
+            jac[:, i, i] = 1 - self._dt * deriv[i][i]
         delta = np.squeeze(np.linalg.solve(jac, np.expand_dims(res, 2))).T
         for i, (_, c) in enumerate(concentrations.items()):
             c.vec.FV().NumPy()[:] += delta[i, :]
