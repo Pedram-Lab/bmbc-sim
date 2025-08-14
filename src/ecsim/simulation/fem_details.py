@@ -291,27 +291,30 @@ class ReactionSolver:
     ) -> tuple[np.ndarray, int, bool]:
         """Apply one step of a Newton method with adaptive damping to the concentration vector."""
         nc, nn = concentrations.shape
-        c_current = concentrations.copy()
+        c_cur = concentrations.copy()
         if self._res is None or self._jac is None:
             self._res = np.zeros((nn, nc, 1))
             self._jac = np.zeros((nn, nc, nc))
 
         iteration = 0
         is_converged = False
+        atol, rtol = tol, np.sqrt(tol)
+        c_old_norm = np.linalg.norm(concentrations, ord=np.inf, axis=1)
 
         # Update the concentrations, stop when the updates are small
         while not is_converged and iteration < max_it:
             is_converged = True
             iteration += 1
+            c_cur_norm = np.linalg.norm(c_cur, ord=np.inf, axis=1)
 
             # Evaluate source terms and derivatives
-            args = [c_current[i, :] for i in range(nc)] + self._rates
+            args = [c_cur[i, :] for i in range(nc)] + self._rates
             source = self._source_terms(*args)
             deriv = self._derivatives(*args)
 
             # Assemble residual and Jacobian
             for i in range(nc):
-                self._res[:, i, 0] = c_current[i, :] - concentrations[i, :] - self._dt * source[i]
+                self._res[:, i, 0] = c_cur[i, :] - concentrations[i, :] - self._dt * source[i]
                 self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
             for i in range(nc):
                 for j in range(i + 1, nc):
@@ -321,18 +324,22 @@ class ReactionSolver:
             # Compute Newton update
             delta = np.squeeze(np.linalg.solve(self._jac, self._res)).T
 
+            # Are residual and step small enough?
+            upper_bound = atol + rtol * np.maximum(c_old_norm, c_cur_norm)
+            is_converged &= np.all(np.linalg.norm(delta, ord=np.inf, axis=1) < upper_bound)
+            is_converged &= np.all(np.linalg.norm(self._res, ord=np.inf, axis=(0, 2)) < upper_bound)
+
             # Only take a fractional step if full step would make a concentration negative
             eps = 1e-15
             with np.errstate(divide='ignore', invalid='ignore'):
-                positivity_cap = np.where(delta > 0.0, (c_current - eps) / delta, np.inf)
+                positivity_cap = np.where(delta > 0.0, (c_cur - eps) / delta, np.inf)
             alpha = np.minimum(1.0, (1 - eps) * np.min(positivity_cap))
             if alpha < 1:
-                delta *= alpha
-            c_current -= delta
+                c_cur -= alpha * delta
+            else:
+                c_cur -= delta
 
-            is_converged &= np.all(np.abs(delta) < np.abs(c_current) * tol)
-
-        return c_current, iteration, is_converged
+        return c_cur, iteration, is_converged
 
 
 class PnpSolver:

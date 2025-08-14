@@ -96,7 +96,7 @@ class Simulation:
             start_time: u.Quantity = 0 * u.s,
             record_interval: u.Quantity | None = None,
             n_threads: int = 4,
-            newton_tol: float = 1e-8,
+            newton_tol: float = 1e-12,
             max_newton_iterations: int = 20,
     ) -> None:
         """Run the simulation until a given end time.
