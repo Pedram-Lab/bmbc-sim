@@ -293,8 +293,8 @@ class ReactionSolver:
         nc, nn = concentrations.shape
         c_cur = concentrations.copy()
         if self._res is None or self._jac is None:
-            self._res = np.zeros((nn, nc, 1))
-            self._jac = np.zeros((nn, nc, nc))
+            self._res = np.zeros((nc, 1, nn))
+            self._jac = np.zeros((nc, nc, nn))
 
         iteration = 0
         is_converged = False
@@ -314,20 +314,21 @@ class ReactionSolver:
 
             # Assemble residual and Jacobian
             for i in range(nc):
-                self._res[:, i, 0] = c_cur[i, :] - concentrations[i, :] - self._dt * source[i]
-                self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
+                self._res[i, 0, :] = c_cur[i, :] - concentrations[i, :] - self._dt * source[i]
+                self._jac[i, i, :] = 1 - self._dt * deriv[i][i]
             for i in range(nc):
                 for j in range(i + 1, nc):
-                    self._jac[:, i, j] = -self._dt * deriv[i][j]
-                    self._jac[:, j, i] = -self._dt * deriv[j][i]
+                    self._jac[i, j, :] = -self._dt * deriv[i][j]
+                    self._jac[j, i, :] = -self._dt * deriv[j][i]
 
             # Compute Newton update
-            delta = np.squeeze(np.linalg.solve(self._jac, self._res)).T
+            delta = np.linalg.solve(self._jac.transpose((2, 0, 1)), self._res.transpose(2, 0, 1))
+            delta = np.squeeze(delta).T
 
             # Are residual and step small enough?
             upper_bound = atol + rtol * np.maximum(c_old_norm, c_cur_norm)
             is_converged &= np.all(np.linalg.norm(delta, ord=np.inf, axis=1) < upper_bound)
-            is_converged &= np.all(np.linalg.norm(self._res, ord=np.inf, axis=(0, 2)) < upper_bound)
+            is_converged &= np.all(np.linalg.norm(self._res, ord=np.inf, axis=(1, 2)) < upper_bound)
 
             # Only take a fractional step if full step would make a concentration negative
             eps = 1e-15
