@@ -157,24 +157,19 @@ class Simulation:
                     logger.debug("Electrostatic potential computed in %d iterations.", n_iter)
 
                 # 2. Independently apply reaction kinetics using diagonal newton (implicit)
-                c_previous = np.stack([c.vec.FV().NumPy() for _, c in self._concentrations.items()])
-                c_current = c_previous.copy()
-
-                iteration = 0
-                is_converged = False
-                while not is_converged and iteration < max_newton_iterations:
-                    is_converged = True
-                    iteration += 1
-                    # Update the concentrations, stop when the updates are small
-                    delta = self._reaction.newton_step(c_previous, c_current)
-                    is_converged &= np.all(np.abs(delta) < np.abs(c_current) * newton_tol)
-                    c_current -= delta
-
+                old_concentrations = np.stack(
+                    [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
+                )
+                new_concentrations, n_iter, is_converged = self._reaction.newton_step(
+                    old_concentrations,
+                    max_newton_iterations,
+                    newton_tol
+                )
                 for i, c in enumerate(self._concentrations.values()):
-                    c.vec.FV().NumPy()[:] = c_current[i]
+                    c.vec.FV().NumPy()[:] = new_concentrations[i]
 
                 if is_converged:
-                    logger.debug("Reaction converged after %d Newton iterations.", iteration)
+                    logger.debug("Reaction converged after %d Newton iterations.", n_iter)
                 else:
                     logger.warning(
                         "Reaction did not converge after %d Newton iterations. "

@@ -288,30 +288,45 @@ class ReactionSolver:
 
     def newton_step(
         self,
-        c_previous: np.array,
-        c_current: np.array,
-    ) -> np.array:
-        """Apply one step of a diagonal Newton method to the concentration vector."""
-        # Prepare arguments for source term and derivative evaluations
-        nc, nn = c_previous.shape
-        args = [c_current[i, :] for i in range(nc)] + self._rates
+        concentrations: np.ndarray,
+        max_it: int,
+        tol: float
+    ) -> tuple[np.ndarray, int, bool]:
+        """Apply one step of a Newton method with adaptive damping to the concentration vector."""
+        nc, nn = concentrations.shape
+        c_current = concentrations.copy()
         if self._res is None or self._jac is None:
             self._res = np.zeros((nn, nc, 1))
             self._jac = np.zeros((nn, nc, nc))
-        source = self._source_terms(*args)
-        deriv = self._derivatives(*args)
 
-        # Assemble residual and Jacobian
-        for i in range(nc):
-            self._res[:, i, 0] = c_current[i, :] - c_previous[i, :] - self._dt * source[i]
-            self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
-        for i in range(nc):
-            for j in range(i + 1, nc):
-                self._jac[:, i, j] = -self._dt * deriv[i][j]
-                self._jac[:, j, i] = -self._dt * deriv[j][i]
+        iteration = 0
+        is_converged = False
 
-        # Compute Newton update
-        return np.squeeze(np.linalg.solve(self._jac, self._res)).T
+        # Update the concentrations, stop when the updates are small
+        while not is_converged and iteration < max_it:
+            is_converged = True
+            iteration += 1
+
+            # Evaluate source terms and derivatives
+            args = [c_current[i, :] for i in range(nc)] + self._rates
+            source = self._source_terms(*args)
+            deriv = self._derivatives(*args)
+
+            # Assemble residual and Jacobian
+            for i in range(nc):
+                self._res[:, i, 0] = c_current[i, :] - concentrations[i, :] - self._dt * source[i]
+                self._jac[:, i, i] = 1 - self._dt * deriv[i][i]
+            for i in range(nc):
+                for j in range(i + 1, nc):
+                    self._jac[:, i, j] = -self._dt * deriv[i][j]
+                    self._jac[:, j, i] = -self._dt * deriv[j][i]
+
+            # Compute Newton update
+            delta = np.squeeze(np.linalg.solve(self._jac, self._res)).T
+            is_converged &= np.all(np.abs(delta) < np.abs(c_current) * tol)
+            c_current -= delta
+
+        return c_current, iteration, is_converged
 
 
 class PnpSolver:
