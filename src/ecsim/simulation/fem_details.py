@@ -259,16 +259,13 @@ class ReactionSolver:
             for r in reactants:
                 source_terms[r.name] += reverse_reaction
             for p in products:
-                source_terms[p.name] += -reverse_reaction
+                source_terms[p.name] -= reverse_reaction
 
         # Symbolically differentiate the source terms
-        derivatives = []
-        for s in species:
-            v = variables[s.name]
-            partial_derivative = []
-            for s in species:
-                partial_derivative.append(source_terms[s.name].diff(v))
-            derivatives.append(partial_derivative)
+        derivatives = [
+            [source_terms[si.name].diff(variables[sj.name]) for sj in species]
+            for si in species
+        ]
 
         # Convert source terms and derivatives to callable functions
         source_terms = sympy.lambdify(
