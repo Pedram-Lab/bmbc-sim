@@ -6,7 +6,7 @@ import astropy.constants as const
 import numpy as np
 import sympy
 import scipy.sparse as sp
-from scipy.sparse.linalg import gmres, LinearOperator
+from scipy.sparse.linalg import gmres, LinearOperator, spilu
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
@@ -20,31 +20,46 @@ def ngs_to_csr(mat: ngs.Matrix) -> sp.csr_matrix:
     return sp.csr_matrix((val, col, ind), shape=mat.shape)
 
 
-class JacobiPreconditioner:
-    """Jacobi preconditioner as a linear operator for scipy.sparse.linalg.gmres."""
+class ILUPreconditioner:
+    """Incomplete LU preconditioner as a linear operator for scipy.sparse.linalg.gmres."""
 
-    def __init__(self, matrix):
-        """Initialize Jacobi preconditioner with the diagonal of the matrix.
+    def __init__(self, matrix, fill_factor=10, drop_tol=1e-4):
+        """Initialize ILU preconditioner.
 
-        Args:
-            matrix: Sparse matrix (scipy.sparse format) or NGSolve matrix
+        :param matrix: Sparse matrix (scipy.sparse.csr)
+        :param fill_factor: Fill factor for ILU
+        :param drop_tol: Drop tolerance for ILU
         """
-        # Extract diagonal and compute its inverse
-        self.diag_inv = 1.0 / matrix.diagonal()
-        # Handle potential zeros on diagonal
-        self.diag_inv[~np.isfinite(self.diag_inv)] = 0.0
         self.shape = matrix.shape
 
-    def _matvec(self, x):
-        """Apply the Jacobi preconditioner (multiply by inverse diagonal)."""
+        try:
+            # Compute incomplete LU factorization
+            self.ilu = spilu(matrix.tocsc(), fill_factor=fill_factor, drop_tol=drop_tol)
+        except RuntimeError as e:
+            # Fallback to Jacobi if ILU fails
+            print(f"Warning: ILU factorization failed ({e}), falling back to Jacobi preconditioner")
+            self.ilu = None
+            self.diag_inv = 1.0 / matrix.diagonal()
+            self.diag_inv[~np.isfinite(self.diag_inv)] = 0.0
+
+    def _ilu_matvec(self, x):
+        """Apply the ILU preconditioner."""
+        return self.ilu.solve(x)
+
+    def _jac_matvec(self, x):
+        """Apply the fallback Jacobi preconditioner."""
         return self.diag_inv * x
 
     def as_linear_operator(self):
         """Return as scipy LinearOperator."""
-        return LinearOperator(self.shape, matvec=self._matvec)
+        if self.ilu is not None:
+            return LinearOperator(self.shape, matvec=self._ilu_matvec)
+        else:
+            return LinearOperator(self.shape, matvec=self._jac_matvec)
 
-class MatrixDifference:
-    """Class to compute the difference of two matrices."""
+
+class MatrixSum:
+    """Class to compute the sum of two matrices."""
 
     def __init__(self, a, b):
         if a.shape != b.shape:
@@ -54,7 +69,7 @@ class MatrixDifference:
 
     def _matvec(self, x):
         """Compute the sum of the two matrices."""
-        return self.a @ x - self.b @ x
+        return self.a @ x + self.b @ x
 
     def as_linear_operator(self):
         """Return as scipy LinearOperator."""
@@ -63,11 +78,11 @@ class MatrixDifference:
 class DiffusionSolver:
     """FEM solver for diffusion and transport equations."""
 
-    def __init__(self, a, transport, m_star, jacobi_preconditioner, source_term, dt):
+    def __init__(self, a, transport, m_star, preconditioner, source_term, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
-        self._jacobi_preconditioner = jacobi_preconditioner
+        self._preconditioner = preconditioner
         self._source_term = source_term
         self._dt = dt
 
@@ -204,8 +219,8 @@ class DiffusionSolver:
         mass = mass.mat.DeleteZeroElements(1e-10)
         mass_csr = ngs_to_csr(mass)
 
-        # Create Jacobi preconditioner for the system matrix
-        jacobi_preconditioner = JacobiPreconditioner(mass_csr).as_linear_operator()
+        # Create preconditioner for the system matrix
+        preconditioner = ILUPreconditioner(mass_csr).as_linear_operator()
 
         stiffness = stiffness.mat.DeleteZeroElements(1e-10)
 
@@ -213,62 +228,46 @@ class DiffusionSolver:
             stiffness,
             transport_term,
             mass_csr,
-            jacobi_preconditioner,
+            preconditioner,
             source_term,
             dt
         )
 
-    def compute_residual(self, c: ngs.GridFunction) -> ngs.la.DynamicVectorExpression:
-        """Compute the residual vector for the implicit Euler integrator."""
-        # Update the transport terms (implicit and explicit)
+    def step(self, c: ngs.GridFunction):
+        """Apply the implicit Euler step to the concentration vector."""
+        # Assemble matrices
         self._transport.Assemble()
         self._source_term.Assemble()
         stiffness = self._a - self._transport.mat
 
-        return self._dt * (self._source_term.vec - stiffness * c.vec)
+        res = self._dt * (self._source_term.vec - stiffness * c.vec)
 
-    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression) -> int:
-        """Apply the implicit Euler step to the concentration vector."""
         # Scale the transport terms
         scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
-        scaled_transport.AsVector().FV().NumPy()[:] *= self._dt
-
-        # Convert both matrices to scipy sparse format first
-        transport_csr = ngs_to_csr(scaled_transport)
+        scaled_transport.AsVector().FV().NumPy()[:] *= -self._dt
 
         # Create the system matrix: M* - dt * transport
-        system_matrix_csr = MatrixDifference(self._m_star, transport_csr).as_linear_operator()
-
-        # Convert residual to numpy array
+        transport_csr = ngs_to_csr(scaled_transport)
+        system_matrix_csr = MatrixSum(self._m_star, transport_csr).as_linear_operator()
         rhs = res.Evaluate()
 
         # Solve using scipy GMRES
-        num_iters = [0]
-        def callback(x):
-            num_iters[0] += 1
-
         solution, info = gmres(
             system_matrix_csr,
             rhs.FV().NumPy(),
-            M=self._jacobi_preconditioner,
+            M=self._preconditioner,
             rtol=1e-8,
             atol=1e-12,
             maxiter=1000,
-            callback=callback,
         )
 
         if info > 0:
             print(f"Warning: GMRES did not converge after {info} iterations")
         elif info < 0:
             print(f"Error: GMRES failed with error code {info}")
-        else:
-            print(f"GMRES converged after {num_iters[0]} iterations")
 
         # Update the concentration
         c.vec.FV().NumPy()[:] += solution
-
-        # Return number of iterations (or negative error code)
-        return max(info, 0) if info >= 0 else abs(info)
 
 
 class ReactionSolver:

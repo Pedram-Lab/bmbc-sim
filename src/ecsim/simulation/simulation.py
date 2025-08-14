@@ -153,8 +153,7 @@ class Simulation:
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
-                    n_iter = self._pnp.step()
-                    logger.debug("Electrostatic potential computed in %d iterations.", n_iter)
+                    self._pnp.step()
 
                 # 2. Independently apply reaction kinetics using diagonal newton (implicit)
                 old_concentrations = np.stack(
@@ -182,19 +181,9 @@ class Simulation:
                 for membrane in self.simulation_geometry.membranes.values():
                     for _, _, _, transport in membrane.get_transport():
                         transport.update_flux(t)
-                # Compute the residual for each species given the current concentrations
-                residual = {
-                    species: self._diffusion[species].compute_residual(c)
-                    for species, c in self._concentrations.items()
-                }
                 # Update each species by solving the implicit diffusion equation
-                n_iter = {}
                 for species, c in self._concentrations.items():
-                    n_iter[species] = self._diffusion[species].step(c, residual[species])
-                logger.debug(
-                    "Diffusion step completed in %s iterations.",
-                    ", ".join(f"{species.name}: {n}" for species, n in n_iter.items())
-                )
+                    self._diffusion[species].step(c)
 
                 t += time_step
                 recorder.record(current_time=t)
