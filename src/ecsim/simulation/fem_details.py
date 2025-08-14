@@ -75,6 +75,7 @@ class MatrixSum:
         """Return as scipy LinearOperator."""
         return LinearOperator(self.a.shape, matvec=self._matvec)
 
+
 class DiffusionSolver:
     """FEM solver for diffusion and transport equations."""
 
@@ -223,9 +224,10 @@ class DiffusionSolver:
         preconditioner = ILUPreconditioner(mass_csr).as_linear_operator()
 
         stiffness = stiffness.mat.DeleteZeroElements(1e-10)
+        stiffness_csr = ngs_to_csr(stiffness)
 
         return cls(
-            stiffness,
+            stiffness_csr,
             transport_term,
             mass_csr,
             preconditioner,
@@ -233,28 +235,26 @@ class DiffusionSolver:
             dt
         )
 
-    def step(self, c: ngs.GridFunction):
+    def step(self, concentration: ngs.GridFunction):
         """Apply the implicit Euler step to the concentration vector."""
         # Assemble matrices
         self._transport.Assemble()
         self._source_term.Assemble()
-        stiffness = self._a - self._transport.mat
+        transport = self._transport.mat.DeleteZeroElements(1e-10)
+        transport_csr = ngs_to_csr(transport)
 
-        res = self._dt * (self._source_term.vec - stiffness * c.vec)
-
-        # Scale the transport terms
-        scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
-        scaled_transport.AsVector().FV().NumPy()[:] *= -self._dt
+        # Compute the residual
+        c = concentration.vec.FV().NumPy().copy()
+        res = self._dt * (self._source_term.vec.FV().NumPy() - self._a * c + transport_csr * c)
 
         # Create the system matrix: M* - dt * transport
-        transport_csr = ngs_to_csr(scaled_transport)
+        transport_csr.data *= -self._dt
         system_matrix_csr = MatrixSum(self._m_star, transport_csr).as_linear_operator()
-        rhs = res.Evaluate()
 
         # Solve using scipy GMRES
         solution, info = gmres(
             system_matrix_csr,
-            rhs.FV().NumPy(),
+            res,
             M=self._preconditioner,
             rtol=1e-8,
             atol=1e-12,
@@ -267,7 +267,7 @@ class DiffusionSolver:
             print(f"Error: GMRES failed with error code {info}")
 
         # Update the concentration
-        c.vec.FV().NumPy()[:] += solution
+        concentration.vec.FV().NumPy()[:] += solution
 
 
 class ReactionSolver:
