@@ -323,7 +323,7 @@ class ReactionSolver:
 
             # Compute Newton update
             delta = np.linalg.solve(self._jac.transpose((2, 0, 1)), self._res.transpose(2, 0, 1))
-            delta = np.squeeze(delta).T
+            delta = np.reshape(delta, (nn, nc)).T
 
             # Are residual and step small enough?
             upper_bound = atol + rtol * np.maximum(c_old_norm, c_cur_norm)
