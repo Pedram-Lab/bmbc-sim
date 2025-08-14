@@ -320,8 +320,17 @@ class ReactionSolver:
 
             # Compute Newton update
             delta = np.squeeze(np.linalg.solve(self._jac, self._res)).T
-            is_converged &= np.all(np.abs(delta) < np.abs(c_current) * tol)
+
+            # Only take a fractional step if full step would make a concentration negative
+            eps = 1e-15
+            with np.errstate(divide='ignore', invalid='ignore'):
+                positivity_cap = np.where(delta > 0.0, (c_current - eps) / delta, np.inf)
+            alpha = np.minimum(1.0, (1 - eps) * np.min(positivity_cap))
+            if alpha < 1:
+                delta *= alpha
             c_current -= delta
+
+            is_converged &= np.all(np.abs(delta) < np.abs(c_current) * tol)
 
         return c_current, iteration, is_converged
 
