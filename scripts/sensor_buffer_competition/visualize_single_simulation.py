@@ -9,6 +9,7 @@ It produces four plots:
 from datetime import datetime
 
 import xarray as xr
+import numpy as np
 import matplotlib.pyplot as plt
 
 import ecsim
@@ -142,49 +143,39 @@ plt.savefig(f"{FILE_PREFIX}_sensor_complex.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 
-# === Plot 4: All species ===
-fig4, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharex=True)
-for ax4, region in zip(axes, compartments):
-    region_size = region_sizes[region]
-    ax4.plot(
-        free_ca.sel(region=region).time,
-        free_ca.sel(region=region) / region_size,
-        label=r"Free $\mathrm{Ca}^{2+}$",
-    )
-    ax4.plot(
-        total_ca.sel(region=region).time,
-        total_ca.sel(region=region) / region_size,
-        linestyle="--",
-        label=r"Total $\mathrm{Ca}^{2+}$",
-    )
-    ax4.plot(
-        buffer.sel(region=region).time,
-        buffer.sel(region=region) / region_size,
-        label="Buffer",
-    )
-    ax4.plot(
-        sensor_complex.sel(region=region).time,
-        sensor_complex.sel(region=region) / region_size,
-        linestyle="--",
-        label="Sensor complex",
-    )
-    ax4.plot(
-        sensor.sel(region=region).time,
-        sensor.sel(region=region) / region_size,
-        label="Sensor",
-    )
-    ax4.plot(
-        sensor_complex.sel(region=region).time,
-        sensor_complex.sel(region=region) / region_size,
-        linestyle="--",
-        label="Sensor complex",
-    )
-    ax4.set_ylabel("Average concentration (mM)")
-    ax4.set_title(f"{region}")
-    ax4.set_xlabel("Time (ms)")
-    ax4.grid(True)
-    ax4.set_ylim(0, 2)
-axes[0].legend()
+# === Plot 4: mass conservation ===
+def get_average_concentration(*species):
+    """Get average concentration and it's initial value."""
+    total_volume = sum(region_sizes.values())
+    avg_concentration = 0
+    for s in species:
+        avg_concentration += (s.sel(region="top") + s.sel(region="bottom")) / total_volume
+    return avg_concentration, avg_concentration.isel(time=0)
+
+fig4, ax4 = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+avg_ca, initial_ca = get_average_concentration(free_ca, buffer_complex, sensor_complex)
+ax4.semilogy(
+    avg_ca.time,
+    np.abs(avg_ca - initial_ca) / initial_ca,
+    label=r"$\mathrm{Ca}^{2+}$",
+)
+avg_buffer, initial_buffer = get_average_concentration(buffer, buffer_complex)
+ax4.semilogy(
+    avg_buffer.time,
+    np.abs(avg_buffer - initial_buffer) / initial_buffer,
+    label=r"Buffer",
+)
+avg_sensor, initial_sensor = get_average_concentration(sensor, sensor_complex)
+ax4.semilogy(
+    avg_sensor.time,
+    np.abs(avg_sensor - initial_sensor) / initial_sensor,
+    label="Sensor",
+)
+ax4.set_ylabel("Deviation from initial concentration (relative)")
+ax4.set_xlabel("Time (ms)")
+ax4.grid(True)
+ax4.set_ylim(0, 2)
+ax4.legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle(
     r"Sensor-Buffer competition $[B]_{\mathrm{bottom}}$ = %.0e mM, $Kd_B$ = %.0e mM"
@@ -192,7 +183,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_all_species.pdf", bbox_inches="tight")
+plt.savefig(f"{FILE_PREFIX}_mass_conservation.pdf", bbox_inches="tight")
 plt.show()
 plt.close()
 

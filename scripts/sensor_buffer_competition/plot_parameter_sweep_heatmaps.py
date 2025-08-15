@@ -12,8 +12,6 @@ import ecsim
 # Define the parameter sweep values (from parameter_sweep.py)
 buffer_concs = [1e-6, 1e-3, 1.0, 1e3]  # in mmol/L
 buffer_kds = [1e-6, 1e-3, 1.0, 1e3]    # in mmol/L
-buffer_conc_names = ["1e-06", "0.001", "1.0", "1000.0"]
-buffer_kd_names = ["1e-06", "0.001", "1.0", "1000.0"]
 Kd_sensor = 1  # from visualize_single_simulation.py
 
 # Initialize arrays to store results
@@ -24,14 +22,10 @@ ratios_bottom = np.zeros((len(buffer_concs), len(buffer_kds)))
 results_root = Path(__file__).resolve().parents[2] / "results" / "heatmap_data_plot"
 
 # Loop through all parameter combinations
-running_count = 0
 for j, conc in enumerate(buffer_concs):
     for i, kd in enumerate(buffer_kds):
         # Construct simulation name pattern
-        running_count += 1
-        conc_str = buffer_conc_names[j]
-        kd_str = buffer_kd_names[i]
-        sim_name = f"s{running_count}_sensor_buffer_competition_conc{conc_str}_kd{kd_str}"
+        sim_name = f"sensor_buffer_competition_conc{conc:.0e}_kd{kd:.0e}"
 
         try:
             # Try to load the most recent result for this parameter combination
@@ -59,7 +53,7 @@ for j, conc in enumerate(buffer_concs):
                 ca_act = ca.sel(region=compartment) / region_sizes[compartment]
                 ratio_array[i, j] = (ca_est / ca_act).squeeze().values
 
-        except Exception as e:
+        except (FileNotFoundError, KeyError, ValueError) as e:
             print(f"Error processing {sim_name}: {e}")
             ratios_top[i, j] = np.nan
             ratios_bottom[i, j] = np.nan
