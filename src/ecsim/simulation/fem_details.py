@@ -5,75 +5,20 @@ import astropy.units as u
 import astropy.constants as const
 import numpy as np
 import sympy
-import scipy.sparse as sp
-from scipy.sparse.linalg import gmres, LinearOperator, spilu
+import scipy as sp
+import scipy.sparse as sps
+import scipy.sparse.linalg as spla
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
 
 
-def ngs_to_csr(mat: ngs.Matrix) -> sp.csr_matrix:
+def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:
     """Convert an NGSolve matrix to a SciPy CSR matrix."""
     # Extract the matrix data
     data = mat.CSR()
     val, col, ind = (v.NumPy().copy() for v in data)
-    return sp.csr_matrix((val, col, ind), shape=mat.shape)
-
-
-class ILUPreconditioner:
-    """Incomplete LU preconditioner as a linear operator for scipy.sparse.linalg.gmres."""
-
-    def __init__(self, matrix, fill_factor=10, drop_tol=1e-4):
-        """Initialize ILU preconditioner.
-
-        :param matrix: Sparse matrix (scipy.sparse.csr)
-        :param fill_factor: Fill factor for ILU
-        :param drop_tol: Drop tolerance for ILU
-        """
-        self.shape = matrix.shape
-
-        try:
-            # Compute incomplete LU factorization
-            self.ilu = spilu(matrix.tocsc(), fill_factor=fill_factor, drop_tol=drop_tol)
-        except RuntimeError as e:
-            # Fallback to Jacobi if ILU fails
-            print(f"Warning: ILU factorization failed ({e}), falling back to Jacobi preconditioner")
-            self.ilu = None
-            self.diag_inv = 1.0 / matrix.diagonal()
-            self.diag_inv[~np.isfinite(self.diag_inv)] = 0.0
-
-    def _ilu_matvec(self, x):
-        """Apply the ILU preconditioner."""
-        return self.ilu.solve(x)
-
-    def _jac_matvec(self, x):
-        """Apply the fallback Jacobi preconditioner."""
-        return self.diag_inv * x
-
-    def as_linear_operator(self):
-        """Return as scipy LinearOperator."""
-        if self.ilu is not None:
-            return LinearOperator(self.shape, matvec=self._ilu_matvec)
-        else:
-            return LinearOperator(self.shape, matvec=self._jac_matvec)
-
-
-class MatrixSum:
-    """Class to compute the sum of two matrices."""
-
-    def __init__(self, a, b):
-        if a.shape != b.shape:
-            raise ValueError("Incompatible matrix shapes")
-        self.a = a
-        self.b = b
-
-    def _matvec(self, x):
-        """Compute the sum of the two matrices."""
-        return self.a @ x + self.b @ x
-
-    def as_linear_operator(self):
-        """Return as scipy LinearOperator."""
-        return LinearOperator(self.a.shape, matvec=self._matvec)
+    return sps.csr_matrix((val, col, ind), shape=mat.shape)
 
 
 class DiffusionSolver:
@@ -221,7 +166,9 @@ class DiffusionSolver:
         mass_csr = ngs_to_csr(mass)
 
         # Create preconditioner for the system matrix
-        preconditioner = ILUPreconditioner(mass_csr).as_linear_operator()
+        # spilu on csc is more efficient -> use symmmetry of m
+        m_ilu = spla.spilu(mass_csr.T, fill_factor=5)
+        preconditioner = spla.LinearOperator(mass_csr.shape, matvec=m_ilu.solve, dtype=np.float64)
 
         stiffness = stiffness.mat.DeleteZeroElements(1e-10)
         stiffness_csr = ngs_to_csr(stiffness)
@@ -249,10 +196,14 @@ class DiffusionSolver:
 
         # Create the system matrix: M* - dt * transport
         transport_csr.data *= -self._dt
-        system_matrix_csr = MatrixSum(self._m_star, transport_csr).as_linear_operator()
+        system_matrix_csr = spla.LinearOperator(
+            transport_csr.shape,
+            matvec=lambda x: self._m_star @ x + transport_csr @ x,
+            dtype=np.float64,
+        )
 
         # Solve using scipy GMRES
-        solution, info = gmres(
+        solution, info = spla.gmres(
             system_matrix_csr,
             res,
             M=self._preconditioner,
@@ -430,9 +381,9 @@ class ReactionSolver:
 class PnpSolver:
     """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
-    def __init__(self, stiffness, inverse, source_term, potential):
-        self._stiffness = stiffness
-        self._inverse = inverse
+    def __init__(self, matrix, preconditioner, source_term, potential):
+        self._matrix = matrix
+        self._preconditioner = preconditioner
         self._source_term = source_term
         self.potential = potential
 
@@ -447,17 +398,18 @@ class PnpSolver:
         """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
+        n_space = sum(fes.components[k].ndof for k in range(len(compartments)))
 
-        # Set up potential matrix and source term
+        # Set up potential matrix [[a, b], [b^T, 0]] and source term
         trial, test = fes.TnT()
         offset = len(compartments)
         a = ngs.BilinearForm(fes, check_unused=False)
+        b = ngs.BilinearForm(fes, check_unused=False)
         f = ngs.LinearForm(fes)
         for k, compartment in enumerate(compartments):
             eps = compartment.coefficients.permittivity
             a += eps * ngs.grad(trial[k]) * ngs.grad(test[k]) * ngs.dx
-            a += trial[k + offset] * test[k] * ngs.dx
-            a += trial[k] * test[k + offset] * ngs.dx
+            b += trial[k + offset] * test[k] * ngs.dx
 
             for s in species:
                 c = concentrations[s]
@@ -465,31 +417,53 @@ class PnpSolver:
 
         a.Assemble()
         a = a.mat.DeleteZeroElements(1e-10)
+        a = ngs_to_csr(a)
+        a = a[:n_space, :n_space]
+
+        b.Assemble()
+        b = b.mat.DeleteZeroElements(1e-10)
+        b = ngs_to_csr(b)
+        b = b[:n_space, n_space:]
+
+        matrix = sps.block_array([[a, b], [b.T, None]], format='csr')
 
         # Assemble preconditioner
-        p = ngs.BilinearForm(fes, check_unused=False)
-        for k, compartment in enumerate(compartments):
-            p += trial[k + offset] * test[k + offset] * ngs.dx
+        # spilu on csc is more efficient -> use symmmetry of a
+        a_ilu = spla.spilu(a.T)
+        s = -b.T @ (a_ilu.solve(b.toarray()))
+        def precond_step(x):
+            y = a_ilu.solve(x[:n_space])
+            d = x[n_space:] - b.T @ y
+            lam = sp.linalg.solve(s, -d)
+            return np.concatenate([y + b @ lam, lam])
 
-        p.Assemble()
-        p = p.mat.DeleteZeroElements(1e-10)
+        preconditioner = spla.LinearOperator(matrix.shape, matvec=precond_step)
 
-        free_dofs = fes.FreeDofs()
-        for i in range(len(species)):
-            free_dofs[-i - 1] = False
-
-        smoother = a.CreateSmoother(free_dofs, GS=True) + p
-        inverse = ngs.CGSolver(a, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
-        return cls(a, inverse, f, potential)
+        return cls(matrix, preconditioner, f, potential)
 
 
-    def step(self) -> int:
+    def step(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
-        self.potential.vec.data = self._inverse * self._source_term.vec
-        return self._inverse.GetSteps()
+
+        solution, info = spla.gmres(
+            self._matrix,
+            self._source_term.vec.FV().NumPy(),
+            M=self._preconditioner,
+            x0=self.potential.vec.FV().NumPy(),
+            rtol=1e-8,
+            atol=1e-12,
+            maxiter=1000,
+        )
+
+        if info > 0:
+            print(f"GMRES did not converge in {info} iterations")
+        elif info < 0:
+            print(f"GMRES failed with error code {info}")
+
+        self.potential.vec.FV().NumPy()[:] = solution
 
 
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:
