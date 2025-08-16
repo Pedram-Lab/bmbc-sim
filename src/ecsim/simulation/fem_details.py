@@ -5,7 +5,6 @@ import astropy.units as u
 import astropy.constants as const
 import numpy as np
 import sympy
-import scipy as sp
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
@@ -381,9 +380,8 @@ class ReactionSolver:
 class PnpSolver:
     """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
-    def __init__(self, matrix, preconditioner, source_term, potential):
+    def __init__(self, matrix, source_term, potential):
         self._matrix = matrix
-        self._preconditioner = preconditioner
         self._source_term = source_term
         self.potential = potential
 
@@ -399,6 +397,7 @@ class PnpSolver:
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
         n_space = sum(fes.components[k].ndof for k in range(len(compartments)))
+        shape = (n_space + len(species), n_space + len(species))
 
         # Set up potential matrix [[a, b], [b^T, 0]] and source term
         trial, test = fes.TnT()
@@ -425,43 +424,39 @@ class PnpSolver:
         b = ngs_to_csr(b)
         b = b[:n_space, n_space:]
 
-        matrix = sps.block_array([[a, b], [b.T, None]], format='csr')
-
-        # Assemble preconditioner
-        # spilu on csc is more efficient -> use symmmetry of a
-        a_ilu = spla.spilu(a.T)
-        s = -b.T @ (a_ilu.solve(b.toarray()))
-        def precond_step(x):
-            y = a_ilu.solve(x[:n_space])
-            d = x[n_space:] - b.T @ y
-            lam = sp.linalg.solve(s, -d)
-            return np.concatenate([y + b @ lam, lam])
-
-        preconditioner = spla.LinearOperator(matrix.shape, matvec=precond_step)
+        # Augmented Lagrangian formulation: [[a + tau * b * bT, b], [bT, -I / tau]]
+        tau = np.mean(a.diagonal())
+        tau_inv = 1 / tau
+        def matvec_full(x):
+            f, g = x[:n_space], tau_inv * x[n_space:]
+            r = b.T @ f
+            s = a @ f + tau * (b @ (r + g))
+            return np.concatenate([s, r - g])
+        matrix = spla.LinearOperator(shape, matvec=matvec_full, dtype=np.float64)
 
         potential = ngs.GridFunction(fes)
 
-        return cls(matrix, preconditioner, f, potential)
+        return cls(matrix, f, potential)
 
 
     def step(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
 
-        solution, info = spla.gmres(
+        # Minres without preconditioning seemed to yield the best results
+        solution, info = spla.minres(
             self._matrix,
             self._source_term.vec.FV().NumPy(),
-            M=self._preconditioner,
             x0=self.potential.vec.FV().NumPy(),
             rtol=1e-8,
-            atol=1e-12,
+            # atol=1e-12,
             maxiter=1000,
         )
 
         if info > 0:
-            print(f"GMRES did not converge in {info} iterations")
+            print(f"Warning: Minres did not converge in {info} iterations")
         elif info < 0:
-            print(f"GMRES failed with error code {info}")
+            print(f"Error: Minres failed with error code {info}")
 
         self.potential.vec.FV().NumPy()[:] = solution
 
