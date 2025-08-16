@@ -165,7 +165,7 @@ class DiffusionSolver:
         mass_csr = ngs_to_csr(mass)
 
         # Create preconditioner for the system matrix
-        # spilu on csc is more efficient -> use symmmetry of m
+        # spilu on csc is more efficient -> use symmmetry of M*
         m_ilu = spla.spilu(mass_csr.T, fill_factor=5)
         preconditioner = spla.LinearOperator(mass_csr.shape, matvec=m_ilu.solve, dtype=np.float64)
 
@@ -206,7 +206,7 @@ class DiffusionSolver:
             system_matrix_csr,
             res,
             M=self._preconditioner,
-            rtol=1e-8,
+            rtol=1e-6,
             atol=1e-12,
             maxiter=1000,
         )
@@ -449,7 +449,6 @@ class PnpSolver:
             self._source_term.vec.FV().NumPy(),
             x0=self.potential.vec.FV().NumPy(),
             rtol=1e-8,
-            # atol=1e-12,
             maxiter=1000,
         )
 
