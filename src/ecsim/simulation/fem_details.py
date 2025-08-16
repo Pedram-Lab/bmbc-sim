@@ -5,19 +5,29 @@ import astropy.units as u
 import astropy.constants as const
 import numpy as np
 import sympy
+import scipy.sparse as sps
+import scipy.sparse.linalg as spla
 
 from ecsim.simulation.simulation_agents import ChemicalSpecies
 from ecsim.units import to_simulation_units
 
 
+def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:
+    """Convert an NGSolve matrix to a SciPy CSR matrix."""
+    # Extract the matrix data
+    data = mat.CSR()
+    val, col, ind = (v.NumPy().copy() for v in data)
+    return sps.csr_matrix((val, col, ind), shape=mat.shape)
+
+
 class DiffusionSolver:
     """FEM solver for diffusion and transport equations."""
 
-    def __init__(self, a, transport, m_star, pre, source_term, dt):
+    def __init__(self, a, transport, m_star, preconditioner, source_term, dt):
         self._a = a
         self._transport = transport
         self._m_star = m_star
-        self._pre = pre
+        self._preconditioner = preconditioner
         self._source_term = source_term
         self._dt = dt
 
@@ -149,41 +159,65 @@ class DiffusionSolver:
         mass.Assemble()
         stiffness.Assemble()
 
-        # Invert the matrix for the implicit Euler integrator
-        # Use GMRes with a Gauss-Seidel smoother (Jacobi converges to wrong solution!)
+        # Invert the matrix for the implicit Euler integrator (M* = M + dt * A)
         mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
         mass = mass.mat.DeleteZeroElements(1e-10)
-        smoother = mass.CreateSmoother(fes.FreeDofs(), GS=True)
+        mass_csr = ngs_to_csr(mass)
+
+        # Create preconditioner for the system matrix
+        # spilu on csc is more efficient -> use symmmetry of M*
+        m_ilu = spla.spilu(mass_csr.T, fill_factor=5)
+        preconditioner = spla.LinearOperator(mass_csr.shape, matvec=m_ilu.solve, dtype=np.float64)
+
         stiffness = stiffness.mat.DeleteZeroElements(1e-10)
+        stiffness_csr = ngs_to_csr(stiffness)
 
         return cls(
-            stiffness,
+            stiffness_csr,
             transport_term,
-            mass,
-            smoother,
+            mass_csr,
+            preconditioner,
             source_term,
             dt
         )
 
-    def compute_residual(self, c: ngs.GridFunction) -> ngs.la.DynamicVectorExpression:
-        """Compute the residual vector for the implicit Euler integrator."""
-        # Update the transport terms (implicit and explicit)
+    def step(self, concentration: ngs.GridFunction):
+        """Apply the implicit Euler step to the concentration vector."""
+        # Assemble matrices
         self._transport.Assemble()
         self._source_term.Assemble()
-        stiffness = self._a - self._transport.mat
+        transport = self._transport.mat.DeleteZeroElements(1e-10)
+        transport_csr = ngs_to_csr(transport)
 
-        return self._dt * (self._source_term.vec - stiffness * c.vec)
+        # Compute the residual
+        c = concentration.vec.FV().NumPy().copy()
+        res = self._dt * (self._source_term.vec.FV().NumPy() - self._a * c + transport_csr * c)
 
-    def step(self, c: ngs.GridFunction, res: ngs.la.DynamicVectorExpression) -> int:
-        """Apply the implicit Euler step to the concentration vector."""
-        # Scale the transport terms
-        scaled_transport = self._transport.mat.DeleteZeroElements(1e-10)
-        scaled_transport.AsVector().FV().NumPy()[:] *= self._dt
-        mstar_inv = ngs.GMRESSolver(self._m_star - scaled_transport, self._pre, printrates=False)
+        # Create the system matrix: M* - dt * transport
+        transport_csr.data *= -self._dt
+        system_matrix_csr = spla.LinearOperator(
+            transport_csr.shape,
+            matvec=lambda x: self._m_star @ x + transport_csr @ x,
+            dtype=np.float64,
+        )
+
+        # Solve using scipy GMRES
+        solution, info = spla.gmres(
+            system_matrix_csr,
+            res,
+            M=self._preconditioner,
+            rtol=1e-6,
+            atol=1e-12,
+            maxiter=1000,
+        )
+
+        if info > 0:
+            print(f"Warning: GMRES did not converge after {info} iterations")
+        elif info < 0:
+            print(f"Error: GMRES failed with error code {info}")
 
         # Update the concentration
-        c.vec.data += mstar_inv * res
-        return mstar_inv.GetSteps()
+        concentration.vec.FV().NumPy()[:] += solution
 
 
 class ReactionSolver:
@@ -346,9 +380,8 @@ class ReactionSolver:
 class PnpSolver:
     """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
-    def __init__(self, stiffness, inverse, source_term, potential):
-        self._stiffness = stiffness
-        self._inverse = inverse
+    def __init__(self, matrix, source_term, potential):
+        self._matrix = matrix
         self._source_term = source_term
         self.potential = potential
 
@@ -363,17 +396,19 @@ class PnpSolver:
         """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
+        n_space = sum(fes.components[k].ndof for k in range(len(compartments)))
+        shape = (n_space + len(species), n_space + len(species))
 
-        # Set up potential matrix and source term
+        # Set up potential matrix [[a, b], [b^T, 0]] and source term
         trial, test = fes.TnT()
         offset = len(compartments)
         a = ngs.BilinearForm(fes, check_unused=False)
+        b = ngs.BilinearForm(fes, check_unused=False)
         f = ngs.LinearForm(fes)
         for k, compartment in enumerate(compartments):
             eps = compartment.coefficients.permittivity
             a += eps * ngs.grad(trial[k]) * ngs.grad(test[k]) * ngs.dx
-            a += trial[k + offset] * test[k] * ngs.dx
-            a += trial[k] * test[k + offset] * ngs.dx
+            b += trial[k + offset] * test[k] * ngs.dx
 
             for s in species:
                 c = concentrations[s]
@@ -381,31 +416,48 @@ class PnpSolver:
 
         a.Assemble()
         a = a.mat.DeleteZeroElements(1e-10)
+        a = ngs_to_csr(a)
+        a = a[:n_space, :n_space]
 
-        # Assemble preconditioner
-        p = ngs.BilinearForm(fes, check_unused=False)
-        for k, compartment in enumerate(compartments):
-            p += trial[k + offset] * test[k + offset] * ngs.dx
+        b.Assemble()
+        b = b.mat.DeleteZeroElements(1e-10)
+        b = ngs_to_csr(b)
+        b = b[:n_space, n_space:]
 
-        p.Assemble()
-        p = p.mat.DeleteZeroElements(1e-10)
+        # Augmented Lagrangian formulation: [[a + tau * b * bT, b], [bT, -I / tau]]
+        tau = np.mean(a.diagonal())
+        tau_inv = 1 / tau
+        def matvec_full(x):
+            f, g = x[:n_space], tau_inv * x[n_space:]
+            r = b.T @ f
+            s = a @ f + tau * (b @ (r + g))
+            return np.concatenate([s, r - g])
+        matrix = spla.LinearOperator(shape, matvec=matvec_full, dtype=np.float64)
 
-        free_dofs = fes.FreeDofs()
-        for i in range(len(species)):
-            free_dofs[-i - 1] = False
-
-        smoother = a.CreateSmoother(free_dofs, GS=True) + p
-        inverse = ngs.CGSolver(a, pre=smoother, printrates=False)
         potential = ngs.GridFunction(fes)
 
-        return cls(a, inverse, f, potential)
+        return cls(matrix, f, potential)
 
 
-    def step(self) -> int:
+    def step(self):
         """Update the potential given the current status of chemical concentrations."""
         self._source_term.Assemble()
-        self.potential.vec.data = self._inverse * self._source_term.vec
-        return self._inverse.GetSteps()
+
+        # Minres without preconditioning seemed to yield the best results
+        solution, info = spla.minres(
+            self._matrix,
+            self._source_term.vec.FV().NumPy(),
+            x0=self.potential.vec.FV().NumPy(),
+            rtol=1e-8,
+            maxiter=1000,
+        )
+
+        if info > 0:
+            print(f"Warning: Minres did not converge in {info} iterations")
+        elif info < 0:
+            print(f"Error: Minres failed with error code {info}")
+
+        self.potential.vec.FV().NumPy()[:] = solution
 
 
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:

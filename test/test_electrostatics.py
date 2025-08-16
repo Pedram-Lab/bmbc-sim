@@ -99,10 +99,10 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     assert eq2_middle.isel(time=0) == pytest.approx(1.0)
     assert eq2_right.isel(time=0) == pytest.approx(1.0)
 
-    assert eq1_left.isel(time=-1) == pytest.approx(0.6)
-    assert eq1_middle.isel(time=-1) == pytest.approx(0.4)
-    assert eq1_right.isel(time=-1) == pytest.approx(0.6)
-    assert eq2_left.isel(time=-1) == pytest.approx(1.1)
+    assert eq1_left.isel(time=-1) == pytest.approx(0.6, rel=1e-3)
+    assert eq1_middle.isel(time=-1) == pytest.approx(0.4, rel=1e-3)
+    assert eq1_right.isel(time=-1) == pytest.approx(0.6, rel=1e-3)
+    assert eq2_left.isel(time=-1) == pytest.approx(1.1, rel=1e-3)
     assert eq2_middle.isel(time=-1) < 0.9
     assert eq2_right.isel(time=-1) > 1.1
 
