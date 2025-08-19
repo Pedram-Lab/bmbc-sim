@@ -4,6 +4,7 @@ Create the simulation geometry from [Rusakov 2001].
 from math import pi
 
 from netgen import occ
+from ngsolve import Mesh
 import numpy as np
 import astropy.units as u
 
@@ -16,7 +17,8 @@ def create_rusakov_geometry(
     glia_distance: u.Quantity,
     glia_width: u.Quantity,
     glial_coverage_angle: u.Quantity,
-) -> occ.OCCGeometry:
+    mesh_size: u.Quantity,
+) -> Mesh:
     """
     Create the geometry from [Rusakov 2001]. It consists of two semi-spheric
     synaptic terminals separated by a synaptic cleft. The terminals are
@@ -30,7 +32,8 @@ def create_rusakov_geometry(
     :param glia_distance: The distance of the glial cell from the synaptic terminals.
     :param glia_width: The width of the ensheathing glial cell.
     :param glial_coverage_angle: The angle of the glial coverage from the top.
-    :return: The assembled geometry.
+    :param mesh_size: The maximum size of the mesh elements.
+    :return: The mesh of the geometry.
     """
     # Convert all quantities to the same set of base units
     ts = to_simulation_units(total_size, 'length')
@@ -51,12 +54,14 @@ def create_rusakov_geometry(
     pre_synapse_cutout = occ.HalfSpace(occ.Pnt(0, 0, -cs/2), occ.Dir(0, 0, -1)) \
         .bc("presynaptic_membrane")
     pre_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - pre_synapse_cutout
+    pre_synapse = pre_synapse.MakeFillet(pre_synapse.edges, sr / 12.)
     pre_synapse.faces.col = (1, 0, 0)
     pre_synapse.mat("presynapse")
 
     post_synapse_cutout = occ.HalfSpace(occ.Pnt(0, 0, cs/2), occ.Dir(0, 0, 1)) \
         .bc("postsynaptic_membrane")
     post_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - post_synapse_cutout
+    post_synapse = post_synapse.MakeFillet(post_synapse.edges, sr / 10)
     post_synapse.faces.col = (0, 0, 1)
     post_synapse.mat("postsynapse")
 
@@ -90,7 +95,10 @@ def create_rusakov_geometry(
         glial_cutout = occ.Cone(occ.gp_Ax2(occ.Pnt(0, 0, -h), occ.Z), r_base, 0.0, h, 2 * pi)
         glia = glia - glial_cutout
 
+    glia = glia.MakeFillet(glia.edges, gw / 4)
     glia.bc("glial_membrane")
     glia.mat("glia")
 
-    return occ.Glue([box, pre_synapse, post_synapse, synapse_ecs, glia])
+    geo = occ.Glue([box, pre_synapse, post_synapse, synapse_ecs, glia])
+    geo = occ.OCCGeometry(geo)
+    return Mesh(geo.GenerateMesh(maxh=to_simulation_units(mesh_size, 'length')))
