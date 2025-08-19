@@ -24,7 +24,22 @@ def create_rusakov_geometry(
     synaptic terminals separated by a synaptic cleft. The terminals are
     surrounded in some distance by a glial cell with an adjustable coverage
     angle (measured from the top). The whole geometry is contained in an
-    enclosing box of porous neuropil.
+    enclosing box of porous neuropil. The compartments / membranes involved are:
+    - presynapse: the interior of the presynaptic terminal
+    - postsynapse: the interior of the postsynaptic terminal
+    - glia: the interior of the glial covering
+    - synapse_ecs: the space between the synaptic terminals, and the surrounding
+        glial cell and neuropil
+    - neuropil: the porous region surrounding the synapse
+    - glial membrane: the membrane surrounding the glial cell
+    - presynaptic_membrane: the membrane of the presynaptic terminal facing the
+        postsynaptic terminal
+    - postsynaptic_membrane: the membrane of the postsynaptic terminal facing
+        the presynaptic terminal
+    - terminal_membrane: the membranes of both terminals that don't face
+        each other
+    - synapse_boundary: the boundary of the synapse connecting to the neuropil
+    - neuropil_boundary: the outer boundary of the porous neuropil
 
     :param total_size: The side-length of the enclosing cube.
     :param synapse_radius: The radius of the synaptic terminals.
@@ -56,6 +71,7 @@ def create_rusakov_geometry(
     pre_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - pre_synapse_cutout
     pre_synapse = pre_synapse.MakeFillet(pre_synapse.edges, sr / 12.)
     pre_synapse.faces.col = (1, 0, 0)
+    pre_synapse.faces[1].bc("terminal_membrane")
     pre_synapse.mat("presynapse")
 
     post_synapse_cutout = occ.HalfSpace(occ.Pnt(0, 0, cs/2), occ.Dir(0, 0, 1)) \
@@ -63,6 +79,7 @@ def create_rusakov_geometry(
     post_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - post_synapse_cutout
     post_synapse = post_synapse.MakeFillet(post_synapse.edges, sr / 10)
     post_synapse.faces.col = (0, 0, 1)
+    post_synapse.faces[1].bc("terminal_membrane")
     post_synapse.mat("postsynapse")
 
     synapse_ecs = occ.Sphere(occ.Pnt(0, 0, 0), sr + gd).bc("synapse_boundary")
