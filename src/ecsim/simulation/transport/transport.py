@@ -238,20 +238,15 @@ class Transparent(Transport):
             self,
             source_diffusivity: Coefficient,
             target_diffusivity: Coefficient,
-            source_porosity: float = None,
-            target_porosity: float = None,
             outside_concentration: u.Quantity = None
     ):
         """Create a new transparent transport mechanism with the given
-        diffusivities (and optionally porosities) for the source and target
-        compartments.
+        diffusivities for the source and target compartments.
 
         :param source_diffusivity: Diffusivity of the substance in the source
             compartment
         :param target_diffusivity: Diffusivity of the substance in the target
             compartment
-        :param source_porosity: Porosity of the source compartment (optional)
-        :param target_porosity: Porosity of the target compartment (optional)
         :param outside_concentration: Concentration of the substance outside of
             the domain if one of the compartments is a boundary.
         """
@@ -262,8 +257,6 @@ class Transparent(Transport):
         self.tgt_diffusivity = self._register_coefficient(
             target_diffusivity, "diffusivity"
         )
-        self.src_porosity = source_porosity
-        self.tgt_porosity = target_porosity
         if outside_concentration is not None:
             self.outside_concentration = self._register_coefficient(
                 outside_concentration, "molar concentration"

@@ -92,7 +92,15 @@ class DiffusionSolver:
                     if compartment is None:
                         return None, None, None
                     idx = compartment_to_index[compartment]
-                    return concentration.components[idx], *tnt[idx]
+                    porosity = compartment.coefficients.porosity
+                    if porosity is None:
+                        return concentration.components[idx], *tnt[idx]
+                    else:
+                        return (
+                            concentration.components[idx],
+                            tnt[idx][0] / porosity,
+                            tnt[idx][1] / porosity,
+                        )
 
                 src_c, src_trial, src_test = select_i(source, concentration, trial_and_test)
                 trg_c, trg_trial, trg_test = select_i(target, concentration, trial_and_test)
@@ -119,7 +127,14 @@ class DiffusionSolver:
                     if compartment is None:
                         return None, None
                     idx = compartment_to_index[compartment]
-                    return concentration.components[idx], tnt[idx][1]
+                    porosity = compartment.coefficients.porosity
+                    if porosity is None:
+                        return concentration.components[idx], tnt[idx][1]
+                    else:
+                        return (
+                            concentration.components[idx],
+                            tnt[idx][1] / porosity,
+                        )
 
                 src_c, src_test = select_e(source, concentration, trial_and_test)
                 trg_c, trg_test = select_e(target, concentration, trial_and_test)

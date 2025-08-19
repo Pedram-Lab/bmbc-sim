@@ -130,6 +130,26 @@ class Compartment:
             self._to_coefficient_function(eps, 'permittivity')
 
 
+    def add_porosity(
+            self,
+            porosity: float,
+    ) -> None:
+        """Add a porosity value 0 < alpha <= 1, which means that only the
+        fraction alpha of the compartment is filled with the species.
+
+        :param porosity: Porosity value for the compartment. The value must be
+            between 0 and 1.
+        :raises ValueError: If porosity for the compartment is already defined or
+            if the value is not in the valid range.
+        """
+        if self.coefficients.porosity is not None:
+            raise ValueError(f"Porosity already defined for compartment '{self.name}'")
+        if not (0 < porosity <= 1):
+            raise ValueError(f"Invalid porosity value {porosity}. Must be between 0 and 1.")
+
+        self.coefficients.porosity = porosity
+
+
     def add_reaction(
             self,
             reactants: list[S],
@@ -223,3 +243,4 @@ class SimulationDetails:
     diffusion: dict[S, C] = field(default_factory=dict)
     reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
     permittivity: C = field(default_factory=lambda: None)
+    porosity: C = field(default_factory=lambda: None)

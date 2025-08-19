@@ -64,6 +64,7 @@ neuropil.initialize_species(ca, CA_RESTING)
 synapse_ecs.add_diffusion(ca, DIFFUSIVITY)
 presynapse.add_diffusion(ca, DIFFUSIVITY)
 neuropil.add_diffusion(ca, DIFFUSIVITY / TORTUOSITY**2)
+neuropil.add_porosity(POROSITY)
 
 # Add transport across the neuropil boundary
 t = transport.Transparent(
