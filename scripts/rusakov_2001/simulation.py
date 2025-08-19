@@ -51,17 +51,32 @@ simulation = ecsim.Simulation(mesh=mesh, name="rusakov", result_root="results")
 geo = simulation.simulation_geometry
 synapse_ecs = geo.compartments["synapse_ecs"]
 neuropil = geo.compartments["neuropil"]
+presynapse = geo.compartments["presynapse"]
 presynaptic_membrane = geo.membranes["presynaptic_membrane"]
+synapse_boundary = geo.membranes["synapse_boundary"]
 
 # Add calcium and diffusion
 ca = simulation.add_species("Ca")
+synapse_ecs.initialize_species(ca, CA_RESTING)
+neuropil.initialize_species(ca, CA_RESTING)
+
+# Add diffusion in different compartments
 synapse_ecs.add_diffusion(ca, DIFFUSIVITY)
+presynapse.add_diffusion(ca, DIFFUSIVITY)
 neuropil.add_diffusion(ca, DIFFUSIVITY / TORTUOSITY**2)
 
+# Add transport across the neuropil boundary
+t = transport.Transparent(
+    source_diffusivity=DIFFUSIVITY / TORTUOSITY**2,
+    target_diffusivity=DIFFUSIVITY,
+)
+synapse_boundary.add_transport(ca, t, neuropil, synapse_ecs)
+
 # Compute the channel flux on the presynaptic membrane
-Q = N_CHANNELS * CHANNEL_CURRENT / (2 * presynaptic_membrane.area)
-t = transport.GeneralFlux(lambda t: Q * math.exp(-t * TIME_CONSTANT))
-presynaptic_membrane.add_transport(ca, t, neuropil, synapse_ecs)
+const_F = const.e.si * const.N_A
+Q = N_CHANNELS * CHANNEL_CURRENT / (2 * const_F)
+t = transport.GeneralFlux(lambda t: Q * t * TIME_CONSTANT * math.exp(-t * TIME_CONSTANT))
+presynaptic_membrane.add_transport(ca, t, synapse_ecs, presynapse)
 
 # Run the simulation
 simulation.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)
