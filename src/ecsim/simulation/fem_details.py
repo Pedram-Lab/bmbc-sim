@@ -98,8 +98,8 @@ class DiffusionSolver:
                     else:
                         return (
                             concentration.components[idx],
-                            tnt[idx][0] / porosity,
-                            tnt[idx][1] / porosity,
+                            tnt[idx][0],             # For porous flux,
+                            tnt[idx][1] / porosity,  # scale test function
                         )
 
                 src_c, src_trial, src_test = select_i(source, concentration, trial_and_test)
