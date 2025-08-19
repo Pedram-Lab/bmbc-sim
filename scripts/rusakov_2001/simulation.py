@@ -81,17 +81,3 @@ presynaptic_membrane.add_transport(ca, t, synapse_ecs, presynapse)
 
 # Run the simulation
 simulation.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)
-
-
-# dist = to_simulation_units(SYNAPSE_RADIUS + GLIA_DISTANCE / 2, 'length')
-# eval_points = np.array([
-#     [0, 0, 0],          # 1: center
-#     [dist, 0, 0],       # 2: inside glia, near cleft
-#     [0, 0, dist],       # 3: inside glia, far from cleft
-# ])
-# eval_synapse = PointEvaluator(mesh, eval_points)
-# eval_points = np.array([
-#     [0, 0, -2 * dist],  # 4: outside glia (below)
-#     [0, 0, 2 * dist],   # 5: outside glia (above)
-# ])
-# eval_neuropil = PointEvaluator(mesh, eval_points)

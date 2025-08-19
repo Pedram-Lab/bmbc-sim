@@ -64,11 +64,13 @@ class ResultLoader:
             result_folders = [f for f in result_folders if time_stamp in f]
             if not result_folders:
                 raise RuntimeError(
-                    f"No folders with name {simulation_name} and timestamp {time_stamp} found in {results_root}."
+                    f"No folders with name {simulation_name} and "
+                    f"timestamp {time_stamp} found in {results_root}."
                 )
             if len(result_folders) > 1:
                 raise RuntimeError(
-                    f"Multiple folders with name {simulation_name} and timestamp {time_stamp} found in {results_root}."
+                    f"Multiple folders with name {simulation_name} and "
+                    f"timestamp {time_stamp} found in {results_root}."
                 )
             result_folder = result_folders[0]
         else:
