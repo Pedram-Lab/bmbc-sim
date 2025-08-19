@@ -228,3 +228,84 @@ class GeneralFlux(Transport):
         # Flux is independent of the concentrations
         del source, target
         return self.flux_value
+
+
+class Transparent(Transport):
+    """Transport mechanism that aims to make the membrane as transparent as
+    possible by mimicking the diffusive speed on both sides of the membrane.
+    """
+    def __init__(
+            self,
+            source_diffusivity: Coefficient,
+            target_diffusivity: Coefficient,
+            source_porosity: float = None,
+            target_porosity: float = None,
+            outside_concentration: u.Quantity = None
+    ):
+        """Create a new transparent transport mechanism with the given
+        diffusivities (and optionally porosities) for the source and target
+        compartments.
+
+        :param source_diffusivity: Diffusivity of the substance in the source
+            compartment
+        :param target_diffusivity: Diffusivity of the substance in the target
+            compartment
+        :param source_porosity: Porosity of the source compartment (optional)
+        :param target_porosity: Porosity of the target compartment (optional)
+        :param outside_concentration: Concentration of the substance outside of
+            the domain if one of the compartments is a boundary.
+        """
+        super().__init__()
+        self.src_diffusivity = self._register_coefficient(
+            source_diffusivity, "diffusivity"
+        )
+        self.tgt_diffusivity = self._register_coefficient(
+            target_diffusivity, "diffusivity"
+        )
+        self.src_porosity = source_porosity
+        self.tgt_porosity = target_porosity
+        if outside_concentration is not None:
+            self.outside_concentration = self._register_coefficient(
+                outside_concentration, "molar concentration"
+            )
+        else:
+            self.outside_concentration = None
+
+    def flux_lhs(
+            self,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None,
+            src_test: ngs.comp.ProxyFunction | None,
+            trg_test: ngs.comp.ProxyFunction | None
+    ) -> ngs.CoefficientFunction:
+        del source, target  # Unused
+        if src_test is None and trg_test is None:
+            raise ValueError("Both source and target cannot be None.")
+        if (src_test is None or trg_test is None) and self.outside_concentration is None:
+            raise ValueError("No outside concentration specified for outside flux.")
+
+        permeability = 2 * self.src_diffusivity * self.tgt_diffusivity / (
+            self.src_diffusivity + self.tgt_diffusivity
+        )
+
+        if trg_test is None:
+            return permeability * src_test
+        if src_test is None:
+            return -permeability * trg_test
+
+        return permeability * (src_test - trg_test)
+
+
+    def flux_rhs(
+            self,
+            source: ngs.CoefficientFunction | None,
+            target: ngs.CoefficientFunction | None
+    ) -> ngs.CoefficientFunction:
+        permeability = 2 * self.src_diffusivity * self.tgt_diffusivity / (
+            self.src_diffusivity + self.tgt_diffusivity
+        )
+
+        if source is None:
+            return permeability * self.outside_concentration
+        if target is None:
+            return -permeability * self.outside_concentration
