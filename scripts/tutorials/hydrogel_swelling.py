@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Hydrogel swelling
 # This script defines a block of hydrogel that is weakly anchored in a
-# surrounding medium and swells under the influence of a chemical concentration.
+# surrounding medium and swells/shrinks due to internal pressure.
 
 # %%
 from netgen import occ
@@ -9,7 +9,7 @@ import ngsolve as ngs
 from ngsolve.webgui import Draw
 
 # %%
-# Use the NGSolve parameter class to change parameters after defining everything
+# Use parameters from the NGSolve non-linear elasticity tutorial
 E, nu = 210, 0.2
 MU  = E / (2 * (1 + nu))
 LAM = E * nu / ((1 + nu) * (1 - 2 * nu))
@@ -30,11 +30,17 @@ I = ngs.Id(mesh.dim)
 F = I + ngs.Grad(u)
 C = F.trans * F
 E = 0.5 * (C - I)
-PRESSURE = -1e0  # should depend on the concentration
+PRESSURE = -1e0  # dummy value, solution is unstable for large values
 
-def neo_hooke(C):
-    det_c = ngs.Det(C)
-    return MU * (0.5 * ngs.Trace(C - I) + MU / LAM * det_c ** (-LAM / (2 * MU)) - 1 - PRESSURE * det_c)
+def neo_hooke(c):
+    """Neo-Hookean material model with internal pressure."""
+    det_c = ngs.Det(c)
+    return MU * (
+        0.5 * ngs.Trace(c - I)
+        + MU / LAM * det_c ** (-LAM / (2 * MU))
+        - 1
+        - PRESSURE * det_c
+    )
 
 # %%
 # Define mechanic problem
@@ -57,6 +63,5 @@ for it in range(5):
     print("err^2 = ", ngs.InnerProduct(w, res))
     u.vec.data -= w
 
-Draw(u, mesh, "displacement")
-
-# %%
+settings = dict(deformation=1)
+Draw(u, mesh, "displacement", settings=settings)
