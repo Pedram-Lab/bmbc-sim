@@ -43,7 +43,7 @@ def neo_hooke(c):
         0.5 * ngs.Trace(c - I)
         + MU / LAM * det_c ** (-LAM / (2 * MU))
         - 1
-        # - concentration * det_c
+        + concentration * det_c
     )
 
 # %%
@@ -54,8 +54,9 @@ elasticity_stiffness += ngs.Variation(neo_hooke(C).Compile() * ngs.dx)
 deformation = ngs.GridFunction(elasticity_fes)
 deformation.vec[:] = 0
 
-res = deformation.vec.CreateVector()
-w = deformation.vec.CreateVector()
+elasticity_res = deformation.vec.CreateVector()
+deformation_history = ngs.GridFunction(elasticity_fes, multidim=0)
+deformation_history.AddMultiDimComponent(deformation.vec)
 
 # %%
 # Define diffusion problem
@@ -70,11 +71,19 @@ diffusion_res = concentration.vec.CreateVector()
 
 # %%
 # Time stepping
-N_STEPS = int(1 / TAU)
+N_STEPS = int(0.5 / TAU)
 concentration_history = ngs.GridFunction(diffusion_fes, multidim=0)
 concentration_history.AddMultiDimComponent(concentration.vec)
 
 for step in range(N_STEPS):
+    # Solve elasticity problem
+    for it in range(5):
+        elasticity_stiffness.Apply(deformation.vec, elasticity_res)
+        elasticity_stiffness.AssembleLinearization(deformation.vec)
+        inv = elasticity_stiffness.mat.Inverse(elasticity_fes.FreeDofs())
+        deformation.vec.data -= inv * elasticity_res
+    deformation_history.AddMultiDimComponent(deformation.vec)
+
     # Solve diffusion problem
     diffusion_stiffness.Assemble()
     diffusion_mass.Assemble()
@@ -85,18 +94,9 @@ for step in range(N_STEPS):
     concentration.vec.data += m_star_inv * diffusion_res
     concentration_history.AddMultiDimComponent(concentration.vec)
 
-    # for it in range(5):
-    #     print("Newton iteration", it)
-    #     print("energy = ", elasticity_stiffness.Energy(deformation.vec))
-    #     elasticity_stiffness.Apply(deformation.vec, res)
-    #     elasticity_stiffness.AssembleLinearization(deformation.vec)
-    #     inv = elasticity_stiffness.mat.Inverse(elasticity_fes.FreeDofs())
-    #     w.data = inv * res
-    #     print("err^2 = ", ngs.InnerProduct(w, res))
-    #     deformation.vec.data -= w
-
-# settings = dict(deformation=1)
-# Draw(deformation, mesh, "displacement", settings=settings)
-Draw(concentration_history, mesh, interpolate_multidim=True, animate=True)
+settings = dict(deformation=1)
+animation_settings = dict(interpolate_multidim=True, animate=True)
+Draw(deformation_history, mesh, "displacement", settings=settings, **animation_settings)
+Draw(concentration_history, mesh, **animation_settings)
 
 # %%
