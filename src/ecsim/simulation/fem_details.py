@@ -354,7 +354,6 @@ class ReactionSolver:
         while not is_converged and iteration < max_it:
             is_converged = True
             iteration += 1
-            c_cur_norm = np.linalg.norm(c_cur, ord=np.inf, axis=1)
 
             # Evaluate source terms and derivatives
             args = [c_cur[i, :] for i in range(nc)] + self._rates
@@ -373,21 +372,13 @@ class ReactionSolver:
             # Compute Newton update
             delta = np.linalg.solve(self._jac.transpose((2, 0, 1)), self._res.transpose(2, 0, 1))
             delta = np.reshape(delta, (nn, nc)).T
+            c_cur -= delta
+            c_cur_norm = np.linalg.norm(c_cur, ord=np.inf, axis=1)
 
             # Are residual and step small enough?
             upper_bound = atol + rtol * np.maximum(c_old_norm, c_cur_norm)
             is_converged &= np.all(np.linalg.norm(delta, ord=np.inf, axis=1) < upper_bound)
             is_converged &= np.all(np.linalg.norm(self._res, ord=np.inf, axis=(1, 2)) < upper_bound)
-
-            # Only take a fractional step if full step would make a concentration negative
-            eps = 1e-15
-            with np.errstate(divide='ignore', invalid='ignore'):
-                positivity_cap = np.where(delta > 0.0, (c_cur - eps) / delta, np.inf)
-            alpha = np.minimum(1.0, (1 - eps) * np.min(positivity_cap))
-            if alpha < 1:
-                c_cur -= alpha * delta
-            else:
-                c_cur -= delta
 
         return c_cur, iteration, is_converged
 
