@@ -7,6 +7,7 @@
 from netgen import occ
 import ngsolve as ngs
 from ngsolve.webgui import Draw
+from ngsolve import VTKOutput
 
 # %%
 # Use parameters from the NGSolve non-linear elasticity tutorial
@@ -14,7 +15,7 @@ E, nu = 210, 0.2
 MU  = E / (2 * (1 + nu))
 LAM = E * nu / ((1 + nu) * (1 - 2 * nu))
 ALPHA = 0.1  # diffusion coefficient
-TAU = 0.05  # time step size
+TAU = 0.01  # time step size
 
 # %%
 # Define geometry
@@ -33,23 +34,21 @@ concentration = ngs.GridFunction(diffusion_fes)
 # Define mechanic parameters
 I = ngs.Id(mesh.dim)
 F = I + ngs.Grad(u)
-C = F.trans * F
-E = 0.5 * (C - I)
 
-def neo_hooke(c):
+def neo_hooke(f):
     """Neo-Hookean material model with internal pressure."""
-    det_c = ngs.Det(c)
+    det_f = ngs.Det(f)
     return MU * (
-        0.5 * ngs.Trace(c - I)
-        + MU / LAM * det_c ** (-LAM / (2 * MU))
+        0.5 * ngs.Trace(f.trans * f - I)
+        + MU / LAM * det_f ** (-LAM / MU)
         - 1
-        + concentration * det_c
+        + concentration * det_f
     )
 
 # %%
 # Define mechanic problem
 elasticity_stiffness = ngs.BilinearForm(elasticity_fes, symmetric=False)
-elasticity_stiffness += ngs.Variation(neo_hooke(C).Compile() * ngs.dx)
+elasticity_stiffness += ngs.Variation(neo_hooke(F).Compile() * ngs.dx)
 
 deformation = ngs.GridFunction(elasticity_fes)
 deformation.vec[:] = 0
@@ -82,6 +81,9 @@ N_STEPS = int(0.5 / TAU)
 concentration_history = ngs.GridFunction(diffusion_fes, multidim=0)
 concentration_history.AddMultiDimComponent(concentration.vec)
 
+vtk_out = VTKOutput(ma=mesh, coefs=[concentration], names=["concentration"], filename="results/hydrogel/hydrogel")
+vtk_out.Do()
+
 for step in range(N_STEPS):
     # Solve elasticity problem
     for it in range(5):
@@ -107,6 +109,7 @@ for step in range(N_STEPS):
     diffusion_res = -TAU * (diffusion_stiffness.mat * concentration.vec)
     concentration.vec.data += m_star_inv * diffusion_res
     concentration_history.AddMultiDimComponent(concentration.vec)
+    vtk_out.Do()
 
 
 mesh.UnsetDeformation()
