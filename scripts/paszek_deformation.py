@@ -51,7 +51,7 @@ MEMBRANE_HEIGHT = to_simulation_units(40 * u.nm)
 MESH_SIZE = to_simulation_units(10 * u.nm)
 CUTOUT_SIZE = to_simulation_units(300 * u.nm)
 
-PULLING_FORCE = to_simulation_units(18 * u.pN)
+PULLING_FORCE = to_simulation_units(20 * u.pN)
 YOUNG_MODULUS_ECS = to_simulation_units(2.5 * u.fN / u.nm ** 2)
 YOUNG_MODULUS_MEMBRANE = to_simulation_units(50 * u.fN / u.nm ** 2)
 POISSON_RATIO = 0.25
@@ -99,8 +99,9 @@ u, v = fes.TnT()
 
 blf = ngs.BilinearForm(fes)
 blf += ngs.InnerProduct(stress(ngs.Sym(ngs.Grad(u))), ngs.Sym(ngs.Grad(v))).Compile() * ngs.dx
-blf.Assemble()
-a_inv = blf.mat.Inverse(fes.FreeDofs())
+with ngs.TaskManager():
+    blf.Assemble()
+    a_inv = blf.mat.Inverse(fes.FreeDofs())
 
 
 # %%
@@ -121,7 +122,7 @@ def compute_solution(points, force):
 
 
 # %%
-def sample_cutout(fe_mesh, deformation, n_samples=50):
+def sample_cutout(fe_mesh, deformation, n_samples=100):
     """Sample deformation on a square cutout centered at (0, 0, ECS_HEIGHT)."""
     x = np.linspace(-CUTOUT_SIZE / 2, CUTOUT_SIZE / 2, n_samples)
     y = np.linspace(-CUTOUT_SIZE / 2, CUTOUT_SIZE / 2, n_samples)
@@ -197,11 +198,10 @@ def visualize_deformation_3d(fe_mesh, deformation):
         show_scalar_bar=False,
     )
 
-    plotter.show_axes()
     plotter.set_scale(zscale=0.5)
 
     direction = np.array([-0.5, -1.0, 0.5]) / 3
-    plotter.camera_position = [direction.tolist(), [0, 0, 0.07], [0, 0, -1]]
+    plotter.camera_position = [direction.tolist(), [0, 0, 0.03], [0, 0, -1]]
     plotter.camera.Roll(0)
 
     plotter.show()
@@ -217,5 +217,29 @@ visualize_deformation_2d(mesh, deformation_3)
 visualize_deformation_3d(mesh, deformation_1)
 visualize_deformation_3d(mesh, deformation_2)
 visualize_deformation_3d(mesh, deformation_3)
+
+# %%
+# Show colorbar for 3D plots
+plotter = pv.Plotter()
+plotter.set_background("white")
+dummy_sphere = pv.Sphere(radius=0.001)
+dummy_sphere["deformation"] = np.linspace(0, 18, dummy_sphere.n_points)
+mesh_plot = plotter.add_mesh(
+    dummy_sphere,
+    cmap="gnuplot",
+    clim=(0, 18),
+    show_scalar_bar=False,
+)
+plotter.add_scalar_bar(
+    title='Deformation distance [nm]',
+    n_labels=10,
+    title_font_size=20,
+    label_font_size=16,
+    width=0.5,
+    height=0.1,
+    fmt="%.0f",
+)
+mesh_plot.SetVisibility(False)
+plotter.show()
 
 # %%
