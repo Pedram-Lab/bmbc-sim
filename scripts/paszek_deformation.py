@@ -39,6 +39,7 @@ import astropy.units as u
 import ngsolve as ngs
 import netgen.occ as occ
 from ngsolve.webgui import Draw
+import pyvista as pv
 
 from ecsim.units import to_simulation_units
 
@@ -50,7 +51,7 @@ MEMBRANE_HEIGHT = to_simulation_units(40 * u.nm)
 MESH_SIZE = to_simulation_units(10 * u.nm)
 CUTOUT_SIZE = to_simulation_units(300 * u.nm)
 
-PULLING_FORCE = to_simulation_units(10 * u.pN)
+PULLING_FORCE = to_simulation_units(18 * u.pN)
 YOUNG_MODULUS_ECS = to_simulation_units(2.5 * u.fN / u.nm ** 2)
 YOUNG_MODULUS_MEMBRANE = to_simulation_units(50 * u.fN / u.nm ** 2)
 POISSON_RATIO = 0.25
@@ -120,7 +121,7 @@ def compute_solution(points, force):
 
 
 # %%
-def sample_cutout(fe_mesh, deformation, n_samples=300):
+def sample_cutout(fe_mesh, deformation, n_samples=50):
     """Sample deformation on a square cutout centered at (0, 0, ECS_HEIGHT)."""
     x = np.linspace(-CUTOUT_SIZE / 2, CUTOUT_SIZE / 2, n_samples)
     y = np.linspace(-CUTOUT_SIZE / 2, CUTOUT_SIZE / 2, n_samples)
@@ -174,24 +175,36 @@ def visualize_deformation_2d(fe_mesh, deformation):
 def visualize_deformation_3d(fe_mesh, deformation):
     """Visualize deformation as 3D surface plot."""
     x, y, z = sample_cutout(fe_mesh, deformation)
-    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    c = ax.plot_surface(
-        x,
-        y,
-        (ECS_HEIGHT - z) * 1000,
-        cmap="gnuplot",
-        vmin=0,
-        vmax=18,
-        antialiased=False,
+    deformation_nm = (ECS_HEIGHT - z) * 10
+
+    # Create a structured grid that mirrors the rectangular sampling domain.
+    grid = pv.StructuredGrid(
+        np.ascontiguousarray(x),
+        np.ascontiguousarray(y),
+        np.ascontiguousarray(deformation_nm),
     )
-    ax.set_xlim3d(-0.05, 0.05)
-    ax.set_ylim3d(-0.05, 0.05)
-    ax.view_init(160, 70, 0)
-    ax.set_facecolor('black')
-    ax.set_box_aspect((10, 10, 5))
-    ax.set_axis_off()
-    fig.colorbar(c, ax=ax, label='deformation [nm]')
-    plt.show()
+
+    grid["deformation"] = deformation_nm.flatten(order="F")
+    grid.set_active_scalars("deformation")
+
+    plotter = pv.Plotter()
+    plotter.set_background("black")
+    plotter.add_mesh(
+        grid,
+        cmap="gnuplot",
+        clim=(0, 0.18),
+        show_edges=True,
+        show_scalar_bar=False,
+    )
+
+    plotter.show_axes()
+    plotter.set_scale(zscale=0.5)
+
+    direction = np.array([-0.5, -1.0, 0.5]) / 3
+    plotter.camera_position = [direction.tolist(), [0, 0, 0.07], [0, 0, -1]]
+    plotter.camera.Roll(0)
+
+    plotter.show()
 
 # %%
 # Visualize elastic deformation of membrane and ECS after some post-processing
@@ -204,3 +217,5 @@ visualize_deformation_2d(mesh, deformation_3)
 visualize_deformation_3d(mesh, deformation_1)
 visualize_deformation_3d(mesh, deformation_2)
 visualize_deformation_3d(mesh, deformation_3)
+
+# %%
