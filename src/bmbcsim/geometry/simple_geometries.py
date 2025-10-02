@@ -92,6 +92,7 @@ def create_box_geometry(
         Quantities for each axis (x, y, z).
     :param mesh_size: Size of the mesh.
     :param split: Height of the split (can be None).
+    :param compartments: Whether to make top and bottom compartments or regions.
     :return: Mesh of the geometry.
     """
     if isinstance(dimensions, Quantity):
@@ -185,3 +186,25 @@ def create_sensor_geometry(
     geo = occ.Glue(regions)
     occ_geo = occ.OCCGeometry(geo)
     return Mesh(occ_geo.GenerateMesh(maxh=maxh))
+
+
+def create_sphere_geometry(
+        *,
+        radius: Quantity,
+        mesh_size: Quantity
+) -> Mesh:
+    """
+    Creates a spherical geometry with a given radius.
+
+    :param radius: Radius of the sphere.
+    :param mesh_size: Maximum mesh size for meshing.
+    :return: Mesh object for the geometry.
+    """
+    radius = to_simulation_units(radius, 'length')
+    maxh = to_simulation_units(mesh_size, 'length')
+
+    sphere = occ.Sphere((0, 0, 0), radius)
+    sphere.mat("sphere")
+    sphere.bc("boundary")
+    geo = occ.OCCGeometry(sphere)
+    return Mesh(geo.GenerateMesh(maxh=maxh))
