@@ -27,17 +27,17 @@
 # | l$_{d}$     | Equilibrium separation distance | 13.5 nm          |
 #
 #
-# | Compartment                          | Size                         |
-# |------------------------------------|--------------------------------|
-# | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm          |
-# | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm                               |
+# | Compartment                  | Size                         |
+# |------------------------------|------------------------------|
+# | Cell membrane                | 1.4 μm x 1.4 μm x 40 nm      |
+# | Glycocalyx                   | 1.4 μm x 1.4 μm x 45 nm      |
 
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
 import astropy.units as u
 import ngsolve as ngs
-import netgen.occ as occ
+from netgen import occ
 from ngsolve.webgui import Draw
 import pyvista as pv
 
@@ -154,6 +154,20 @@ deformation_3 = compute_solution(pulling_points, 0.7 * PULLING_FORCE)
 # Draw(deformation_3, settings=visualization_settings, clipping=clipping)
 
 # %%
+# Recreate the colormap used in Paszek et al.
+cmap_x = [0.0, 0.2667, 0.5529, 0.8157, 1.0]
+cmap_rgb = [
+    [0.00025, 0.00392, 0.02264],   # black
+    [0.01895, 0.00596, 0.96124],   # blue
+    [0.98346, 0.03252, 0.01562],   # red
+    [0.99593, 0.96221, 0.01912],   # yellow
+    [0.99216, 1.00000, 0.57027],   # end
+]
+custom_cmap = plt.matplotlib.colors.LinearSegmentedColormap.from_list(
+    "paszek", list(zip(cmap_x, cmap_rgb))
+)
+
+# %%
 def visualize_deformation_2d(fe_mesh, deformation):
     """Visualize deformation as 2D heatmap."""
     x, y, z = sample_cutout(fe_mesh, deformation)
@@ -162,7 +176,7 @@ def visualize_deformation_2d(fe_mesh, deformation):
         x,
         y,
         (ECS_HEIGHT - z) * 1000,
-        cmap="gnuplot",
+        cmap=custom_cmap,
         shading="gouraud",
         vmin=0,
         vmax=18,
@@ -192,7 +206,7 @@ def visualize_deformation_3d(fe_mesh, deformation):
     plotter.set_background("black")
     plotter.add_mesh(
         grid,
-        cmap="gnuplot",
+        cmap=custom_cmap,
         clim=(0, 0.18),
         show_edges=True,
         show_scalar_bar=False,
@@ -226,7 +240,7 @@ dummy_sphere = pv.Sphere(radius=0.001)
 dummy_sphere["deformation"] = np.linspace(0, 18, dummy_sphere.n_points)
 mesh_plot = plotter.add_mesh(
     dummy_sphere,
-    cmap="gnuplot",
+    cmap=custom_cmap,
     clim=(0, 18),
     show_scalar_bar=False,
 )
