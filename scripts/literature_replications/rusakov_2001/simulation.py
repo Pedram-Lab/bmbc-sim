@@ -1,7 +1,8 @@
 """
-This script recreates the simulation from [Rusakov 2001]. Specifically, we
-will recreate the simulation of Ca-depletion for presynaptic, AP-driven
-calcium influx (Figure 4, top row).
+This script recreates the simulation from Rusakov "The Role of Perisynaptic
+Glial Sheaths in Glutamate Spillover and Extracellular Ca2+ Depletion" (2001).
+Specifically, we will recreate the simulation of Ca-depletion for presynaptic,
+AP-driven calcium influx (Figure 4, top row).
 """
 import math
 

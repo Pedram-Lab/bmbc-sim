@@ -1,7 +1,6 @@
 # %% [markdown]
-# # Verify mechanical parameters based on the Paszek paper
-# This script recreates the setup of Paszek et al. *Integrin Clustering Is
-# Driven by Mechanical Resistance from the Glycocalyx and the Substrate* (2009).
+# This script recreates the setup of Paszek et al. "Integrin Clustering Is
+# Driven by Mechanical Resistance from the Glycocalyx and the Substrate" (2009).
 #
 # According to this paper, Young's modulus is determined by the following expression:
 #

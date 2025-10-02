@@ -64,6 +64,6 @@ This should give you an output like this:
 
 ## Repository Structure
 - `src/bmbcsim/` – core simulation engine, geometry builders, and utilities.
-- `scripts/` – curated scenarios (Paszek, Sala, Tour, and more) ready to run.
-- `scripts/tutorials/` – bite-sized notebooks and scripts that demonstrate specific techniques (point sampling, tortuosity, deformation, etc.).
+- `scripts/` – curated scenarios that are ready to run (literature replications) and ongoing work.
+- `scripts/prototypes/` – bite-sized notebooks and scripts that explore specific techniques (point sampling, tortuosity, deformation, etc.).
 - `test/` – pytest suite covering units, multi-compartment setups, electrostatics, and geometry validation.
