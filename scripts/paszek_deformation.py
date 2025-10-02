@@ -51,7 +51,7 @@ MEMBRANE_HEIGHT = to_simulation_units(40 * u.nm)
 MESH_SIZE = to_simulation_units(10 * u.nm)
 CUTOUT_SIZE = to_simulation_units(300 * u.nm)
 
-PULLING_FORCE = to_simulation_units(20 * u.pN)
+PULLING_FORCE = to_simulation_units(10 * u.pN)
 YOUNG_MODULUS_ECS = to_simulation_units(2.5 * u.fN / u.nm ** 2)
 YOUNG_MODULUS_MEMBRANE = to_simulation_units(50 * u.fN / u.nm ** 2)
 POISSON_RATIO = 0.25
@@ -64,9 +64,9 @@ membrane = occ.Box(
     (S, S, ECS_HEIGHT + MEMBRANE_HEIGHT)
 ).mat("membrane").bc("side")
 geo = occ.Glue([ecs, membrane])
-geo.faces[4].bc("top")
+geo.faces[4].bc("substrate")
 geo.faces[10].bc("interface")
-geo.faces[11].bc("substrate")
+geo.faces[11].bc("top")
 
 geo = occ.OCCGeometry(geo)
 mesh = ngs.Mesh(geo.GenerateMesh(maxh=MESH_SIZE))
