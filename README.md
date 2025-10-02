@@ -59,6 +59,9 @@ This runs a simple reaction-diffusion simulation in a spherical cell and stores 
 The `ResultLoader` API then lets you post-process outputs into pandas/xarray structures.
 All results are saved as VTK files for easy visualization in [Paraview](https://www.paraview.org/) or similar tools.
 
+This should give you an output like this:
+![Demo Simulation Output](demo.gif)
+
 ## Repository Structure
 - `src/bmbcsim/` – core simulation engine, geometry builders, and utilities.
 - `scripts/` – curated scenarios (Paszek, Sala, Tour, and more) ready to run.
