@@ -6,8 +6,7 @@ It is designed to easily prototype hypotheses, reproduce literature scenarios, o
 
 ## Quick Start
 ```bash
-uv sync            # create the development environment
-uv run pytest      # optional: verify the install
+uv sync                        # create the development environment
 uv run python scripts/demo.py  # run a demo simulation
 ```
 
@@ -45,6 +44,7 @@ cell.add_reaction(
 # recording a snapshot of all species every 1 millisecond
 sim.run(end_time=10.0 * u.ms, time_step=0.1 * u.ms, record_interval=1.0 * u.ms)
 ```
+This runs a simple reaction-diffusion simulation in a spherical cell and stores the results in the `results/demo_<timestamp>` folder.
 The `ResultLoader` API then lets you post-process outputs into pandas/xarray structures.
 All results are saved as VTK files for easy visualization in [Paraview](https://www.paraview.org/) or similar tools.
 
