@@ -16,8 +16,8 @@ from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 import matplotlib.pyplot as plt
 
-from ecsim.simulation import Simulation
-from ecsim.units import LENGTH, convert
+from bmbcsim.simulation import Simulation
+from bmbcsim.units import LENGTH, convert
 
 # %%
 s = convert(1 * u.um, LENGTH) / 2

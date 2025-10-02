@@ -7,8 +7,8 @@ from matplotlib import pyplot as plt
 import astropy.units as u
 import xarray as xr
 
-import ecsim
-from ecsim.units import mM
+import bmbcsim
+from bmbcsim.units import mM
 
 
 def create_simulation(tmp_path):
@@ -27,7 +27,7 @@ def create_simulation(tmp_path):
     geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    return ecsim.Simulation(
+    return bmbcsim.Simulation(
         "electrostatics_test",
         mesh,
         result_root=tmp_path,
@@ -71,7 +71,7 @@ def test_pnp_dynamics(tmp_path, visualize=False):
     )
 
     # Test point values (new ResultLoader syntax)
-    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
     assert len(result_loader) == 1001
     points = [(0.5, 0.5, 0.5), (1.5, 0.5, 0.5), (2.5, 0.5, 0.5)]
     point_values = xr.concat(

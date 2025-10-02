@@ -76,8 +76,8 @@ from ngsolve.webgui import Draw
 from tqdm.notebook import trange
 from astropy import units as u
 
-from ecsim.geometry import create_ca_depletion_mesh, LineEvaluator
-from ecsim.simulation import Simulation
+from bmbcsim.geometry import create_ca_depletion_mesh, LineEvaluator
+from bmbcsim.simulation import Simulation
 
 # %%
 # Create meshed geometry

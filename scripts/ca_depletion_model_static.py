@@ -20,7 +20,7 @@
 from ngsolve import *
 from ngsolve.webgui import Draw
 
-from ecsim.geometry import create_ca_depletion_mesh
+from bmbcsim.geometry import create_ca_depletion_mesh
 
 # %%
 # Create meshed geometry

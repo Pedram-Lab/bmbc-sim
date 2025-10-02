@@ -3,7 +3,7 @@ import pytest
 from netgen import occ
 import ngsolve as ngs
 
-import ecsim
+import bmbcsim
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +26,7 @@ def geometry():
     mesh.ngmesh.SetBCName(1, "left_membrane")
     mesh.ngmesh.SetBCName(6, "right_membrane")
 
-    return ecsim.SimulationGeometry(mesh)
+    return bmbcsim.SimulationGeometry(mesh)
 
 
 def test_geometry_contains_everything(geometry):

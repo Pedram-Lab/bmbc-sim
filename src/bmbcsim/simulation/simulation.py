@@ -8,13 +8,13 @@ from tqdm import trange
 import numpy as np
 import threadpoolctl
 
-from ecsim.logging import logger
-from ecsim.simulation.result_io import Recorder
-from ecsim.simulation.geometry.compartment import Compartment
-from ecsim.simulation.geometry.simulation_geometry import SimulationGeometry
-from ecsim.units import to_simulation_units
-from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
+from bmbcsim.logging import logger
+from bmbcsim.simulation.result_io import Recorder
+from bmbcsim.simulation.geometry.compartment import Compartment
+from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
+from bmbcsim.units import to_simulation_units
+from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
 
 
 class Simulation:

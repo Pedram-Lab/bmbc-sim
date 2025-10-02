@@ -24,8 +24,8 @@ from astropy import units as au
 from ngsolve import *
 from tqdm.notebook import trange
 
-from ecsim.geometry import create_ca_depletion_mesh, LineEvaluator
-from ecsim.simulation import Simulation
+from bmbcsim.geometry import create_ca_depletion_mesh, LineEvaluator
+from bmbcsim.simulation import Simulation
 
 # %%
 # Set to True to write out the results as CSV files

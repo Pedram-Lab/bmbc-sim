@@ -10,8 +10,8 @@ unevenly across the regions. The simulation is designed to run under different s
 import astropy.units as u
 from ngsolve.webgui import Draw
 
-import ecsim
-import ecsim.geometry as geo
+import bmbcsim
+import bmbcsim.geometry as geo
 
 
 # Switches for electrostatics and chelation
@@ -39,7 +39,7 @@ if ELECTROSTATICS:
     simulation_name.append("electrostatics")
 if not simulation_name:
     simulation_name.append("no_interaction")
-simulation = ecsim.Simulation(
+simulation = bmbcsim.Simulation(
     "_".join(simulation_name), mesh, result_root="results", electrostatics=ELECTROSTATICS
 )
 geometry = simulation.simulation_geometry

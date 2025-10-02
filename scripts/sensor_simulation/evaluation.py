@@ -1,10 +1,10 @@
 import xarray as xr
 import matplotlib.pyplot as plt
 
-import ecsim
+import bmbcsim
 
 
-result_loader = ecsim.ResultLoader.find(
+result_loader = bmbcsim.ResultLoader.find(
     results_root="results",
     simulation_name="sensor",
 )

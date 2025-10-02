@@ -3,7 +3,7 @@ import pytest
 import ngsolve as ngs
 from netgen import occ
 
-import ecsim
+import bmbcsim
 
 
 @pytest.fixture(scope="function")
@@ -27,7 +27,7 @@ def simulation(tmp_path_factory):
     mesh.ngmesh.SetBCName(6, "right_membrane")
 
     tmp_path = tmp_path_factory.mktemp("results")
-    return ecsim.Simulation("test_simulation", mesh, result_root=tmp_path)
+    return bmbcsim.Simulation("test_simulation", mesh, result_root=tmp_path)
 
 
 def test_added_species_are_present(simulation):

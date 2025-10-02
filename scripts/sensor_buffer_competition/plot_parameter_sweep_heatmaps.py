@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-import ecsim
+import bmbcsim
 
 # Define the parameter sweep values (from parameter_sweep.py)
 buffer_concs = [1e-6, 1e-3, 1.0, 1e3]  # in mmol/L
@@ -29,7 +29,7 @@ for j, conc in enumerate(buffer_concs):
 
         try:
             # Try to load the most recent result for this parameter combination
-            result_loader = ecsim.ResultLoader.find(
+            result_loader = bmbcsim.ResultLoader.find(
                 simulation_name=sim_name,
                 results_root=results_root
             )

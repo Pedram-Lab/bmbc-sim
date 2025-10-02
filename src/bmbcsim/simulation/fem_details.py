@@ -8,8 +8,8 @@ import sympy
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
-from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.units import to_simulation_units
+from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.units import to_simulation_units
 
 
 def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:

@@ -11,32 +11,24 @@ into the cytosol, where it interacts with three buffers:
 
 Calcium is removed from the cytosol via SERCA pumps and the sodium-calcium exchanger (NCX).
 """
-
-import ngsolve as ngs
-from netgen import occ
 import astropy.units as u
 
-import ecsim
-from ecsim.simulation import transport
-from ecsim.units import M, uM
+import bmbcsim
+from bmbcsim.simulation import transport
+from bmbcsim.units import M, uM
 
 
 # Create a spherical cell
-cell = occ.Sphere((0, 0, 0), 20).mat('cell').bc('membrane')
-
-geo = occ.OCCGeometry(cell)
-mesh = ngs.Mesh(geo.GenerateMesh(maxh=2))
-# from ngsolve.webgui import Draw
-# Draw(mesh)
+mesh = bmbcsim.geometry.create_sphere_geometry(radius=20 * u.um, mesh_size=2 * u.um)
 
 # Initialize the simulation
-simulation = ecsim.Simulation('sala', mesh, result_root='results')
+simulation = bmbcsim.Simulation('sala', mesh, result_root='results')
 geometry = simulation.simulation_geometry
 # geometry.visualize()
 
 # Get the compartments and membranes
-cell = geometry.compartments['cell']
-membrane = geometry.membranes['membrane']
+cell = geometry.compartments['sphere']
+membrane = geometry.membranes['boundary']
 
 # Add species to the simulation
 ca = simulation.add_species('Ca', valence=2)

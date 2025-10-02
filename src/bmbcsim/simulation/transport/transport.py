@@ -4,7 +4,7 @@ from typing import Callable
 import ngsolve as ngs
 import astropy.units as u
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 
 Coefficient = u.Quantity | Callable[[u.Quantity], u.Quantity]

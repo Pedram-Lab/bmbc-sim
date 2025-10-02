@@ -4,7 +4,7 @@ import os
 import numpy as np
 import xarray as xr
 
-import ecsim
+import bmbcsim
 
 # Define parameter ranges (in mM)
 buffer_kd_values = np.geomspace(1e-3, 10, 5)  # 1uM to 10mM
@@ -53,7 +53,7 @@ results = xr.Dataset(data_vars=data_vars, coords=coords)
 
 # Collect results
 for path, (buffer_kd, sensor_kd) in zip(simulation_results, params_list):
-    result_loader = ecsim.ResultLoader(f"results/{path}")
+    result_loader = bmbcsim.ResultLoader(f"results/{path}")
 
     total_substance = xr.concat(
         [result_loader.load_total_substance(i) for i in range(len(result_loader))],

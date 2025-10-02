@@ -12,9 +12,9 @@ import argparse
 import astropy.units as u
 from ngsolve.webgui import Draw
 
-import ecsim
-from ecsim.geometry import create_box_geometry
-from ecsim.simulation import transport
+import bmbcsim
+from bmbcsim.geometry import create_box_geometry
+from bmbcsim.simulation import transport
 
 
 def run_simulation(buffer_conc, buffer_kd):
@@ -54,7 +54,7 @@ def run_simulation(buffer_conc, buffer_kd):
     )
     Draw(mesh)
 
-    simulation = ecsim.Simulation(sim_name, mesh, result_root='results')
+    simulation = bmbcsim.Simulation(sim_name, mesh, result_root='results')
     geometry = simulation.simulation_geometry
 
     compartments = geometry.compartments

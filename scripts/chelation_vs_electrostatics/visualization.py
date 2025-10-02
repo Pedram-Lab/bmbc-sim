@@ -12,7 +12,7 @@ from datetime import datetime
 
 import xarray as xr
 import matplotlib.pyplot as plt
-import ecsim
+import bmbcsim
 
 
 # Switches for electrostatics and chelation
@@ -32,7 +32,7 @@ simulation_name = "_".join(simulation_name)
 file_prefix = f"{timestamp}_{simulation_name}"
 
 # Load results
-result_loader = ecsim.ResultLoader.find(
+result_loader = bmbcsim.ResultLoader.find(
     results_root="results",
     simulation_name=simulation_name,
 )
@@ -53,7 +53,7 @@ total_ca = free_ca
 regions = ["box:top", "box:bottom"]
 region_sizes = result_loader.compute_region_sizes()
 
-figsize = ecsim.plot_style("pedramlab")
+figsize = bmbcsim.plot_style("pedramlab")
 
 # Plot 1: Free and total Ca
 plt.rcParams["lines.linewidth"] = 2

@@ -1,7 +1,7 @@
 [project]
-name = "ecsim"
-version = "0.2.0"
-description = "Extracellular Matrix Simulations"
+name = "bmbcsim"
+version = "0.1.0"
+description = "Biomechanical and Biochemical Simulator (BMBC-Sim)"
 requires-python = ">= 3.12,<3.13"
 readme = "README.md"
 license = {file = "LICENSE"}

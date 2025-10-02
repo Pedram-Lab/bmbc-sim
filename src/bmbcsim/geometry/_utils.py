@@ -8,7 +8,7 @@ from netgen import occ
 import netgen.meshing as ngs
 from ngsolve import Mesh
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 def convert_to_volume_mesh(
         surface_mesh: ngs.Mesh,

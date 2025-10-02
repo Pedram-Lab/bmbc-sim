@@ -4,9 +4,9 @@ from pathlib import Path
 
 import astropy.units as u
 
-import ecsim
-from ecsim.geometry import create_sensor_geometry
-from ecsim.units import mM, uM, nM
+import bmbcsim
+from bmbcsim.geometry import create_sensor_geometry
+from bmbcsim.units import mM, uM, nM
 
 
 def run_sensor_simulation(
@@ -49,7 +49,7 @@ def run_sensor_simulation(
     )
 
     # Create simulation
-    simulation = ecsim.Simulation("sensor", mesh, result_root="results")
+    simulation = bmbcsim.Simulation("sensor", mesh, result_root="results")
 
     # Save the variables to the simulation directory as yaml
     simulation_dir = Path(simulation.result_directory)

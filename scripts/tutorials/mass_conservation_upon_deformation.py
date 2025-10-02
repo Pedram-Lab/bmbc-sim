@@ -12,7 +12,7 @@ from ngsolve.webgui import Draw
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ecsim.units import *
+from bmbcsim.units import *
 
 # %%
 # Define units and parameters for the simulation (mechanical parameters are for typical extracellular matrix)

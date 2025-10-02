@@ -1,9 +1,9 @@
 import astropy.units as u
 import ngsolve as ngs
 
-from ecsim.simulation.geometry.compartment import Compartment
-from ecsim.simulation.transport.transport import Transport
-from ecsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.simulation.geometry.compartment import Compartment
+from bmbcsim.simulation.transport.transport import Transport
+from bmbcsim.simulation.simulation_agents import ChemicalSpecies
 
 
 class Membrane:

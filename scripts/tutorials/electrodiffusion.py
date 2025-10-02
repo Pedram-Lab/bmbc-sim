@@ -16,7 +16,7 @@ import astropy.units as au
 from astropy import constants as const
 from tqdm.notebook import trange
 
-from ecsim.units import to_simulation_units, uM
+from bmbcsim.units import to_simulation_units, uM
 
 # %%
 # Parameters (of calcium in extracellular space)

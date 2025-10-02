@@ -7,9 +7,9 @@ from matplotlib import pyplot as plt
 import astropy.units as u
 import xarray as xr
 
-import ecsim
-from ecsim.simulation import transport
-from ecsim.units import mM
+import bmbcsim
+from bmbcsim.simulation import transport
+from bmbcsim.units import mM
 
 
 def create_simulation(tmp_path, width):
@@ -21,7 +21,7 @@ def create_simulation(tmp_path, width):
     geo = occ.OCCGeometry(box)
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    simulation = ecsim.Simulation(
+    simulation = bmbcsim.Simulation(
         f"outside_fluxes_{width}_test",
         mesh,
         result_root=tmp_path
@@ -87,7 +87,7 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms, record_interval=10 * u.ms)
 
     # Test point values (new ResultLoader syntax)
-    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
     assert len(result_loader) == 101
     point = (0.5, 0.5, 0.5)
     point_values = xr.concat(

@@ -4,8 +4,8 @@ import astropy.units as u
 import astropy.constants as const
 import ngsolve as ngs
 
-from ecsim.simulation.simulation_agents import ChemicalSpecies
-from ecsim.units import to_simulation_units
+from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.units import to_simulation_units
 import numbers
 
 
