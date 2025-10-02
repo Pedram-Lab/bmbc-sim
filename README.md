@@ -17,6 +17,7 @@ Setting up a simulation is straightforward as BMBC-Sim provides an easy-to-use A
 ```python
 import astropy.units as u
 import bmbcsim
+import bmbcsim.simulation.transport as transport
 
 # Create a spherical mesh with a radius of 10 micrometers and a mesh size of 1 micrometer
 mesh = bmbcsim.geometry.create_sphere_geometry(radius=10 * u.um, mesh_size=1 * u.um)
@@ -29,6 +30,9 @@ ca = sim.add_species("ca")
 buffer = sim.add_species("buffer")
 ca_buffer = sim.add_species("ca_buffer")
 
+# Initialize the buffer with a concentration of 1 millimolar
+cell.initialize_species(buffer, value=1 * u.mmol / u.l)
+
 # Add diffusion constants on a per-species and per-compartment basis
 cell.add_diffusion(ca, diffusivity=0.2 * u.um**2 / u.ms)
 cell.add_diffusion(buffer, diffusivity=0.1 * u.um**2 / u.ms)
@@ -39,6 +43,13 @@ cell.add_reaction(
     reactants=[ca, buffer], products=[ca_buffer],
     k_f=0.1 / (u.ms * u.um**3), k_r=0.05 / u.ms,
 )
+
+# Add influx of calcium at the boundary of the sphere with a rate of
+# 0.2 millimolar per millisecond for the first 5 milliseconds
+membrane = sim.simulation_geometry.membranes["boundary"]
+buffer_substance = 1 * u.mmol / u.l * cell.volume
+flux = lambda t: buffer_substance / (5 * u.ms) if t < 5 * u.ms else 0 * u.mmol / u.ms
+membrane.add_transport(ca, transport.GeneralFlux(flux=flux), source=None, target=cell)
 
 # Run the simulation for 10 milliseconds with a time step of 0.1 milliseconds
 # recording a snapshot of all species every 1 millisecond
