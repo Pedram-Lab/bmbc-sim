@@ -7,9 +7,9 @@ from matplotlib import pyplot as plt
 import astropy.units as u
 import xarray as xr
 
-import ecsim
-from ecsim.simulation import transport
-from ecsim.units import mM
+import bmbcsim
+from bmbcsim.simulation import transport
+from bmbcsim.units import mM
 
 
 def create_simulation(tmp_path):
@@ -27,7 +27,7 @@ def create_simulation(tmp_path):
     geo = occ.OCCGeometry(occ.Glue([left, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    simulation = ecsim.Simulation("multi_region_test", mesh, result_root=tmp_path)
+    simulation = bmbcsim.Simulation("multi_region_test", mesh, result_root=tmp_path)
 
     return simulation
 
@@ -88,7 +88,7 @@ def test_multi_region_dynamics(tmp_path, visualize=False):
     simulation.run(end_time=1 * u.s, time_step=1 * u.ms, record_interval=10 * u.ms)
 
     # Test point values (new ResultLoader syntax)
-    result_loader = ecsim.ResultLoader(simulation.result_directory)
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
     assert len(result_loader) == 101
     points = [(0.2, 0.5, 0.5), (1.8, 0.5, 0.5)]
     point_values = xr.concat(

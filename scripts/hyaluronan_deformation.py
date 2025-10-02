@@ -41,7 +41,7 @@ from netgen.csg import *
 from ngsolve import *
 from ngsolve.webgui import Draw
 
-from ecsim.units import *
+from bmbcsim.units import *
 
 # %%
 # Define units and parameters for the simulation

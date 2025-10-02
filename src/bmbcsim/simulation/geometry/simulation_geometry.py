@@ -4,10 +4,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import ngsolve as ngs
 
-from ecsim.logging import logger
-from ecsim.simulation.geometry.compartment import Compartment, Region
-from ecsim.simulation.geometry.membrane import Membrane
-from ecsim.units import BASE_UNITS
+from bmbcsim.logging import logger
+from bmbcsim.simulation.geometry.compartment import Compartment, Region
+from bmbcsim.simulation.geometry.membrane import Membrane
+from bmbcsim.units import BASE_UNITS
 
 
 class SimulationGeometry:

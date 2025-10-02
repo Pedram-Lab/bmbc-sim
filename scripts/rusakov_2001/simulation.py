@@ -9,8 +9,8 @@ import numpy as np
 import astropy.units as u
 import astropy.constants as const
 
-import ecsim
-from ecsim.simulation import transport
+import bmbcsim
+from bmbcsim.simulation import transport
 
 # Geometry parameters
 TOTAL_SIZE = 2 * u.um        # Guessed
@@ -36,7 +36,7 @@ END_TIME = 1.5 * u.ms
 
 # Create the geometry
 angle = float(np.arccos(1 - 2 * GLIA_COVERAGE)) * u.rad
-mesh = ecsim.create_rusakov_geometry(
+mesh = bmbcsim.create_rusakov_geometry(
     total_size=TOTAL_SIZE,
     synapse_radius=SYNAPSE_RADIUS,
     cleft_size=CLEFT_SIZE,
@@ -47,7 +47,7 @@ mesh = ecsim.create_rusakov_geometry(
 )
 
 # Initialize the simulation and all geometry components
-simulation = ecsim.Simulation(mesh=mesh, name="rusakov", result_root="results")
+simulation = bmbcsim.Simulation(mesh=mesh, name="rusakov", result_root="results")
 geo = simulation.simulation_geometry
 synapse_ecs = geo.compartments["synapse_ecs"]
 neuropil = geo.compartments["neuropil"]

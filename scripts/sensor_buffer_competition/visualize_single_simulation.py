@@ -12,11 +12,11 @@ import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 
-import ecsim
-from ecsim.simulation.result_io import result_loader
+import bmbcsim
+from bmbcsim.simulation.result_io import result_loader
 
 # Customizing the plot style
-fig_width, fig_height = ecsim.plot_style("pedramlab")
+fig_width, fig_height = bmbcsim.plot_style("pedramlab")
 
 BUFFER_CONC = 1000.0  # mM
 BUFFER_KD = 1000.0  # mM

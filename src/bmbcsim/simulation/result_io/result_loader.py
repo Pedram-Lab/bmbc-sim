@@ -6,7 +6,7 @@ import pyvista as pv
 import numpy as np
 import xarray as xr
 
-from ecsim.units import BASE_UNITS
+from bmbcsim.units import BASE_UNITS
 
 
 class ResultLoader:

@@ -41,7 +41,7 @@ from netgen import occ
 from ngsolve.webgui import Draw
 import pyvista as pv
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 # %%
 # Define units and parameters for the simulation

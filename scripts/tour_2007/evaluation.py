@@ -3,7 +3,7 @@ import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 
-import ecsim
+import bmbcsim
 
 def get_radial_profile(buffer_name, *, z, species_of_interest="Ca", n_points=50):
     """Load the concentration profile for a specific buffer and species
@@ -16,7 +16,7 @@ def get_radial_profile(buffer_name, *, z, species_of_interest="Ca", n_points=50)
         as well as the time at which the data was recorded.
     """
     sim_name = "tour_" + buffer_name.lower()
-    loader = ecsim.ResultLoader.find(simulation_name=sim_name, results_root="results")
+    loader = bmbcsim.ResultLoader.find(simulation_name=sim_name, results_root="results")
     last_step = len(loader) - 1
     distances = np.linspace(0.0, 0.6, n_points)
     points = [(0, d, z) for d in distances]
@@ -28,7 +28,7 @@ def get_radial_profile(buffer_name, *, z, species_of_interest="Ca", n_points=50)
     return distances, sim_values, ds.coords['time'].values[0]
 
 
-figsize = ecsim.plot_style("pedramlab")
+figsize = bmbcsim.plot_style("pedramlab")
 EXPERIMENTS = [
     ("EGTA_low", "EGTA 4.5 mM"),
     ("EGTA_high", "EGTA 40 mM"),

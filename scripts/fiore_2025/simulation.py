@@ -8,9 +8,9 @@ experiment), considering:
 
 import astropy.units as u  # Physical units
 from ngsolve.webgui import Draw  # Mesh visualization
-import ecsim  # Simulation framework
-from ecsim.simulation import transport  # Tools for transport
-from ecsim.geometry import create_dish_geometry  # Geometry generator
+import bmbcsim  # Simulation framework
+from bmbcsim.simulation import transport  # Tools for transport
+from bmbcsim.geometry import create_dish_geometry  # Geometry generator
 
 # Initial and target Ca concentrations
 CA_INIT = 4 * u.mmol / u.L
@@ -33,7 +33,7 @@ Draw(mesh)
 print("Material names in mesh:", mesh.GetMaterials())
 
 # Initialize simulation and link geometry
-simulation = ecsim.Simulation('tony', mesh, result_root='results')
+simulation = bmbcsim.Simulation('tony', mesh, result_root='results')
 geometry = simulation.simulation_geometry
 
 # Access compartments and membrane

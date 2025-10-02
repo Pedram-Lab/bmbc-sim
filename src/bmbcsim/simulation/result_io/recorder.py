@@ -3,9 +3,9 @@ import os
 import ngsolve as ngs
 import astropy.units as u
 
-from ecsim.logging import logger
-from ecsim.simulation.geometry.compartment import Compartment
-from ecsim.units import to_simulation_units
+from bmbcsim.logging import logger
+from bmbcsim.simulation.geometry.compartment import Compartment
+from bmbcsim.units import to_simulation_units
 
 
 class Recorder:

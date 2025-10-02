@@ -8,7 +8,7 @@ from ngsolve import Mesh
 import numpy as np
 import astropy.units as u
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 def create_rusakov_geometry(
     total_size: u.Quantity,

@@ -2,12 +2,12 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import numpy as np
 
-import ecsim
+import bmbcsim
 
 
 # Load results
-loader = ecsim.ResultLoader.find(simulation_name="rusakov", results_root="results")
-figsize = ecsim.plot_style("pedramlab")
+loader = bmbcsim.ResultLoader.find(simulation_name="rusakov", results_root="results")
+figsize = bmbcsim.plot_style("pedramlab")
 plt.rcParams.update({"lines.linewidth": 2})
 
 # Load total substance by snapshot

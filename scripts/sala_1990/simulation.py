@@ -16,9 +16,9 @@ import ngsolve as ngs
 from netgen import occ
 import astropy.units as u
 
-import ecsim
-from ecsim.simulation import transport
-from ecsim.units import M, uM
+import bmbcsim
+from bmbcsim.simulation import transport
+from bmbcsim.units import M, uM
 
 
 # Create a spherical cell
@@ -30,7 +30,7 @@ mesh = ngs.Mesh(geo.GenerateMesh(maxh=2))
 # Draw(mesh)
 
 # Initialize the simulation
-simulation = ecsim.Simulation('sala', mesh, result_root='results')
+simulation = bmbcsim.Simulation('sala', mesh, result_root='results')
 geometry = simulation.simulation_geometry
 # geometry.visualize()
 

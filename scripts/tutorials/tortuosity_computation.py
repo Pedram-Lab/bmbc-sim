@@ -20,7 +20,7 @@ from netgen import occ
 import ngsolve as ngs
 from ngsolve.webgui import Draw
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 # %%
 # Parameters (some generic solution in extracellular space)

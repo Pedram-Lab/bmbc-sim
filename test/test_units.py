@@ -1,7 +1,7 @@
 import astropy.units as u
 import pytest
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 
 def test_base_unit_conversion_is_correct():

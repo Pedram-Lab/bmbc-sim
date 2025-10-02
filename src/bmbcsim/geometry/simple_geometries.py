@@ -6,7 +6,7 @@ from netgen import occ
 from ngsolve import Mesh
 from astropy.units import Quantity
 
-from ecsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units
 
 
 def create_ca_depletion_mesh(

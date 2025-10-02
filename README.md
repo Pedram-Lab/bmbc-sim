@@ -1,5 +1,5 @@
-# ECM simulations
-A collection of scripts for solving problems that arise in extracellular matrix simulations using [NGSolve](https://ngsolve.org/).
+# Biomechanical and Biochemical Simulator
+The Biomechanical and Biochemical Simulator (BMBC-Sim) is a multi-physics simulation framework for simulating coupled mechanical and chemical processes in biological models using [NGSolve](https://ngsolve.org/).
 
 ### Setup
 This project uses [uv]() to manage the environment and dependencies.
@@ -16,4 +16,3 @@ uv run python <filename>
 
 ### Examples
 Currently, all examples are located in the `scripts/` directory. Apart from simulations, there are some files that showcase how to use some aspects of NGSolve in greater detail, since the documentation is sometimes lacking for what we need. These are located in the `tutorials/` subfolder.
-

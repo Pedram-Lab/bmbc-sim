@@ -12,10 +12,10 @@ from collections import namedtuple
 import astropy.units as u
 from ngsolve.webgui import Draw
 
-import ecsim
-from ecsim.simulation import transport
-from ecsim.units import mM, uM
-from ecsim.geometry import create_ca_depletion_mesh
+import bmbcsim
+from bmbcsim.simulation import transport
+from bmbcsim.units import mM, uM
+from bmbcsim.geometry import create_ca_depletion_mesh
 
 # Buffer configuration
 BufferSpec = namedtuple('BufferSpec', ['name', 'initial_concentration', 'diffusivity', 'kf', 'kr'])
@@ -63,7 +63,7 @@ Draw(mesh)
 
 
 # Initialize simulation
-simulation = ecsim.Simulation(f"tour_{buffer_spec.name.lower()}", mesh, result_root='results')
+simulation = bmbcsim.Simulation(f"tour_{buffer_spec.name.lower()}", mesh, result_root='results')
 geometry = simulation.simulation_geometry
 
 ecs = geometry.compartments['ecs']

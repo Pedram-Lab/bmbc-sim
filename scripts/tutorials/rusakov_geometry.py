@@ -13,7 +13,7 @@
 from netgen.webgui import Draw
 from astropy.units import um, nm, deg
 
-from ecsim.geometry import create_rusakov_geometry
+from bmbcsim.geometry import create_rusakov_geometry
 
 # %%
 clipping_settings = {"function": False,  "pnt": (0, 0, 0), "vec": (0, 1, 0)}
