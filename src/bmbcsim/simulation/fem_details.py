@@ -403,18 +403,18 @@ class PnpSolver:
         compartments = list(simulation_geometry.compartments.values())
         faraday_const = to_simulation_units(96485.3365 * u.C / u.mol)
         n_space = sum(fes.components[k].ndof for k in range(len(compartments)))
-        shape = (n_space + len(species), n_space + len(species))
+        n_compartments = len(compartments)
+        shape = (n_space + n_compartments, n_space + n_compartments)
 
         # Set up potential matrix [[a, b], [b^T, 0]] and source term
         trial, test = fes.TnT()
-        offset = len(compartments)
         a = ngs.BilinearForm(fes, check_unused=False)
         b = ngs.BilinearForm(fes, check_unused=False)
         f = ngs.LinearForm(fes)
         for k, compartment in enumerate(compartments):
             eps = compartment.coefficients.permittivity
             a += eps * ngs.grad(trial[k]) * ngs.grad(test[k]) * ngs.dx
-            b += trial[k + offset] * test[k] * ngs.dx
+            b += trial[k + n_compartments] * test[k] * ngs.dx
 
             for s in species:
                 c = concentrations[s]
