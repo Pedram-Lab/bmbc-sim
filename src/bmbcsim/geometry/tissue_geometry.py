@@ -194,8 +194,6 @@ class TissueGeometry:
 
         return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))
 
-
-
     @classmethod
     def from_file(cls, file_name: str):
         """Load a tissue geometry from a file. The file must be in vtk format

@@ -1,9 +1,13 @@
 # %% [markdown]
-# # Hydrogel swelling
-# This script defines a block of hydrogel that is weakly anchored in a
-# surrounding medium and swells/shrinks due to some ion concentration.
+# # Hydrogel contraction
+# This script defines a block of hydrogel that is contracting due
+# to changes in ion concentration. The tissue is not anchored,
+# instead the tissue is connected to a fixed reference frame
+# through springs ("local compliant embedding" boundary conditions).
 
 # %%
+import numpy as np
+
 from netgen import occ
 import ngsolve as ngs
 from ngsolve.webgui import Draw
@@ -21,11 +25,14 @@ TAU = 0.01  # time step size
 # Define geometry
 S = 1 / 2
 ecs = occ.Box((-S, -S, 0), (S, S, 1.0)).mat("ecs").bc("side")
-ecs.faces[2].bc("substrate")
 
 geo = occ.OCCGeometry(ecs)
 mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.1))
-elasticity_fes = ngs.VectorH1(mesh, order=1, dirichlet="substrate")
+max_coords = np.max(mesh.ngmesh.Coordinates(), axis=0)
+min_coords = np.min(mesh.ngmesh.Coordinates(), axis=0)
+L = np.linalg.norm(max_coords - min_coords) / (2 * np.sqrt(3))
+
+elasticity_fes = ngs.VectorH1(mesh, order=1)
 diffusion_fes = ngs.H1(mesh, order=1)
 u  = elasticity_fes.TrialFunction()
 concentration = ngs.GridFunction(diffusion_fes)
@@ -46,9 +53,16 @@ def neo_hooke(f):
     )
 
 # %%
-# Define mechanic problem
+# Define mechanic problem with Neo-Hookean material
+# and robin-type "local compliant embedding" boundary conditions
 elasticity_stiffness = ngs.BilinearForm(elasticity_fes, symmetric=False)
 elasticity_stiffness += ngs.Variation(neo_hooke(F).Compile() * ngs.dx)
+
+n = ngs.specialcf.normal(3)
+t = ngs.specialcf.tangential(3)
+normal_springs = (E / (2 * L)) * ngs.InnerProduct(u, n) ** 2
+tangent_springs = (MU / (2 * L)) * ngs.InnerProduct(u, t) ** 2
+elasticity_stiffness += ngs.Variation((normal_springs + tangent_springs) * ngs.ds("side"))
 
 deformation = ngs.GridFunction(elasticity_fes)
 deformation.vec[:] = 0
@@ -72,7 +86,7 @@ prev_mass = patch_mass.vec.CreateVector()
 curr_mass = patch_mass.vec.CreateVector()
 prev_mass.data = patch_mass.vec
 
-concentration.Set(ngs.exp(-10 * ngs.x * ngs.x))
+concentration.Set(2 * ngs.exp(-10 * ngs.x * ngs.x) * (0.5 + ngs.y))
 diffusion_res = concentration.vec.CreateVector()
 
 # %%
@@ -81,7 +95,12 @@ N_STEPS = int(0.5 / TAU)
 concentration_history = ngs.GridFunction(diffusion_fes, multidim=0)
 concentration_history.AddMultiDimComponent(concentration.vec)
 
-vtk_out = VTKOutput(ma=mesh, coefs=[concentration], names=["concentration"], filename="results/hydrogel/hydrogel")
+vtk_out = VTKOutput(
+    ma=mesh,
+    coefs=[concentration],
+    names=["concentration"],
+    filename="results/hydrogel/hydrogel",
+)
 vtk_out.Do()
 
 for step in range(N_STEPS):
