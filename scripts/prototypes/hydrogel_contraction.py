@@ -34,7 +34,7 @@ L = np.linalg.norm(max_coords - min_coords) / (2 * np.sqrt(3))
 
 elasticity_fes = ngs.VectorH1(mesh, order=1)
 diffusion_fes = ngs.H1(mesh, order=1)
-u  = elasticity_fes.TrialFunction()
+u = elasticity_fes.TrialFunction()
 concentration = ngs.GridFunction(diffusion_fes)
 
 # %%
