@@ -7,8 +7,6 @@ import ngsolve as ngs
 from bmbcsim.logging import logger
 from bmbcsim.simulation.geometry.compartment import Compartment, Region
 from bmbcsim.simulation.geometry.membrane import Membrane
-from bmbcsim.units import BASE_UNITS
-
 
 class SimulationGeometry:
     """A high-level description of the simulation geometry. The description is
@@ -47,9 +45,8 @@ class SimulationGeometry:
             compartment_name, region_name = _split_compartment_and_region(name)
             logger.debug('Inferred compartment %s from region %s', compartment_name, name)
 
-            volume = ngs.Integrate(1, mesh_region, ngs.VOL) * BASE_UNITS['length']**3
             regions = compartment_to_regions.get(compartment_name, [])
-            regions.append(Region(name=region_name, volume=volume))
+            regions.append(Region(name=region_name, volume=0.0))
             compartment_to_regions[compartment_name] = regions
 
         self.compartments = {name: Compartment(name, mesh, regions)
@@ -71,13 +68,12 @@ class SimulationGeometry:
 
             left = mesh_region_to_name[neighbors[0]]
             right = mesh_region_to_name[neighbors[1]] if len(neighbors) > 1 else None
-            area = ngs.Integrate(1, bnd, ngs.BND) * BASE_UNITS['length']**2
 
-            self._full_interface_info.append((left, right, name, area))
+            self._full_interface_info.append((left, right, name))
             logger.debug('Connected regions %s and %s via membrane %s', left, right, name)
 
         membranes_to_neighbors = {}
-        for left, right, name, area in self._full_interface_info:
+        for left, right, name in self._full_interface_info:
             # Find the interfaces that connect compartments (= membranes)
             left, _ = _split_compartment_and_region(left)
             right, _ = _split_compartment_and_region(right)
@@ -86,15 +82,31 @@ class SimulationGeometry:
                 # A membrane connects different compartments
                 continue
 
-            neighbors, total_area = membranes_to_neighbors.get(name, (set(), 0))
+            neighbors = membranes_to_neighbors.get(name, set())
             neighbors.add((self.compartments[left], self.compartments[right] if right else None))
-            total_area += area
-            membranes_to_neighbors[name] = (neighbors, total_area)
+            membranes_to_neighbors[name] = neighbors
 
-        self.membranes = {name: Membrane(name, mesh, neighbors, total_area)
-                          for name, (neighbors, total_area) in membranes_to_neighbors.items()}
+        self.membranes = {name: Membrane(name, mesh, neighbors, 0.0)
+                          for name, neighbors in membranes_to_neighbors.items()}
 
         logger.info('Found %d membranes: %s', len(self.membranes), self.membranes)
+        self.update_measures()
+
+    def update_measures(self) -> None:
+        """Update compartment volumes and membrane areas on the current mesh."""
+        # Update region volumes
+        for compartment in self.compartments.values():
+            region_names = compartment.get_region_names(full_names=True)
+            for region, name in zip(compartment.regions, region_names):
+                region._volume_parameter.Set(
+                    ngs.Integrate(1, self.mesh.Materials(name), ngs.VOL)
+                )
+
+        # Update membrane areas
+        for membrane in self.membranes.values():
+            membrane._area_parameter.Set(
+                ngs.Integrate(1, self.mesh.Boundaries(membrane.name), ngs.BND)
+            )
 
 
     @property

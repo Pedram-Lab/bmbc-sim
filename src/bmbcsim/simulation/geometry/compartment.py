@@ -5,7 +5,7 @@ import astropy.constants as const
 import ngsolve as ngs
 
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
-from bmbcsim.units import to_simulation_units
+from bmbcsim.units import to_simulation_units, BASE_UNITS
 import numbers
 
 
@@ -14,13 +14,26 @@ S = ChemicalSpecies
 C = ngs.CoefficientFunction
 
 
-@dataclass(frozen=True)
 class Region:
     """A region represents a part of the simulation geometry that is resolved in
     the mesh. It has a name and a volume.
     """
-    name: str
-    volume: u.Quantity
+    def __init__(self, name: str, volume: float):
+        self.name = name
+        self._volume_parameter = ngs.Parameter(volume)
+
+    @property
+    def volume(self) -> u.Quantity:
+        """Get the volume of the region."""
+        return self._volume_parameter.Get() * BASE_UNITS['length'] ** 3
+
+    def __eq__(self, other):
+        if not isinstance(other, Region):
+            return False
+        return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 class Compartment:

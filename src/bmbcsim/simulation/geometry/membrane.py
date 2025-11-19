@@ -4,6 +4,7 @@ import ngsolve as ngs
 from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.transport.transport import Transport
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.units import BASE_UNITS
 
 
 class Membrane:
@@ -16,7 +17,7 @@ class Membrane:
             name: str,
             mesh: ngs.Mesh,
             connects: set[tuple[Compartment, Compartment]],
-            area: u.Quantity
+            area: float
     ):
         """Create a new membrane.
 
@@ -28,8 +29,13 @@ class Membrane:
         self._mesh = mesh
         self.name = name
         self.connects = connects
-        self.area = area
+        self._area_parameter = ngs.Parameter(area)
         self._transport = []
+
+    @property
+    def area(self) -> u.Quantity:
+        """Get the area of the membrane."""
+        return self._area_parameter.Get() * BASE_UNITS['length'] ** 2
 
 
     def add_transport(

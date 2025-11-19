@@ -117,6 +117,9 @@ class Simulation:
         """
         threadpoolctl.threadpool_limits(limits=n_threads, user_api="blas")
 
+        # TODO: Make this dependent on mechanics being enabled
+        reassemble = False
+
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
@@ -135,7 +138,7 @@ class Simulation:
         # Main simulation loop (with parallelization)
         ngs.SetNumThreads(n_threads)
         with ngs.TaskManager():
-            self._setup(dt, reassemble=False)
+            self._setup(dt, reassemble=reassemble)
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
             recorder = Recorder(record_interval)
@@ -150,6 +153,8 @@ class Simulation:
 
             t = start_time.copy()
             for _ in trange(n_steps):
+                if reassemble:
+                    self.simulation_geometry.update_measures()
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
