@@ -135,7 +135,7 @@ class Simulation:
         # Main simulation loop (with parallelization)
         ngs.SetNumThreads(n_threads)
         with ngs.TaskManager():
-            self._setup(dt)
+            self._setup(dt, reassemble=False)
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
             recorder = Recorder(record_interval)
@@ -191,10 +191,11 @@ class Simulation:
             recorder.finalize(end_time=t)
 
 
-    def _setup(self, dt) -> None:
+    def _setup(self, dt, *, reassemble=False) -> None:
         """Set up the simulation by initializing the finite element matrices.
         
-        :param time_step: The time step to use for the simulation.
+        :param dt: The time step to use for the simulation.
+        :param reassemble: Whether to reassemble FEM matrices every time step.
         """
         # Set up the finite element spaces
         logger.info("Setting up finite element spaces...")
@@ -236,6 +237,7 @@ class Simulation:
                 self._el_fes,
                 self.simulation_geometry,
                 self._concentrations,
+                reassemble=reassemble,
             )
 
         logger.debug("Setting up diffusion solver...")
@@ -246,6 +248,7 @@ class Simulation:
             self._concentrations,
             self._pnp,
             dt,
+            reassemble=reassemble,
         )
         logger.debug("Setting up reaction solver...")
         self._reaction = ReactionSolver.for_all_species(

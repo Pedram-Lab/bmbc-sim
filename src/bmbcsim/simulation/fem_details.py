@@ -23,13 +23,27 @@ def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:
 class DiffusionSolver:
     """FEM solver for diffusion and transport equations."""
 
-    def __init__(self, a, transport, m_star, preconditioner, source_term, dt):
-        self._a = a
+    def __init__(
+            self,
+            mass_form,
+            stiffness_form,
+            transport,
+            source_term,
+            dt,
+            reassemble,
+    ):
+        self._mass_form = mass_form
+        self._stiffness_form = stiffness_form
         self._transport = transport
-        self._m_star = m_star
-        self._preconditioner = preconditioner
         self._source_term = source_term
         self._dt = dt
+        self._reassemble = reassemble
+
+        # Operators are (optionally) rebuilt on every step when reassemble=True
+        self._stiffness = None
+        self._m_star = None
+        self._preconditioner = None
+        self._prepare_operators()
 
 
     @classmethod
@@ -40,13 +54,14 @@ class DiffusionSolver:
             simulation_geometry,
             concentrations,
             potential,
-            dt
+            dt,
+            reassemble=False,
     ) -> dict[ChemicalSpecies, 'DiffusionSolver']:
         """Set up the solver for all given species."""
         species_to_solver = {}
         for s in species:
             species_to_solver[s] = cls._for_single_species(
-                s, fes, simulation_geometry, concentrations[s], potential, dt
+                s, fes, simulation_geometry, concentrations[s], potential, dt, reassemble
             )
         return species_to_solver
 
@@ -59,7 +74,8 @@ class DiffusionSolver:
             simulation_geometry,
             concentration,
             potential,
-            dt
+            dt,
+            reassemble,
     ):
         """Set up the solver for a single given species."""
         compartments = simulation_geometry.compartments.values()
@@ -171,33 +187,37 @@ class DiffusionSolver:
                 transport_term += (-d * (supg + drift) * directional_test).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
-        mass.Assemble()
-        stiffness.Assemble()
-
-        # Invert the matrix for the implicit Euler integrator (M* = M + dt * A)
-        mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
-        mass = mass.mat.DeleteZeroElements(1e-10)
-        mass_csr = ngs_to_csr(mass)
-
-        # Create preconditioner for the system matrix
-        # spilu on csc is more efficient -> use symmmetry of M*
-        m_ilu = spla.spilu(mass_csr.T, fill_factor=5)
-        preconditioner = spla.LinearOperator(mass_csr.shape, matvec=m_ilu.solve, dtype=np.float64)
-
-        stiffness = stiffness.mat.DeleteZeroElements(1e-10)
-        stiffness_csr = ngs_to_csr(stiffness)
-
         return cls(
-            stiffness_csr,
+            mass,
+            stiffness,
             transport_term,
-            mass_csr,
-            preconditioner,
             source_term,
-            dt
+            dt,
+            reassemble,
         )
+
+    def _prepare_operators(self):
+        """Assemble matrices and compute the system/preconditioner."""
+        self._stiffness_form.Assemble()
+        stiffness_mat = self._stiffness_form.mat.DeleteZeroElements(1e-10)
+        self._stiffness = ngs_to_csr(stiffness_mat)
+
+        self._mass_form.Assemble()
+        mass_mat = self._mass_form.mat.DeleteZeroElements(1e-10)
+        mass_csr = ngs_to_csr(mass_mat)
+
+        m_star = mass_csr + self._dt * self._stiffness
+        m_ilu = spla.spilu(m_star.T, fill_factor=5)
+        self._preconditioner = spla.LinearOperator(
+            m_star.shape, matvec=m_ilu.solve, dtype=np.float64
+        )
+        self._m_star = m_star
 
     def step(self, concentration: ngs.GridFunction):
         """Apply the implicit Euler step to the concentration vector."""
+        if self._reassemble:
+            self._prepare_operators()
+
         # Assemble matrices
         self._transport.Assemble()
         self._source_term.Assemble()
@@ -206,9 +226,11 @@ class DiffusionSolver:
 
         # Compute the residual
         c = concentration.vec.FV().NumPy().copy()
-        res = self._dt * (self._source_term.vec.FV().NumPy() - self._a * c + transport_csr * c)
+        res = self._dt * (
+            self._source_term.vec.FV().NumPy() - self._stiffness * c + transport_csr * c
+        )
 
-        # Create the system matrix: M* - dt * transport
+        # Create the system matrix: M^* - dt * transport
         transport_csr.data *= -self._dt
         system_matrix_csr = spla.LinearOperator(
             transport_csr.shape,
@@ -386,10 +408,25 @@ class ReactionSolver:
 class PnpSolver:
     """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
-    def __init__(self, matrix, source_term, potential):
-        self._matrix = matrix
+    def __init__(
+            self,
+            a_form,
+            b_form,
+            source_term,
+            potential,
+            n_space,
+            shape,
+            reassemble,
+    ):
+        self._a_form = a_form
+        self._b_form = b_form
         self._source_term = source_term
         self.potential = potential
+        self._n_space = n_space
+        self._shape = shape
+        self._reassemble = reassemble
+
+        self._prepare_matrix()
 
     @classmethod
     def for_all_species(
@@ -398,6 +435,7 @@ class PnpSolver:
             fes,
             simulation_geometry,
             concentrations,
+            reassemble=False,
     ):
         """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
@@ -420,33 +458,40 @@ class PnpSolver:
                 c = concentrations[s]
                 f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
 
-        a.Assemble()
-        a = a.mat.DeleteZeroElements(1e-10)
-        a = ngs_to_csr(a)
-        a = a[:n_space, :n_space]
+        potential = ngs.GridFunction(fes)
 
-        b.Assemble()
-        b = b.mat.DeleteZeroElements(1e-10)
-        b = ngs_to_csr(b)
-        b = b[:n_space, n_space:]
+        return cls(a, b, f, potential, n_space, shape, reassemble)
+
+    def _prepare_matrix(self):
+        """Assemble the saddle-point matrix for the electrostatic potential."""
+        self._a_form.Assemble()
+        a_mat = self._a_form.mat.DeleteZeroElements(1e-10)
+        a = ngs_to_csr(a_mat)
+        a = a[:self._n_space, :self._n_space]
+
+        self._b_form.Assemble()
+        b_mat = self._b_form.mat.DeleteZeroElements(1e-10)
+        b = ngs_to_csr(b_mat)
+        b = b[:self._n_space, self._n_space:]
 
         # Augmented Lagrangian formulation: [[a + tau * b * bT, b], [bT, -I / tau]]
         tau = np.mean(a.diagonal())
         tau_inv = 1 / tau
+
         def matvec_full(x):
-            f, g = x[:n_space], tau_inv * x[n_space:]
+            f, g = x[:self._n_space], tau_inv * x[self._n_space:]
             r = b.T @ f
             s = a @ f + tau * (b @ (r + g))
             return np.concatenate([s, r - g])
-        matrix = spla.LinearOperator(shape, matvec=matvec_full, dtype=np.float64)
 
-        potential = ngs.GridFunction(fes)
-
-        return cls(matrix, f, potential)
+        self._matrix = spla.LinearOperator(self._shape, matvec=matvec_full, dtype=np.float64)
 
 
     def step(self):
         """Update the potential given the current status of chemical concentrations."""
+        if self._reassemble:
+            self._prepare_matrix()
+
         self._source_term.Assemble()
 
         # Minres without preconditioning seemed to yield the best results
