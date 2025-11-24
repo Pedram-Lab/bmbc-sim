@@ -5,6 +5,7 @@ degeneracies, and intersections.
 """
 import pyvista as pv
 from pymeshfix import MeshFix
+import numpy as np
 
 from bmbcsim import TissueGeometry
 
@@ -28,7 +29,7 @@ plotter.add_mesh(combined_mesh, scalars="face_cell_id", show_edges=True, cmap='t
 plotter.show()
 
 repaired_cells = []
-for i, cell in enumerate(all_cells.cells[:5]):
+for i, cell in enumerate(all_cells.cells):
     print(f"Processing cell {i}/{len(all_cells.cells)}")
 
     # Scale the mesh to microns and extract a single cell
@@ -46,6 +47,7 @@ for i, cell in enumerate(all_cells.cells[:5]):
     repaired_cells.append(repaired_cell)
 
     # Create a volume mesh to check for mesh issues
+    repaired_cell["face_cell_id"] = np.full(repaired_cell.n_cells, i)
     single_cell = TissueGeometry(cells=repaired_cell)
     single_cell_mesh = single_cell.to_ngs_mesh(
         mesh_size=10, min_coords=min_coords, max_coords=max_coords
@@ -57,5 +59,8 @@ print(f"Repaired geometry with {len(repaired_cells.cells)} cells.")
 
 combined_mesh = repaired_cells.as_single_mesh()
 plotter = pv.Plotter()
-plotter.add_mesh(combined_mesh, show_edges=True, cmap='tab20b')
+plotter.add_mesh(combined_mesh, scalars="face_cell_id", show_edges=True, cmap='tab20b')
 plotter.show()
+
+# Save the repaired geometry to file
+combined_mesh.save("data/tissue_geometry.vtk")
