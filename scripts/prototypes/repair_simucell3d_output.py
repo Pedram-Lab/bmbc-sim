@@ -20,51 +20,42 @@ def repair_mesh(mesh):
 # Load tissue geometry from file
 all_cells = TissueGeometry.from_file("scripts/prototypes/result_3590.vtk")
 print(f"Loaded geometry with {len(all_cells.cells)} cells.")
-# faulty_cells = [47, 58, 139, 149, 162, 214, 295, 296, 298, 309, 441, 462, 556, 584, 680, 897]
 
-for i, cell in enumerate(all_cells.cells):
-    # Scale it to microns and extract a single cell for testing
+# Visualize the original mesh
+combined_mesh = all_cells.as_single_mesh()
+plotter = pv.Plotter()
+plotter.add_mesh(combined_mesh, scalars="face_cell_id", show_edges=True, cmap='tab20b')
+plotter.show()
+
+repaired_cells = []
+for i, cell in enumerate(all_cells.cells[:5]):
     print(f"Processing cell {i}/{len(all_cells.cells)}")
+
+    # Scale the mesh to microns and extract a single cell
     single_cell = TissueGeometry(cells=cell)
     single_cell = single_cell.scale(1000000)
+
+    # Extract bounding box for meshing
     min_coords, max_coords = single_cell.bounding_box()
     print(f"Bounding box: {min_coords}, {max_coords}")
 
     # Post-process the mesh to make the surfaces look nicer
     single_cell = single_cell.smooth(100)
     single_cell = single_cell.decimate(0.7)
+    repaired_cell = repair_mesh(single_cell.cells[0])
+    repaired_cells.append(repaired_cell)
 
-    single_cell = TissueGeometry(cells=repair_mesh(single_cell.cells[0]))
+    # Create a volume mesh to check for mesh issues
+    single_cell = TissueGeometry(cells=repaired_cell)
     single_cell_mesh = single_cell.to_ngs_mesh(
         mesh_size=10, min_coords=min_coords, max_coords=max_coords
     )
 
+# Visualize the repaired meshes
+repaired_cells = TissueGeometry(cells=repaired_cells)
+print(f"Repaired geometry with {len(repaired_cells.cells)} cells.")
 
-# single_cell = TissueGeometry(cells=all_cells.cells[47])
-# single_cell = single_cell.scale(1000000)
-# min_coords, max_coords = single_cell.bounding_box()
-# print(f"Bounding box: {min_coords}, {max_coords}")
-
-# # Post-process the mesh to make the surfaces look nicer
-# single_cell = single_cell.smooth(100)
-# single_cell = single_cell.decimate(0.7)
-
-# box_bounds = (min_coords[0], max_coords[0], min_coords[1], max_coords[1], min_coords[2], max_coords[2])
-# combined_mesh = single_cell.as_single_mesh()
-# combined_mesh = repair_mesh(combined_mesh)
-# plotter = pv.Plotter()
-# box = pv.Box(box_bounds)
-# plotter.add_mesh(combined_mesh, show_edges=True, cmap='tab20b')
-# plotter.add_mesh(box, color='gray', opacity=0.5)
-# plotter.show()
-
-# cleaned_cell = TissueGeometry(cells=combined_mesh)
-# cleaned_mesh = cleaned_cell.to_ngs_mesh(mesh_size=10, min_coords=min_coords, max_coords=max_coords)
-# Draw(cleaned_mesh)
-
-
-# Manually remove some cells that didn't successfully mesh
-# all_cells = geometry.cells
-# faulty_cells = {47, 58, 139, 149, 162, 214, 295, 296, 298, 309, 441, 462, 556, 584, 680, 897}
-# working_cells = [c for i, c in enumerate(all_cells) if not i in faulty_cells]
-# geometry = TissueGeometry(working_cells)
+combined_mesh = repaired_cells.as_single_mesh()
+plotter = pv.Plotter()
+plotter.add_mesh(combined_mesh, show_edges=True, cmap='tab20b')
+plotter.show()
