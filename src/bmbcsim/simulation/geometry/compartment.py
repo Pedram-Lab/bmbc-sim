@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import numbers
 
 import astropy.units as u
 import astropy.constants as const
@@ -6,7 +7,6 @@ import ngsolve as ngs
 
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
 from bmbcsim.units import to_simulation_units, BASE_UNITS
-import numbers
 
 
 # Define type aliases to shorten type annotations

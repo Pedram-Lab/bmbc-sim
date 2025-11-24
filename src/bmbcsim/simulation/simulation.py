@@ -14,7 +14,12 @@ from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from bmbcsim.units import to_simulation_units
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
-from bmbcsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
+from bmbcsim.simulation.fem_details import (
+    DiffusionSolver,
+    ReactionSolver,
+    PnpSolver,
+    MechanicSolver,
+)
 
 
 class Simulation:
@@ -62,6 +67,7 @@ class Simulation:
         self._pnp: PnpSolver = None
         self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
         self._reaction: ReactionSolver = None
+        self._mechanics: MechanicSolver = None
 
 
     def add_species(
@@ -154,7 +160,10 @@ class Simulation:
             t = start_time.copy()
             for _ in trange(n_steps):
                 if reassemble:
+                    # Update mechanical deformation before geometry-dependent steps
+                    self._mechanics.step()
                     self.simulation_geometry.update_measures()
+
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
@@ -263,3 +272,7 @@ class Simulation:
             self._concentrations,
             dt,
         )
+
+        if reassemble:
+            logger.debug("Setting up mechanics solver...")
+            self._mechanics = MechanicSolver(mesh, E=1.0, nu=1.0)

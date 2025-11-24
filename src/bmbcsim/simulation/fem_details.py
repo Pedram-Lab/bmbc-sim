@@ -514,3 +514,67 @@ class PnpSolver:
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:
         """Returns the k-th component of the potential."""
         return self.potential.components[k]
+
+
+class MechanicSolver:
+    """FEM solver for (non-linear) elasticity on the current mesh deformation."""
+
+    def __init__(self, mesh, E=1.0, nu=1.0):
+        """
+        :param mesh: The mesh to deform.
+        :param E: Young's modulus.
+        :param nu: Poisson's ratio.
+        """
+        self._mesh = mesh
+        self._fes = ngs.VectorH1(mesh, order=1)
+        mu = E / (2 * (1 + nu))
+        lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+        L = np.max(mesh.ngmesh.Coordinates())
+
+        # Set up bulk term
+        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
+        trial = self._fes.TrialFunction()
+        F = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        self._stiffness += ngs.Variation(neo_hooke(F, mu, lam).Compile() * ngs.dx)
+
+        # Set up boundary conditions (spring anchoring, "local compliant embedding")
+        n = ngs.specialcf.normal(3)
+        t = ngs.specialcf.tangential(3)
+        normal_springs = (E / (2 * L)) * ngs.InnerProduct(u, n) ** 2
+        tangent_springs = (mu / (2 * L)) * ngs.InnerProduct(u, t) ** 2
+        self._stiffness += ngs.Variation((normal_springs + tangent_springs) * ngs.ds("side"))
+
+        self._stiffness.Assemble()
+
+        self.deformation = ngs.GridFunction(self._fes)
+        self.deformation.vec[:] = 0
+
+        self._residual = self.deformation.vec.CreateVector()
+
+    def step(self, n_iter=5):
+        """Perform a nonlinear solve via simple Newton iterations."""
+        for _ in range(n_iter):
+            self._stiffness.Apply(self.deformation.vec, self._residual)
+            self._stiffness.AssembleLinearization(self.deformation.vec)
+            inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
+            self.deformation.vec.data -= inv * self._residual
+
+        # Apply deformation to mesh
+        self._mesh.SetDeformation(self.deformation)
+
+    def reset_deformation(self):
+        """Unset mesh deformation and zero the deformation field."""
+        self._mesh.UnsetDeformation()
+        self.deformation.vec[:] = 0
+
+
+def neo_hooke(f, mu, lam):
+    """Neo-Hookean material model with internal pressure."""
+    # TODO: this is just a placeholder for testing purposes!
+    det_f = ngs.Det(f)
+    return mu * (
+        0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
+        + mu / lam * det_f ** (-lam / mu)
+        - 1
+        + det_f
+    )
