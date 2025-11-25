@@ -12,7 +12,10 @@ class TissueGeometry:
 
         :param cells: A list of PyVista PolyData objects representing cell surfaces.
         """
-        self.cells = cells
+        if not isinstance(cells, list):
+            self.cells = [cells]
+        else:
+            self.cells = cells
 
     def as_single_mesh(self):
         """Combine all cell meshes into a single mesh. The resulting mesh
