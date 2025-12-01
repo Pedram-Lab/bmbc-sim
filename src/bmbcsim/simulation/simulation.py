@@ -276,4 +276,4 @@ class Simulation:
 
         if reassemble:
             logger.debug("Setting up mechanics solver...")
-            self._mechanics = MechanicSolver(mesh, self._rd_fes, E=1.0, nu=1.0)
+            self._mechanics = MechanicSolver(mesh, self._rd_fes, self.simulation_geometry)

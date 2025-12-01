@@ -163,6 +163,31 @@ class Compartment:
         self.coefficients.porosity = porosity
 
 
+    def add_elasticity(
+            self,
+            youngs_modulus: u.Quantity | dict[str, u.Quantity],
+            poisson_ratio: float | dict[str, float] = 0.3,
+    ) -> None:
+        """Add elastic material parameters for the compartment.
+
+        :param youngs_modulus: Young's modulus (stiffness) of the material.
+            Can be a single value or a dictionary mapping region names to values.
+        :param poisson_ratio: Poisson's ratio of the material (default 0.3).
+            Can be a single value or a dictionary mapping region names to values.
+        :raises ValueError: If elasticity for the compartment is already defined.
+        """
+        if self.coefficients.elasticity is not None:
+            raise ValueError(f"Elasticity already defined for compartment '{self.name}'")
+
+        # Store raw values (converted to simulation units) for MechanicSolver to build MaterialCF
+        if isinstance(youngs_modulus, dict):
+            E = {k: to_simulation_units(v, 'pressure') for k, v in youngs_modulus.items()}
+        else:
+            E = to_simulation_units(youngs_modulus, 'pressure')
+
+        self.coefficients.elasticity = (E, poisson_ratio)
+
+
     def add_reaction(
             self,
             reactants: list[S],
@@ -257,3 +282,4 @@ class SimulationDetails:
     reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
     permittivity: C = field(default_factory=lambda: None)
     porosity: C = field(default_factory=lambda: None)
+    elasticity: tuple[C, C] = field(default_factory=lambda: None)  # (E, nu)

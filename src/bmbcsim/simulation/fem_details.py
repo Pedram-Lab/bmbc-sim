@@ -519,18 +519,42 @@ class PnpSolver:
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
-    def __init__(self, mesh, concentration_fes, E=1.0, nu=1.0):
+    def __init__(self, mesh, concentration_fes, simulation_geometry):
         """
         :param mesh: The mesh to deform.
         :param concentration_fes: The finite element space for concentration fields.
-        :param E: Young's modulus.
-        :param nu: Poisson's ratio.
+        :param simulation_geometry: The simulation geometry containing compartments
+            with elastic parameters.
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
-        mu = E / (2 * (1 + nu))
-        lam = E * nu / ((1 + nu) * (1 - 2 * nu))
         L = np.max(mesh.ngmesh.Coordinates())
+
+        # Build per-region Lame parameters from elastic properties
+        E_values = {}
+        mu_values = {}
+        lam_values = {}
+        for compartment in simulation_geometry.compartments.values():
+            elasticity = compartment.coefficients.elasticity
+            if elasticity is None:
+                raise ValueError(f"Elasticity not defined for compartment '{compartment.name}'")
+
+            E_raw, nu_raw = elasticity
+            region_names = compartment.get_region_names()
+            full_names = compartment.get_region_names(full_names=True)
+
+            for region, full_name in zip(region_names, full_names):
+                # Get E and nu for this region (either from dict or scalar)
+                E = E_raw[region] if isinstance(E_raw, dict) else E_raw
+                nu = nu_raw[region] if isinstance(nu_raw, dict) else nu_raw
+
+                E_values[full_name] = E
+                mu_values[full_name] = E / (2 * (1 + nu))
+                lam_values[full_name] = E * nu / ((1 + nu) * (1 - 2 * nu))
+
+        E = mesh.MaterialCF(E_values)
+        mu = mesh.MaterialCF(mu_values)
+        lam = mesh.MaterialCF(lam_values)
 
         # Set up bulk term
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
