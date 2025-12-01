@@ -519,9 +519,10 @@ class PnpSolver:
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
-    def __init__(self, mesh, E=1.0, nu=1.0):
+    def __init__(self, mesh, concentration_fes, E=1.0, nu=1.0):
         """
         :param mesh: The mesh to deform.
+        :param concentration_fes: The finite element space for concentration fields.
         :param E: Young's modulus.
         :param nu: Poisson's ratio.
         """
@@ -540,8 +541,8 @@ class MechanicSolver:
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         n = ngs.specialcf.normal(3)
         t = ngs.specialcf.tangential(3)
-        normal_springs = (E / (2 * L)) * ngs.InnerProduct(u, n) ** 2
-        tangent_springs = (mu / (2 * L)) * ngs.InnerProduct(u, t) ** 2
+        normal_springs = (E / (2 * L)) * ngs.InnerProduct(trial, n) ** 2
+        tangent_springs = (mu / (2 * L)) * ngs.InnerProduct(trial, t) ** 2
         self._stiffness += ngs.Variation((normal_springs + tangent_springs) * ngs.ds("side"))
 
         self._stiffness.Assemble()
@@ -550,6 +551,14 @@ class MechanicSolver:
         self.deformation.vec[:] = 0
 
         self._residual = self.deformation.vec.CreateVector()
+
+        # Set up volume tracking for concentration adjustment
+        self._patch_mass = ngs.LinearForm(concentration_fes)
+        for psi in concentration_fes.TestFunction():
+            self._patch_mass += psi * ngs.dx
+        self._patch_mass.Assemble()
+
+        self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
 
     def step(self, n_iter=5):
         """Perform a nonlinear solve via simple Newton iterations."""
@@ -562,10 +571,28 @@ class MechanicSolver:
         # Apply deformation to mesh
         self._mesh.SetDeformation(self.deformation)
 
-    def reset_deformation(self):
-        """Unset mesh deformation and zero the deformation field."""
-        self._mesh.UnsetDeformation()
-        self.deformation.vec[:] = 0
+    def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
+        """Adjust concentrations based on the volume change due to mesh deformation.
+
+        When the mesh deforms, local volumes change. Since the amount of substance
+        is conserved, concentrations must be scaled by the ratio of old to new
+        nodal volumes: c_new = c_old * (V_old / V_new).
+
+        This method should be called after `step()` applies the deformation.
+
+        :param concentrations: Dictionary mapping species to their concentration GridFunctions.
+        """
+        # Recompute nodal volumes on the deformed mesh
+        self._patch_mass.Assemble()
+        curr_mass = self._patch_mass.vec.FV().NumPy()
+
+        # Compute the volume ratio (old / new) for scaling and store current mass
+        volume_ratio = self._prev_mass / curr_mass
+        self._prev_mass = curr_mass.copy()
+
+        # Scale all concentration fields
+        for concentration in concentrations.values():
+            concentration.vec.FV().NumPy()[:] *= volume_ratio
 
 
 def neo_hooke(f, mu, lam):

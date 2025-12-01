@@ -162,6 +162,7 @@ class Simulation:
                 if reassemble:
                     # Update mechanical deformation before geometry-dependent steps
                     self._mechanics.step()
+                    self._mechanics.adjust_concentrations(self._concentrations)
                     self.simulation_geometry.update_measures()
 
                 # Update the concentrations via a first-order splitting approach:
@@ -275,4 +276,4 @@ class Simulation:
 
         if reassemble:
             logger.debug("Setting up mechanics solver...")
-            self._mechanics = MechanicSolver(mesh, E=1.0, nu=1.0)
+            self._mechanics = MechanicSolver(mesh, self._rd_fes, E=1.0, nu=1.0)
