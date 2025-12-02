@@ -552,9 +552,12 @@ class MechanicSolver:
                 mu_values[full_name] = E / (2 * (1 + nu))
                 lam_values[full_name] = E * nu / ((1 + nu) * (1 - 2 * nu))
 
-        E = mesh.MaterialCF(E_values)
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
+
+        # Use mean values for boundary conditions (MaterialCF can't be evaluated on BND)
+        E_mean = np.mean(list(E_values.values()))
+        mu_mean = np.mean(list(mu_values.values()))
 
         # Set up bulk term
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
@@ -565,8 +568,8 @@ class MechanicSolver:
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         n = ngs.specialcf.normal(3)
         t = ngs.specialcf.tangential(3)
-        normal_springs = (E / (2 * L)) * ngs.InnerProduct(trial, n) ** 2
-        tangent_springs = (mu / (2 * L)) * ngs.InnerProduct(trial, t) ** 2
+        normal_springs = (E_mean / (2 * L)) * ngs.InnerProduct(trial, n) ** 2
+        tangent_springs = (mu_mean / (2 * L)) * ngs.InnerProduct(trial, t) ** 2
         self._stiffness += ngs.Variation((normal_springs + tangent_springs) * ngs.ds("side"))
 
         self._stiffness.Assemble()

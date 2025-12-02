@@ -32,6 +32,7 @@ class Simulation:
             *,
             result_root: str,
             electrostatics: bool = False,
+            mechanics: bool = False,
     ):
         """Initialize a new simulation.
 
@@ -40,12 +41,15 @@ class Simulation:
         :param result_root: The directory under which simulation results will be
             stored.
         :param electrostatics: Whether to include electrostatics in the simulation. If
-            yes, compartments must have a permeability.
+            yes, compartments must have a permittivity.
+        :param mechanics: Whether to include mechanics in the simulation. If yes,
+            compartments must have elasticity parameters set.
         """
         self.simulation_geometry = SimulationGeometry(mesh)
 
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
+        self.mechanics = mechanics
 
         # Set up result directory and logging
         time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
@@ -123,9 +127,6 @@ class Simulation:
         """
         threadpoolctl.threadpool_limits(limits=n_threads, user_api="blas")
 
-        # TODO: Make this dependent on mechanics being enabled
-        reassemble = False
-
         if end_time <= start_time:
             raise ValueError("End time must be greater than start time.")
         if time_step <= 0 * u.s:
@@ -144,7 +145,7 @@ class Simulation:
         # Main simulation loop (with parallelization)
         ngs.SetNumThreads(n_threads)
         with ngs.TaskManager():
-            self._setup(dt, reassemble=reassemble)
+            self._setup(dt)
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
             recorder = Recorder(record_interval)
@@ -159,7 +160,7 @@ class Simulation:
 
             t = start_time.copy()
             for _ in trange(n_steps):
-                if reassemble:
+                if self.mechanics:
                     # Update mechanical deformation before geometry-dependent steps
                     self._mechanics.step()
                     self._mechanics.adjust_concentrations(self._concentrations)
@@ -206,12 +207,13 @@ class Simulation:
             recorder.finalize(end_time=t)
 
 
-    def _setup(self, dt, *, reassemble=False) -> None:
+    def _setup(self, dt) -> None:
         """Set up the simulation by initializing the finite element matrices.
-        
+
         :param dt: The time step to use for the simulation.
-        :param reassemble: Whether to reassemble FEM matrices every time step.
         """
+        # Reassemble FEM matrices every time step if mechanics is enabled
+        reassemble = self.mechanics
         # Set up the finite element spaces
         logger.info("Setting up finite element spaces...")
         mesh = self.simulation_geometry.mesh
@@ -274,6 +276,6 @@ class Simulation:
             dt,
         )
 
-        if reassemble:
+        if self.mechanics:
             logger.debug("Setting up mechanics solver...")
             self._mechanics = MechanicSolver(mesh, self._rd_fes, self.simulation_geometry)
