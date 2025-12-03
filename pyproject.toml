@@ -28,6 +28,7 @@ dependencies = [
   'webgui_jupyter_widgets',
   'intel-openmp>=2025.1.1; sys_platform == "linux"',
   'mkl>=2025.1.0; sys_platform == "linux"',
+  "pymeshfix>=0.17.1",
 ]
 
 [build-system]
