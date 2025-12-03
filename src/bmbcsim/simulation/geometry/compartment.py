@@ -188,6 +188,28 @@ class Compartment:
         self.coefficients.elasticity = (E, poisson_ratio)
 
 
+    def add_driving_species(
+            self,
+            species: S,
+            coupling_strength: u.Quantity,
+    ) -> None:
+        """Set the species whose concentration drives mechanical contraction.
+
+        The coupling strength represents the pressure generated per unit concentration.
+        For example, a value of 1 kPa/mM means that 1 mM of the species generates
+        1 kPa of chemical pressure driving contraction.
+
+        :param species: Chemical species that drives contraction.
+        :param coupling_strength: Pressure generated per unit concentration (e.g., kPa/mM).
+        :raises ValueError: If a driving species is already defined for this compartment.
+        """
+        if self.coefficients.driving_species is not None:
+            raise ValueError(f"Driving species already defined for compartment '{self.name}'")
+
+        strength = to_simulation_units(coupling_strength, None)
+        self.coefficients.driving_species = (species, strength)
+
+
     def add_reaction(
             self,
             reactants: list[S],
@@ -282,4 +304,5 @@ class SimulationDetails:
     reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
     permittivity: C = field(default_factory=lambda: None)
     porosity: C = field(default_factory=lambda: None)
-    elasticity: tuple[C, C] = field(default_factory=lambda: None)  # (E, nu)
+    elasticity: tuple[float, float] = field(default_factory=lambda: None)  # (E, nu)
+    driving_species: tuple[S, float] = field(default_factory=lambda: None)  # (species, strength)

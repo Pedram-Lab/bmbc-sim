@@ -519,12 +519,13 @@ class PnpSolver:
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
-    def __init__(self, mesh, concentration_fes, simulation_geometry):
+    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations):
         """
         :param mesh: The mesh to deform.
         :param concentration_fes: The finite element space for concentration fields.
         :param simulation_geometry: The simulation geometry containing compartments
             with elastic parameters.
+        :param concentrations: Dictionary mapping species to concentration GridFunctions.
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
@@ -534,7 +535,8 @@ class MechanicSolver:
         young_modulus_values = {}
         mu_values = {}
         lam_values = {}
-        for compartment in simulation_geometry.compartments.values():
+        compartments = list(simulation_geometry.compartments.values())
+        for compartment in compartments:
             elasticity = compartment.coefficients.elasticity
             if elasticity is None:
                 raise ValueError(f"Elasticity not defined for compartment '{compartment.name}'")
@@ -556,11 +558,23 @@ class MechanicSolver:
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
 
+        # Build chemical pressure term from driving species
+        chemical_pressure = None
+        for i, compartment in enumerate(compartments):
+            driving = compartment.coefficients.driving_species
+            if driving is not None:
+                species, strength = driving
+                concentration = concentrations[species].components[i]
+                term = strength * concentration
+                chemical_pressure = term if chemical_pressure is None else chemical_pressure + term
+
         # Set up bulk term
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
         trial = self._fes.TrialFunction()
         deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
-        self._stiffness += ngs.Variation(neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx)
+        self._stiffness += ngs.Variation(
+            neo_hooke(deformation_tensor, mu, lam, chemical_pressure).Compile() * ngs.dx
+        )
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
@@ -624,13 +638,21 @@ class MechanicSolver:
             concentration.vec.FV().NumPy()[:] *= volume_ratio
 
 
-def neo_hooke(f, mu, lam):
-    """Neo-Hookean material model with internal pressure."""
-    # TODO: this is just a placeholder for testing purposes!
+def neo_hooke(f, mu, lam, chemical_pressure=None):
+    """Neo-Hookean material model with optional chemical pressure.
+
+    :param f: Deformation gradient tensor (F = I + grad(u)).
+    :param mu: Shear modulus (first Lamé parameter).
+    :param lam: Second Lamé parameter.
+    :param chemical_pressure: Optional chemical pressure term (coupling_strength * concentration).
+        When provided, adds a pressure-like term that drives volume change.
+    """
     det_f = ngs.Det(f)
-    return mu * (
+    energy = mu * (
         0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
         + mu / lam * det_f ** (-lam / mu)
         - 1
-        + det_f
     )
+    if chemical_pressure is not None:
+        energy += chemical_pressure * det_f
+    return energy
