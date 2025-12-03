@@ -8,12 +8,14 @@ import xarray as xr
 
 import bmbcsim
 from bmbcsim.units import mM
+from bmbcsim.simulation import transport
 
 
 def create_box_mesh():
     """Create a simple box geometry."""
     box = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, 1))
     box.mat("cell").bc("side")
+    box.faces[0].bc("influx")
     geo = occ.OCCGeometry(box)
     return ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
@@ -116,6 +118,50 @@ def test_mechanics_with_driving_species(tmp_path):
     # Final concentration should be higher due to volume contraction
     # (chemical pressure drives contraction, concentration increases to conserve mass)
     assert ca_values.isel(time=-1) == pytest.approx(1.089, rel=1e-2)
+
+
+def test_mechanics_with_dynamic_species(tmp_path):
+    """Test that a species can drive mechanical contraction."""
+    mesh = create_box_mesh()
+    simulation = bmbcsim.Simulation(
+        "mechanics_dynamic_test", mesh, result_root=tmp_path, mechanics=True
+    )
+
+    cell = simulation.simulation_geometry.compartments["cell"]
+    influx_bnd = simulation.simulation_geometry.membranes["influx"]
+
+    # Add a species that will drive contraction
+    ca = simulation.add_species("ca")
+    cell.initialize_species(ca, 0.0 * mM)
+    cell.add_diffusion(ca, 5.0 * u.um**2 / u.ms)
+
+    # Add a source term to increase concentration over time
+    t = transport.GeneralFlux(flux=lambda t: (0.0 if t < 1.0 * u.ms else 1.0) * u.amol / u.ms)
+    influx_bnd.add_transport(species=ca, transport=t, source=None, target=cell)
+
+    # Add elasticity and driving species
+    cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
+    cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
+
+    # Run simulation
+    simulation.run(end_time=2 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
+
+    # Load results and verify concentration change due to volume contraction
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
+    points = [(0.5, 0.5, 0.5)]
+    point_values = xr.concat(
+        [result_loader.load_point_values(i, points=points) for i in range(len(result_loader))],
+        dim="time",
+    )
+
+    ca_values = point_values.sel(species="ca").isel(point=0)
+
+    # Initial concentration should be 0.0 mM
+    assert ca_values.isel(time=0) == pytest.approx(0.0)
+
+    # Final concentration should be higher due to volume contraction
+    # (smaller as in the previous test since influx scales with boundary area)
+    assert ca_values.isel(time=-1) == pytest.approx(1.040, rel=1e-2)
 
 
 if __name__ == "__main__":
