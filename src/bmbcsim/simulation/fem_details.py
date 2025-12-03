@@ -578,15 +578,18 @@ class MechanicSolver:
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
-        young_bnd = ngs.BoundaryFromVolumeCF(young)
-        mu_bnd = ngs.BoundaryFromVolumeCF(mu)
-        n = ngs.specialcf.normal(3)
-        t = ngs.specialcf.tangential(3)
-        normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
-        tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
-        self._stiffness += ngs.Variation(
-            (normal_springs + tangent_springs) * ngs.ds("side")
-        )
+        exterior_boundaries = simulation_geometry.exterior_boundaries
+        if exterior_boundaries:
+            young_bnd = ngs.BoundaryFromVolumeCF(young)
+            mu_bnd = ngs.BoundaryFromVolumeCF(mu)
+            n = ngs.specialcf.normal(3)
+            t = ngs.specialcf.tangential(3)
+            normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
+            tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
+            for boundary_name in exterior_boundaries:
+                self._stiffness += ngs.Variation(
+                    (normal_springs + tangent_springs) * ngs.ds(boundary_name)
+                )
 
         self._stiffness.Assemble()
 

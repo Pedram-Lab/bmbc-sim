@@ -157,7 +157,7 @@ class Compartment:
         """
         if self.coefficients.porosity is not None:
             raise ValueError(f"Porosity already defined for compartment '{self.name}'")
-        if not (0 < porosity <= 1):
+        if not 0 < porosity <= 1:
             raise ValueError(f"Invalid porosity value {porosity}. Must be between 0 and 1.")
 
         self.coefficients.porosity = porosity
@@ -181,11 +181,11 @@ class Compartment:
 
         # Store raw values (converted to simulation units) for MechanicSolver to build MaterialCF
         if isinstance(youngs_modulus, dict):
-            E = {k: to_simulation_units(v, 'pressure') for k, v in youngs_modulus.items()}
+            ym = {k: to_simulation_units(v, 'pressure') for k, v in youngs_modulus.items()}
         else:
-            E = to_simulation_units(youngs_modulus, 'pressure')
+            ym = to_simulation_units(youngs_modulus, 'pressure')
 
-        self.coefficients.elasticity = (E, poisson_ratio)
+        self.coefficients.elasticity = (ym, poisson_ratio)
 
 
     def add_driving_species(

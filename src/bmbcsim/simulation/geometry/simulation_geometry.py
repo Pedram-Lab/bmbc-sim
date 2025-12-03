@@ -130,6 +130,20 @@ class SimulationGeometry:
         return [name for compartment in self.compartments.values()
                 for name in compartment.get_region_names(full_names=True)]
 
+    @property
+    def exterior_boundaries(self) -> list[str]:
+        """The names of all exterior boundaries in the geometry.
+
+        Exterior boundaries are mesh boundaries that have only one neighboring
+        volume element (i.e., they are on the outside of the domain, not
+        connecting two compartments or regions).
+        """
+        exterior = set()
+        for left, right, name in self._full_interface_info:
+            if right is None:
+                exterior.add(name)
+        return list(exterior)
+
 
     def visualize(self, resolve_regions: bool = True) -> None:
         """Visualize the geometry description. The compartments are
