@@ -528,10 +528,10 @@ class MechanicSolver:
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
-        L = np.max(mesh.ngmesh.Coordinates())
+        characteristic_length = np.ptp(mesh.ngmesh.Coordinates()) / np.sqrt(3)
 
-        # Build per-region Lame parameters from elastic properties
-        E_values = {}
+        # Build per-region Lamé parameters from elastic properties
+        young_modulus_values = {}
         mu_values = {}
         lam_values = {}
         for compartment in simulation_geometry.compartments.values():
@@ -539,38 +539,40 @@ class MechanicSolver:
             if elasticity is None:
                 raise ValueError(f"Elasticity not defined for compartment '{compartment.name}'")
 
-            E_raw, nu_raw = elasticity
+            young_raw, nu_raw = elasticity
             region_names = compartment.get_region_names()
             full_names = compartment.get_region_names(full_names=True)
 
             for region, full_name in zip(region_names, full_names):
-                # Get E and nu for this region (either from dict or scalar)
-                E = E_raw[region] if isinstance(E_raw, dict) else E_raw
-                nu = nu_raw[region] if isinstance(nu_raw, dict) else nu_raw
+                # Get young's modulus and poisson ratio for this region (either from dict or scalar)
+                young = young_raw[region] if isinstance(young_raw, dict) else young_raw
+                poisson = nu_raw[region] if isinstance(nu_raw, dict) else nu_raw
 
-                E_values[full_name] = E
-                mu_values[full_name] = E / (2 * (1 + nu))
-                lam_values[full_name] = E * nu / ((1 + nu) * (1 - 2 * nu))
+                young_modulus_values[full_name] = young
+                mu_values[full_name] = young / (2 * (1 + poisson))
+                lam_values[full_name] = young * poisson / ((1 + poisson) * (1 - 2 * poisson))
 
+        young = mesh.MaterialCF(young_modulus_values)
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
-
-        # Use mean values for boundary conditions (MaterialCF can't be evaluated on BND)
-        E_mean = np.mean(list(E_values.values()))
-        mu_mean = np.mean(list(mu_values.values()))
 
         # Set up bulk term
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
         trial = self._fes.TrialFunction()
-        F = ngs.Id(mesh.dim) + ngs.Grad(trial)
-        self._stiffness += ngs.Variation(neo_hooke(F, mu, lam).Compile() * ngs.dx)
+        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        self._stiffness += ngs.Variation(neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx)
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
+        # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
+        young_bnd = ngs.BoundaryFromVolumeCF(young)
+        mu_bnd = ngs.BoundaryFromVolumeCF(mu)
         n = ngs.specialcf.normal(3)
         t = ngs.specialcf.tangential(3)
-        normal_springs = (E_mean / (2 * L)) * ngs.InnerProduct(trial, n) ** 2
-        tangent_springs = (mu_mean / (2 * L)) * ngs.InnerProduct(trial, t) ** 2
-        self._stiffness += ngs.Variation((normal_springs + tangent_springs) * ngs.ds("side"))
+        normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
+        tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
+        self._stiffness += ngs.Variation(
+            (normal_springs + tangent_springs) * ngs.ds("side")
+        )
 
         self._stiffness.Assemble()
 
