@@ -1,8 +1,10 @@
 import tempfile
 
+import pytest
 import ngsolve as ngs
 from netgen import occ
 import astropy.units as u
+import xarray as xr
 
 import bmbcsim
 from bmbcsim.units import mM
@@ -95,8 +97,25 @@ def test_mechanics_with_driving_species(tmp_path):
     cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
     cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
 
-    # Run simulation - should work without error
+    # Run simulation
     simulation.run(end_time=1 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
+
+    # Load results and verify concentration change due to volume contraction
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
+    points = [(0.5, 0.5, 0.5)]
+    point_values = xr.concat(
+        [result_loader.load_point_values(i, points=points) for i in range(len(result_loader))],
+        dim="time",
+    )
+
+    ca_values = point_values.sel(species="ca").isel(point=0)
+
+    # Initial concentration should be 1.0 mM
+    assert ca_values.isel(time=0) == pytest.approx(1.0)
+
+    # Final concentration should be higher due to volume contraction
+    # (chemical pressure drives contraction, concentration increases to conserve mass)
+    assert ca_values.isel(time=-1) == pytest.approx(1.089, rel=1e-2)
 
 
 if __name__ == "__main__":
