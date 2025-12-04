@@ -222,7 +222,7 @@ def extract_single_cell(
     """Extract nodes and triangles of a cell with given id."""
     # Find the faces that belong to the cell
     face_in_cell = mesh['face_cell_id'] == cell_id
-    faces = mesh.cell_connectivity.reshape(-1, 3)
+    faces = mesh.regular_faces
 
     # Renumber the nodes of the cell and renumber connectivity accordingly
     cell_faces = faces[face_in_cell]
