@@ -192,8 +192,18 @@ class TissueGeometry:
         cell_geometries = occ.Glue(cell_geometries)
         for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
             bounding_box.faces[i].bc(name)
-        bounding_box.mat("ecs")
-        geometry = occ.OCCGeometry(occ.Glue([cell_geometries, bounding_box - cell_geometries]))
+
+        # Create ECS by subtracting cells from bounding box
+        # This may create multiple disconnected regions that need unique names
+        ecs_geometry = bounding_box - cell_geometries
+        ecs_solids = ecs_geometry.solids
+        if len(ecs_solids) == 1:
+            ecs_geometry.mat("ecs")
+        else:
+            # Multiple disconnected ECS regions - give each a unique name
+            for i, solid in enumerate(ecs_solids):
+                solid.mat(f"ecs:region_{i}")
+        geometry = occ.OCCGeometry(occ.Glue([cell_geometries, ecs_geometry]))
 
         return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))
 
