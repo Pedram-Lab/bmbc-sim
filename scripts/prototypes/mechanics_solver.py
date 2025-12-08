@@ -68,11 +68,11 @@ ecs.initialize_species(ca, 0.0 * mM)
 ecs.add_diffusion(ca, diffusivity=0.2 * u.um**2 / u.ms)
 
 # Add elasticity to ECS (softer than cells)
-ecs.add_elasticity(youngs_modulus=0.1 * u.kPa, poisson_ratio=0.3)
+ecs.add_elasticity(youngs_modulus=0.5 * u.kPa, poisson_ratio=0.3)
 
 # Set calcium as the driving species in ECS
 # Positive coupling means higher [Ca] causes expansion
-ecs.add_driving_species(ca, coupling_strength=0.2 * u.kPa / mM)
+ecs.add_driving_species(ca, coupling_strength=0.5 * u.kPa / mM)
 
 # Add a reaction that produces calcium in the ECS at a constant rate
 ecs.add_reaction(reactants=[], products=[ca], k_f=1.0 / u.s, k_r=0.0 / u.s)
@@ -81,7 +81,7 @@ ecs.add_reaction(reactants=[], products=[ca], k_f=1.0 / u.s, k_r=0.0 / u.s)
 for cell in cells:
     cell.initialize_species(ca, 0.0 * mM)
     cell.add_diffusion(ca, diffusivity=0.1 * u.um**2 / u.ms)
-    cell.add_elasticity(youngs_modulus=1.0 * u.kPa, poisson_ratio=0.3)
+    cell.add_elasticity(youngs_modulus=0.5 * u.kPa, poisson_ratio=0.3)
 
 # Run the simulation
 print("Running simulation...")
