@@ -23,13 +23,27 @@ def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:
 class DiffusionSolver:
     """FEM solver for diffusion and transport equations."""
 
-    def __init__(self, a, transport, m_star, preconditioner, source_term, dt):
-        self._a = a
+    def __init__(
+            self,
+            mass_form,
+            stiffness_form,
+            transport,
+            source_term,
+            dt,
+            reassemble,
+    ):
+        self._mass_form = mass_form
+        self._stiffness_form = stiffness_form
         self._transport = transport
-        self._m_star = m_star
-        self._preconditioner = preconditioner
         self._source_term = source_term
         self._dt = dt
+        self._reassemble = reassemble
+
+        # Operators are (optionally) rebuilt on every step when reassemble=True
+        self._stiffness = None
+        self._m_star = None
+        self._preconditioner = None
+        self._prepare_operators()
 
 
     @classmethod
@@ -40,13 +54,14 @@ class DiffusionSolver:
             simulation_geometry,
             concentrations,
             potential,
-            dt
+            dt,
+            reassemble=False,
     ) -> dict[ChemicalSpecies, 'DiffusionSolver']:
         """Set up the solver for all given species."""
         species_to_solver = {}
         for s in species:
             species_to_solver[s] = cls._for_single_species(
-                s, fes, simulation_geometry, concentrations[s], potential, dt
+                s, fes, simulation_geometry, concentrations[s], potential, dt, reassemble
             )
         return species_to_solver
 
@@ -59,7 +74,8 @@ class DiffusionSolver:
             simulation_geometry,
             concentration,
             potential,
-            dt
+            dt,
+            reassemble,
     ):
         """Set up the solver for a single given species."""
         compartments = simulation_geometry.compartments.values()
@@ -171,33 +187,37 @@ class DiffusionSolver:
                 transport_term += (-d * (supg + drift) * directional_test).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
-        mass.Assemble()
-        stiffness.Assemble()
-
-        # Invert the matrix for the implicit Euler integrator (M* = M + dt * A)
-        mass.mat.AsVector().data += dt * stiffness.mat.AsVector()
-        mass = mass.mat.DeleteZeroElements(1e-10)
-        mass_csr = ngs_to_csr(mass)
-
-        # Create preconditioner for the system matrix
-        # spilu on csc is more efficient -> use symmmetry of M*
-        m_ilu = spla.spilu(mass_csr.T, fill_factor=5)
-        preconditioner = spla.LinearOperator(mass_csr.shape, matvec=m_ilu.solve, dtype=np.float64)
-
-        stiffness = stiffness.mat.DeleteZeroElements(1e-10)
-        stiffness_csr = ngs_to_csr(stiffness)
-
         return cls(
-            stiffness_csr,
+            mass,
+            stiffness,
             transport_term,
-            mass_csr,
-            preconditioner,
             source_term,
-            dt
+            dt,
+            reassemble,
         )
+
+    def _prepare_operators(self):
+        """Assemble matrices and compute the system/preconditioner."""
+        self._stiffness_form.Assemble()
+        stiffness_mat = self._stiffness_form.mat.DeleteZeroElements(1e-10)
+        self._stiffness = ngs_to_csr(stiffness_mat)
+
+        self._mass_form.Assemble()
+        mass_mat = self._mass_form.mat.DeleteZeroElements(1e-10)
+        mass_csr = ngs_to_csr(mass_mat)
+
+        m_star = mass_csr + self._dt * self._stiffness
+        m_ilu = spla.spilu(m_star.T, fill_factor=5)
+        self._preconditioner = spla.LinearOperator(
+            m_star.shape, matvec=m_ilu.solve, dtype=np.float64
+        )
+        self._m_star = m_star
 
     def step(self, concentration: ngs.GridFunction):
         """Apply the implicit Euler step to the concentration vector."""
+        if self._reassemble:
+            self._prepare_operators()
+
         # Assemble matrices
         self._transport.Assemble()
         self._source_term.Assemble()
@@ -206,9 +226,11 @@ class DiffusionSolver:
 
         # Compute the residual
         c = concentration.vec.FV().NumPy().copy()
-        res = self._dt * (self._source_term.vec.FV().NumPy() - self._a * c + transport_csr * c)
+        res = self._dt * (
+            self._source_term.vec.FV().NumPy() - self._stiffness * c + transport_csr * c
+        )
 
-        # Create the system matrix: M* - dt * transport
+        # Create the system matrix: M^* - dt * transport
         transport_csr.data *= -self._dt
         system_matrix_csr = spla.LinearOperator(
             transport_csr.shape,
@@ -386,10 +408,25 @@ class ReactionSolver:
 class PnpSolver:
     """FEM solver for Poisson-Nernst-Planck equations, computing the potential."""
 
-    def __init__(self, matrix, source_term, potential):
-        self._matrix = matrix
+    def __init__(
+            self,
+            a_form,
+            b_form,
+            source_term,
+            potential,
+            n_space,
+            shape,
+            reassemble,
+    ):
+        self._a_form = a_form
+        self._b_form = b_form
         self._source_term = source_term
         self.potential = potential
+        self._n_space = n_space
+        self._shape = shape
+        self._reassemble = reassemble
+
+        self._prepare_matrix()
 
     @classmethod
     def for_all_species(
@@ -398,6 +435,7 @@ class PnpSolver:
             fes,
             simulation_geometry,
             concentrations,
+            reassemble=False,
     ):
         """Set up the solver for all given species."""
         compartments = list(simulation_geometry.compartments.values())
@@ -420,33 +458,40 @@ class PnpSolver:
                 c = concentrations[s]
                 f += faraday_const * s.valence * c.components[k] * test[k] * ngs.dx
 
-        a.Assemble()
-        a = a.mat.DeleteZeroElements(1e-10)
-        a = ngs_to_csr(a)
-        a = a[:n_space, :n_space]
+        potential = ngs.GridFunction(fes)
 
-        b.Assemble()
-        b = b.mat.DeleteZeroElements(1e-10)
-        b = ngs_to_csr(b)
-        b = b[:n_space, n_space:]
+        return cls(a, b, f, potential, n_space, shape, reassemble)
+
+    def _prepare_matrix(self):
+        """Assemble the saddle-point matrix for the electrostatic potential."""
+        self._a_form.Assemble()
+        a_mat = self._a_form.mat.DeleteZeroElements(1e-10)
+        a = ngs_to_csr(a_mat)
+        a = a[:self._n_space, :self._n_space]
+
+        self._b_form.Assemble()
+        b_mat = self._b_form.mat.DeleteZeroElements(1e-10)
+        b = ngs_to_csr(b_mat)
+        b = b[:self._n_space, self._n_space:]
 
         # Augmented Lagrangian formulation: [[a + tau * b * bT, b], [bT, -I / tau]]
         tau = np.mean(a.diagonal())
         tau_inv = 1 / tau
+
         def matvec_full(x):
-            f, g = x[:n_space], tau_inv * x[n_space:]
+            f, g = x[:self._n_space], tau_inv * x[self._n_space:]
             r = b.T @ f
             s = a @ f + tau * (b @ (r + g))
             return np.concatenate([s, r - g])
-        matrix = spla.LinearOperator(shape, matvec=matvec_full, dtype=np.float64)
 
-        potential = ngs.GridFunction(fes)
-
-        return cls(matrix, f, potential)
+        self._matrix = spla.LinearOperator(self._shape, matvec=matvec_full, dtype=np.float64)
 
 
     def step(self):
         """Update the potential given the current status of chemical concentrations."""
+        if self._reassemble:
+            self._prepare_matrix()
+
         self._source_term.Assemble()
 
         # Minres without preconditioning seemed to yield the best results
@@ -469,3 +514,148 @@ class PnpSolver:
     def __getitem__(self, k: int) -> ngs.CoefficientFunction:
         """Returns the k-th component of the potential."""
         return self.potential.components[k]
+
+
+class MechanicSolver:
+    """FEM solver for (non-linear) elasticity on the current mesh deformation."""
+
+    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations):
+        """
+        :param mesh: The mesh to deform.
+        :param concentration_fes: The finite element space for concentration fields.
+        :param simulation_geometry: The simulation geometry containing compartments
+            with elastic parameters.
+        :param concentrations: Dictionary mapping species to concentration GridFunctions.
+        """
+        self._mesh = mesh
+        self._fes = ngs.VectorH1(mesh, order=1)
+        characteristic_length = np.ptp(mesh.ngmesh.Coordinates()) / np.sqrt(3)
+
+        # Build per-region Lamé parameters from elastic properties
+        young_modulus_values = {}
+        mu_values = {}
+        lam_values = {}
+        compartments = list(simulation_geometry.compartments.values())
+        for compartment in compartments:
+            elasticity = compartment.coefficients.elasticity
+            if elasticity is None:
+                raise ValueError(f"Elasticity not defined for compartment '{compartment.name}'")
+
+            young_raw, nu_raw = elasticity
+            region_names = compartment.get_region_names()
+            full_names = compartment.get_region_names(full_names=True)
+
+            for region, full_name in zip(region_names, full_names):
+                # Get young's modulus and poisson ratio for this region (either from dict or scalar)
+                young = young_raw[region] if isinstance(young_raw, dict) else young_raw
+                poisson = nu_raw[region] if isinstance(nu_raw, dict) else nu_raw
+
+                young_modulus_values[full_name] = young
+                mu_values[full_name] = young / (2 * (1 + poisson))
+                lam_values[full_name] = young * poisson / ((1 + poisson) * (1 - 2 * poisson))
+
+        young = mesh.MaterialCF(young_modulus_values)
+        mu = mesh.MaterialCF(mu_values)
+        lam = mesh.MaterialCF(lam_values)
+
+        # Build chemical pressure term from driving species
+        chemical_pressure = None
+        for i, compartment in enumerate(compartments):
+            driving = compartment.coefficients.driving_species
+            if driving is not None:
+                species, strength = driving
+                concentration = concentrations[species].components[i]
+                term = strength * concentration
+                chemical_pressure = term if chemical_pressure is None else chemical_pressure + term
+
+        # Set up bulk term
+        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
+        trial = self._fes.TrialFunction()
+        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        self._stiffness += ngs.Variation(
+            neo_hooke(deformation_tensor, mu, lam, chemical_pressure).Compile() * ngs.dx
+        )
+
+        # Set up boundary conditions (spring anchoring, "local compliant embedding")
+        # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
+        exterior_boundaries = simulation_geometry.exterior_boundaries
+        if exterior_boundaries:
+            young_bnd = ngs.BoundaryFromVolumeCF(young)
+            mu_bnd = ngs.BoundaryFromVolumeCF(mu)
+            n = ngs.specialcf.normal(3)
+            t = ngs.specialcf.tangential(3)
+            normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
+            tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
+            for boundary_name in exterior_boundaries:
+                self._stiffness += ngs.Variation(
+                    (normal_springs + tangent_springs) * ngs.ds(boundary_name)
+                )
+
+        self._stiffness.Assemble()
+
+        self.deformation = ngs.GridFunction(self._fes)
+        self.deformation.vec[:] = 0
+
+        self._residual = self.deformation.vec.CreateVector()
+
+        # Set up volume tracking for concentration adjustment
+        self._patch_mass = ngs.LinearForm(concentration_fes)
+        for psi in concentration_fes.TestFunction():
+            self._patch_mass += psi * ngs.dx
+        self._patch_mass.Assemble()
+
+        self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
+
+    def step(self, n_iter=5):
+        """Perform a nonlinear solve via simple Newton iterations."""
+        for _ in range(n_iter):
+            self._stiffness.Apply(self.deformation.vec, self._residual)
+            self._stiffness.AssembleLinearization(self.deformation.vec)
+            inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
+            self.deformation.vec.data -= inv * self._residual
+
+        # Apply deformation to mesh
+        self._mesh.SetDeformation(self.deformation)
+
+    def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
+        """Adjust concentrations based on the volume change due to mesh deformation.
+
+        When the mesh deforms, local volumes change. Since the amount of substance
+        is conserved, concentrations must be scaled by the ratio of old to new
+        nodal volumes: c_new = c_old * (V_old / V_new).
+
+        This method should be called after `step()` applies the deformation.
+
+        :param concentrations: Dictionary mapping species to their concentration GridFunctions.
+        """
+        # Recompute nodal volumes on the deformed mesh
+        self._patch_mass.Assemble()
+        curr_mass = self._patch_mass.vec.FV().NumPy()
+
+        # Compute the volume ratio (old / new) for scaling and store current mass
+        volume_ratio = self._prev_mass / curr_mass
+        self._prev_mass = curr_mass.copy()
+
+        # Scale all concentration fields
+        for concentration in concentrations.values():
+            concentration.vec.FV().NumPy()[:] *= volume_ratio
+
+
+def neo_hooke(f, mu, lam, chemical_pressure=None):
+    """Neo-Hookean material model with optional chemical pressure.
+
+    :param f: Deformation gradient tensor (F = I + grad(u)).
+    :param mu: Shear modulus (first Lamé parameter).
+    :param lam: Second Lamé parameter.
+    :param chemical_pressure: Optional chemical pressure term (coupling_strength * concentration).
+        When provided, adds a pressure-like term that drives volume change.
+    """
+    det_f = ngs.Det(f)
+    energy = mu * (
+        0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
+        + mu / lam * det_f ** (-lam / mu)
+        - 1
+    )
+    if chemical_pressure is not None:
+        energy += chemical_pressure * det_f
+    return energy

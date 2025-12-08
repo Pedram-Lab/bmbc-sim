@@ -14,7 +14,12 @@ from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from bmbcsim.units import to_simulation_units
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
-from bmbcsim.simulation.fem_details import DiffusionSolver, ReactionSolver, PnpSolver
+from bmbcsim.simulation.fem_details import (
+    DiffusionSolver,
+    ReactionSolver,
+    PnpSolver,
+    MechanicSolver,
+)
 
 
 class Simulation:
@@ -27,6 +32,7 @@ class Simulation:
             *,
             result_root: str,
             electrostatics: bool = False,
+            mechanics: bool = False,
     ):
         """Initialize a new simulation.
 
@@ -35,12 +41,15 @@ class Simulation:
         :param result_root: The directory under which simulation results will be
             stored.
         :param electrostatics: Whether to include electrostatics in the simulation. If
-            yes, compartments must have a permeability.
+            yes, compartments must have a permittivity.
+        :param mechanics: Whether to include mechanics in the simulation. If yes,
+            compartments must have elasticity parameters set.
         """
         self.simulation_geometry = SimulationGeometry(mesh)
 
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
+        self.mechanics = mechanics
 
         # Set up result directory and logging
         time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
@@ -62,6 +71,7 @@ class Simulation:
         self._pnp: PnpSolver = None
         self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
         self._reaction: ReactionSolver = None
+        self._mechanics: MechanicSolver = None
 
 
     def add_species(
@@ -150,6 +160,12 @@ class Simulation:
 
             t = start_time.copy()
             for _ in trange(n_steps):
+                if self.mechanics:
+                    # Update mechanical deformation before geometry-dependent steps
+                    self._mechanics.step()
+                    self._mechanics.adjust_concentrations(self._concentrations)
+                    self.simulation_geometry.update_measures()
+
                 # Update the concentrations via a first-order splitting approach:
                 # 1. Update the electrostatic potential (if applicable)
                 if self.electrostatics:
@@ -193,9 +209,11 @@ class Simulation:
 
     def _setup(self, dt) -> None:
         """Set up the simulation by initializing the finite element matrices.
-        
-        :param time_step: The time step to use for the simulation.
+
+        :param dt: The time step to use for the simulation.
         """
+        # Reassemble FEM matrices every time step if mechanics is enabled
+        reassemble = self.mechanics
         # Set up the finite element spaces
         logger.info("Setting up finite element spaces...")
         mesh = self.simulation_geometry.mesh
@@ -236,6 +254,7 @@ class Simulation:
                 self._el_fes,
                 self.simulation_geometry,
                 self._concentrations,
+                reassemble=reassemble,
             )
 
         logger.debug("Setting up diffusion solver...")
@@ -246,6 +265,7 @@ class Simulation:
             self._concentrations,
             self._pnp,
             dt,
+            reassemble=reassemble,
         )
         logger.debug("Setting up reaction solver...")
         self._reaction = ReactionSolver.for_all_species(
@@ -255,3 +275,9 @@ class Simulation:
             self._concentrations,
             dt,
         )
+
+        if self.mechanics:
+            logger.debug("Setting up mechanics solver...")
+            self._mechanics = MechanicSolver(
+                mesh, self._rd_fes, self.simulation_geometry, self._concentrations
+            )

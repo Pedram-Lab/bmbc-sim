@@ -192,8 +192,18 @@ class TissueGeometry:
         cell_geometries = occ.Glue(cell_geometries)
         for i, name in enumerate(["left", "right", "top", "bottom", "front", "back"]):
             bounding_box.faces[i].bc(name)
-        bounding_box.mat("ecs")
-        geometry = occ.OCCGeometry(occ.Glue([cell_geometries, bounding_box - cell_geometries]))
+
+        # Create ECS by subtracting cells from bounding box
+        # This may create multiple disconnected regions that need unique names
+        ecs_geometry = bounding_box - cell_geometries
+        ecs_solids = ecs_geometry.solids
+        if len(ecs_solids) == 1:
+            ecs_geometry.mat("ecs")
+        else:
+            # Multiple disconnected ECS regions - give each a unique name
+            for i, solid in enumerate(ecs_solids):
+                solid.mat(f"ecs:region_{i}")
+        geometry = occ.OCCGeometry(occ.Glue([cell_geometries, ecs_geometry]))
 
         return ngs.Mesh(geometry.GenerateMesh(maxh=mesh_size))
 
@@ -222,7 +232,7 @@ def extract_single_cell(
     """Extract nodes and triangles of a cell with given id."""
     # Find the faces that belong to the cell
     face_in_cell = mesh['face_cell_id'] == cell_id
-    faces = mesh.cell_connectivity.reshape(-1, 3)
+    faces = mesh.regular_faces
 
     # Renumber the nodes of the cell and renumber connectivity accordingly
     cell_faces = faces[face_in_cell]

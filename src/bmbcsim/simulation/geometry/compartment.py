@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
+import numbers
 
 import astropy.units as u
 import astropy.constants as const
 import ngsolve as ngs
 
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
-from bmbcsim.units import to_simulation_units
-import numbers
+from bmbcsim.units import to_simulation_units, BASE_UNITS
 
 
 # Define type aliases to shorten type annotations
@@ -14,13 +14,26 @@ S = ChemicalSpecies
 C = ngs.CoefficientFunction
 
 
-@dataclass(frozen=True)
 class Region:
     """A region represents a part of the simulation geometry that is resolved in
     the mesh. It has a name and a volume.
     """
-    name: str
-    volume: u.Quantity
+    def __init__(self, name: str, volume: float):
+        self.name = name
+        self._volume_parameter = ngs.Parameter(volume)
+
+    @property
+    def volume(self) -> u.Quantity:
+        """Get the volume of the region."""
+        return self._volume_parameter.Get() * BASE_UNITS['length'] ** 3
+
+    def __eq__(self, other):
+        if not isinstance(other, Region):
+            return False
+        return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 class Compartment:
@@ -144,10 +157,57 @@ class Compartment:
         """
         if self.coefficients.porosity is not None:
             raise ValueError(f"Porosity already defined for compartment '{self.name}'")
-        if not (0 < porosity <= 1):
+        if not 0 < porosity <= 1:
             raise ValueError(f"Invalid porosity value {porosity}. Must be between 0 and 1.")
 
         self.coefficients.porosity = porosity
+
+
+    def add_elasticity(
+            self,
+            youngs_modulus: u.Quantity | dict[str, u.Quantity],
+            poisson_ratio: float | dict[str, float] = 0.3,
+    ) -> None:
+        """Add elastic material parameters for the compartment.
+
+        :param youngs_modulus: Young's modulus (stiffness) of the material.
+            Can be a single value or a dictionary mapping region names to values.
+        :param poisson_ratio: Poisson's ratio of the material (default 0.3).
+            Can be a single value or a dictionary mapping region names to values.
+        :raises ValueError: If elasticity for the compartment is already defined.
+        """
+        if self.coefficients.elasticity is not None:
+            raise ValueError(f"Elasticity already defined for compartment '{self.name}'")
+
+        # Store raw values (converted to simulation units) for MechanicSolver to build MaterialCF
+        if isinstance(youngs_modulus, dict):
+            ym = {k: to_simulation_units(v, 'pressure') for k, v in youngs_modulus.items()}
+        else:
+            ym = to_simulation_units(youngs_modulus, 'pressure')
+
+        self.coefficients.elasticity = (ym, poisson_ratio)
+
+
+    def add_driving_species(
+            self,
+            species: S,
+            coupling_strength: u.Quantity,
+    ) -> None:
+        """Set the species whose concentration drives mechanical contraction.
+
+        The coupling strength represents the pressure generated per unit concentration.
+        For example, a value of 1 kPa/mM means that 1 mM of the species generates
+        1 kPa of chemical pressure driving contraction.
+
+        :param species: Chemical species that drives contraction.
+        :param coupling_strength: Pressure generated per unit concentration (e.g., kPa/mM).
+        :raises ValueError: If a driving species is already defined for this compartment.
+        """
+        if self.coefficients.driving_species is not None:
+            raise ValueError(f"Driving species already defined for compartment '{self.name}'")
+
+        strength = to_simulation_units(coupling_strength, None)
+        self.coefficients.driving_species = (species, strength)
 
 
     def add_reaction(
@@ -244,3 +304,5 @@ class SimulationDetails:
     reactions: dict[tuple[list[S], list[S]], tuple[C, C]] = field(default_factory=dict)
     permittivity: C = field(default_factory=lambda: None)
     porosity: C = field(default_factory=lambda: None)
+    elasticity: tuple[float, float] = field(default_factory=lambda: None)  # (E, nu)
+    driving_species: tuple[S, float] = field(default_factory=lambda: None)  # (species, strength)
