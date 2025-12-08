@@ -1,4 +1,3 @@
-# one_cell_permeable.py  (or tissue_rusakov_from_vtk.py)
 import math
 import numpy as np
 
@@ -31,7 +30,7 @@ PERMEABLE_INDEX = 6
 # ================================================================
 # 1) Load and post-process geometry from VTK
 # ================================================================
-geometry = TissueGeometry.from_file("tissue_geometry.vtk")
+geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
 print("Cells after from_file:", len(geometry.cells))
 
 # --- 1a) compute the typical "diameter" of each cell ---
@@ -117,13 +116,6 @@ geometry = geometry.keep_cells_within(
 n_cells = len(geometry.cells)
 print("Cells after keep_cells_within (~30 x 30 x 1 µm box):", n_cells)
 
-# TEST: limit to a few cells to see if the pipeline works
-MAX_CELLS = 150
-if n_cells > MAX_CELLS:
-    geometry.cells = geometry.cells[:MAX_CELLS]
-    n_cells = len(geometry.cells)
-    print(f"Using only first {n_cells} cells for testing.")
-
 if n_cells == 0:
     raise RuntimeError(
         "No cells remain after keep_cells_within. "
@@ -158,13 +150,7 @@ tissue_mesh: ngs.Mesh = geometry.to_ngs_mesh(
 )
 
 # Visualization (optional)
-viewer = Draw(tissue_mesh, order=1, draw_surf=True)  # draw_vol=False by default
-viewer
-
-try:
-    Draw(tissue_mesh)
-except Exception:
-    pass
+Draw(tissue_mesh, order=1, draw_surf=True)
 
 # ================================================================
 # 2) Set up simulation
@@ -228,4 +214,3 @@ mem_perm.add_transport(ca, flux, ecs, target_cell)
 # ================================================================
 sim.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)
 print("Simulation completed.")
-
