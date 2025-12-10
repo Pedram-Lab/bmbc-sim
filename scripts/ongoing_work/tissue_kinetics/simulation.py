@@ -12,10 +12,10 @@ import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
 
-# =========== 0) Simulation parameters (Rusakov style) ===========
+# =========== 0) Simulation parameters ===========
 CA_ECS = 1.3 * u.mmol / u.L               # [Ca2+] ECS at rest (1.3 mM)
 CA_CELL0 = 0.0 * u.mmol / u.L             # Initial [Ca2+] in cell (0 mM)
-DIFFUSIVITY_ECS = 0.6 * u.um**2 / u.ms    # Diffusivity in ECS (Rusakov Fig.4)
+DIFFUSIVITY_ECS = 0.6 * u.um**2 / u.ms    # Diffusivity in ECS
 DIFFUSIVITY_CYTO = 0.22 * u.um**2 / u.ms  # Diffusivity in cytosol (adjust if needed)
 
 CHANNEL_CURRENT = 0.5 * u.pA
@@ -24,13 +24,13 @@ TIME_CONSTANT = 1.0 / 10.0 / u.ms         # τ = 1 ms^{-1}
 END_TIME = 0.5 * u.s
 TIME_STEP = 1 * u.ms
 
-# Initial index of the permeable cell (later adjusted if necessary)
-PERMEABLE_INDEX = 6
+# Index of the permeable cell(s)
+PERMEABLE_CELLS = [29]
 
 # ================================================================
 # 1) Load and post-process geometry from VTK
 # ================================================================
-geometry = TissueGeometry.from_file("../../../data/tissue_geometry.vtk")
+geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
 print("Cells after from_file:", len(geometry.cells))
 
 # --- 1a) compute the typical "diameter" of each cell ---
@@ -126,19 +126,12 @@ if n_cells == 0:
     )
 
 # ================================================================
-# 1g) Cell and membrane names: all impermeable except one
+# 1g) Cell and membrane names: all impermeable except specified ones
 # ================================================================
-# Robust adjustment of PERMEABLE_INDEX
-if PERMEABLE_INDEX >= n_cells:
-    print(
-        f"WARNING: PERMEABLE_INDEX={PERMEABLE_INDEX} >= n_cells={n_cells}. "
-        f"Using PERMEABLE_INDEX = {n_cells - 1}."
-    )
-    PERMEABLE_INDEX = n_cells - 1
-
 cell_names = [f"cell_{i}" for i in range(n_cells)]
 bnd_names = ["impermeable"] * n_cells
-bnd_names[PERMEABLE_INDEX] = "permeable"
+for idx in PERMEABLE_CELLS:
+    bnd_names[idx] = "permeable"
 
 # ================================================================
 # 1h) Generate NGSolve mesh with unique material and BC names
@@ -161,7 +154,7 @@ print(f"Create mesh with {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices
 # ================================================================
 sim = bmbcsim.Simulation(
     mesh=tissue_mesh,
-    name=f"tissue_rusakov_cell{PERMEABLE_INDEX}",
+    name="tissue_kinetics",
     result_root="results"
 )
 geo = sim.simulation_geometry
@@ -169,12 +162,12 @@ geo = sim.simulation_geometry
 # Compartments and membranes created by to_ngs_mesh:
 # - 'ecs' (the volume of the box minus the cells)
 # - 'cell_i' for each cell
-# - membranes with BC name: 'impermeable' (many), 'permeable' (one)
+# - membranes with BC name: 'impermeable', 'permeable'
 ecs = geo.compartments["ecs"]
-target_cell = geo.compartments[cell_names[PERMEABLE_INDEX]]
+target_cell = geo.compartments[cell_names[PERMEABLE_CELLS[0]]]
 mem_perm = geo.membranes["permeable"]
 
-print(f"Target cell index: {PERMEABLE_INDEX}")
+print(f"Target cell index: {PERMEABLE_CELLS[0]}")
 print(f"Target cell volume: {target_cell.volume:.2f} µm^3")
 print(f"Target cell surface area: {mem_perm.area:.2f} µm^2")
 
@@ -199,7 +192,7 @@ ecs.add_diffusion(ca, DIFFUSIVITY_ECS)
 target_cell.add_diffusion(ca, DIFFUSIVITY_CYTO)
 
 # ================================================================
-# 5) Transport across 'permeable' membrane (Rusakov pulse)
+# 5) Transport across 'permeable' membrane
 # ================================================================
 # Q = N * I / (2 F)  (factor 2 for Ca2+)
 const_F = const.e.si * const.N_A  # Faraday constant [C/mol]
