@@ -21,8 +21,8 @@ DIFFUSIVITY_CYTO = 0.22 * u.um**2 / u.ms  # Diffusivity in cytosol (adjust if ne
 CHANNEL_CURRENT = 0.5 * u.pA
 N_CHANNELS = 88820
 TIME_CONSTANT = 1.0 / 10.0 / u.ms         # τ = 1 ms^{-1}
-END_TIME = 100.0 * u.ms
-TIME_STEP = 10 * u.us
+END_TIME = 0.5 * u.s
+TIME_STEP = 1 * u.ms
 
 # Initial index of the permeable cell (later adjusted if necessary)
 PERMEABLE_INDEX = 6
@@ -30,7 +30,7 @@ PERMEABLE_INDEX = 6
 # ================================================================
 # 1) Load and post-process geometry from VTK
 # ================================================================
-geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
+geometry = TissueGeometry.from_file("../../../data/tissue_geometry.vtk")
 print("Cells after from_file:", len(geometry.cells))
 
 # --- 1a) compute the typical "diameter" of each cell ---
@@ -47,12 +47,15 @@ cell_diameters = np.array(cell_diameters)
 median_diam = float(np.median(cell_diameters))
 print(f"Median cell diameter (original units): {median_diam}")
 
-# --- 1b) scale so that the median is ~2.2 µm ---
-TARGET_CELL_DIAM = 2.2  # µm
+# --- 1b) scale so that the median is ~4 µm ---
+TARGET_CELL_DIAM = 4  # µm
 scale_factor = TARGET_CELL_DIAM / median_diam
-print("Scale factor to get ~2.2 µm cells:", scale_factor)
+print("Scale factor to get ~4 µm cells:", scale_factor)
 
 geometry = geometry.scale(scale_factor)
+geometry = geometry.decimate(factor=0.5)
+geometry = geometry.smooth(n_iter=10)
+geometry = geometry.decimate(factor=0.5)
 
 # --- 1c) bounding box after scaling ---
 minc, maxc = geometry.bounding_box()
@@ -76,11 +79,11 @@ print("Max domain size after scaling (in µm):", float(size2.max()))
 print("Target median cell diameter (in µm):", TARGET_CELL_DIAM)
 
 # --- 1e) open ECS by shrinking the cells ---
-ECS_RATIO = 0.3  # volumetric fraction to open ECS gaps
+ECS_RATIO = 0.2  # volumetric fraction to open ECS gaps
 geometry = geometry.shrink_cells(1 - ECS_RATIO, jitter=0.0)
 print("Cells after shrink:", len(geometry.cells))
 
-# --- 1f) crop a block of ~30 x 30 x 1 µm around the center ---
+# --- 1f) crop a block of ~20 x 20 x 1 µm around the center ---
 minc3, maxc3 = geometry.bounding_box()
 size3 = maxc3 - minc3
 center = 0.5 * (minc3 + maxc3)
@@ -90,9 +93,9 @@ print("  max:", maxc3)
 print("  size:", size3)
 print("  center:", center)
 
-# We want a box of ~30 x 30 x 1 µm (x, y, z)
-BOX_SIZE_X = 30.0  # µm
-BOX_SIZE_Y = 30.0  # µm
+# We want a box of ~20 x 20 x 1 µm (x, y, z)
+BOX_SIZE_X = 20.0  # µm
+BOX_SIZE_Y = 20.0  # µm
 BOX_SIZE_Z = 1.0   # µm
 
 box_size = np.array([BOX_SIZE_X, BOX_SIZE_Y, BOX_SIZE_Z])
@@ -114,7 +117,7 @@ geometry = geometry.keep_cells_within(
 )
 
 n_cells = len(geometry.cells)
-print("Cells after keep_cells_within (~30 x 30 x 1 µm box):", n_cells)
+print("Cells after keep_cells_within (~20 x 20 x 1 µm box):", n_cells)
 
 if n_cells == 0:
     raise RuntimeError(
@@ -141,16 +144,17 @@ bnd_names[PERMEABLE_INDEX] = "permeable"
 # 1h) Generate NGSolve mesh with unique material and BC names
 # ================================================================
 tissue_mesh: ngs.Mesh = geometry.to_ngs_mesh(
-    mesh_size=10.0,             # you can reduce to 5.0 or 3.0 for higher resolution
+    mesh_size=5.0,
     min_coords=min_box,
     max_coords=max_box,
-    projection_tol=0.01,
+    projection_tol=0.02,
     cell_names=cell_names,
     cell_bnd_names=bnd_names,
 )
 
 # Visualization (optional)
-Draw(tissue_mesh, order=1, draw_surf=True)
+Draw(tissue_mesh)
+print(f"Create mesh with {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices.")
 
 # ================================================================
 # 2) Set up simulation
