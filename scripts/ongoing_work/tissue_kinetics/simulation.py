@@ -207,7 +207,18 @@ flux = transport.GeneralFlux(
 mem_perm.add_transport(ca, flux, ecs, target_cell)
 
 # ================================================================
-# 6) Execute
+# 6) Transport from external reservoir into ECS
+# ================================================================
+# Simple passive flux to maintain ECS concentration
+flux = transport.Passive(1 * u.um ** 3 / u.ms, CA_ECS)
+
+# Direction: ECS -> permeable cell
+for bnd in ["top", "bottom", "left", "right", "front", "back"]:
+    boundary = geo.membranes[bnd]
+    boundary.add_transport(ca, flux, None, ecs)
+
+# ================================================================
+# 7) Run simulation
 # ================================================================
 sim.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)
 print("Simulation completed.")
