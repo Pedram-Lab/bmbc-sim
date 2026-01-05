@@ -1,7 +1,7 @@
 """Coefficient fields for spatially-varying simulation parameters.
 
-This module provides a unified abstraction for coefficient fields that can be used
-for initial conditions, diffusion coefficients, and other simulation parameters.
+This module provides a unified abstraction for coefficient fields that can be
+used for initial conditions and simulation parameters.
 """
 
 from abc import ABC, abstractmethod
@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 import astropy.units as u
 import numpy as np
 import ngsolve as ngs
+from scipy.interpolate import RBFInterpolator
 
 from bmbcsim.units import to_simulation_units
 
@@ -35,7 +36,6 @@ class CoefficientField(ABC):
         :param unit_name: The physical unit name for conversion (e.g., 'molar concentration').
         :returns: An NGSolve CoefficientFunction representing the field.
         """
-        pass
 
 
 class ConstantField(CoefficientField):
@@ -58,13 +58,6 @@ class ConstantField(CoefficientField):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        """Generate a constant coefficient function.
-
-        :param mesh: The NGSolve mesh object (unused for constant fields).
-        :param fes: The finite element space (unused for constant fields).
-        :param unit_name: The physical unit name for conversion.
-        :returns: A constant NGSolve CoefficientFunction.
-        """
         return ngs.CoefficientFunction(to_simulation_units(self._value, unit_name))
 
     @property
@@ -85,13 +78,13 @@ class NodalNoiseField(CoefficientField):
 
     def __init__(
         self,
-        seed: int,
         value_range: tuple[u.Quantity, u.Quantity],
+        seed: int = 0,
     ):
         """Initialize a nodal noise field.
 
-        :param seed: Random seed for reproducibility (required).
         :param value_range: (min_value, max_value) tuple with units.
+        :param seed: Random seed for reproducibility (default is 0).
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -104,13 +97,6 @@ class NodalNoiseField(CoefficientField):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        """Generate uncorrelated random nodal values.
-
-        :param mesh: The NGSolve mesh object.
-        :param fes: The finite element space for this compartment.
-        :param unit_name: The physical unit name for conversion.
-        :returns: A GridFunction with random nodal values.
-        """
         rng = np.random.default_rng(self._seed)
         min_val = to_simulation_units(self._value_range[0], unit_name)
         max_val = to_simulation_units(self._value_range[1], unit_name)
@@ -139,15 +125,15 @@ class SmoothRandomField(CoefficientField):
 
     def __init__(
         self,
-        seed: int,
         value_range: tuple[u.Quantity, u.Quantity],
         correlation_length: u.Quantity,
+        seed: int = 0,
     ):
         """Initialize a smooth random field.
 
-        :param seed: Random seed for reproducibility (required).
         :param value_range: (min_value, max_value) tuple with units.
         :param correlation_length: Spatial scale of variations (e.g., 5 * u.um).
+        :param seed: Random seed for reproducibility (default is 0).
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -168,15 +154,13 @@ class SmoothRandomField(CoefficientField):
         :param unit_name: The physical unit name for conversion.
         :returns: A GridFunction with smoothly varying random values.
         """
-        from scipy.interpolate import RBFInterpolator
-
         rng = np.random.default_rng(self._seed)
         min_val = to_simulation_units(self._value_range[0], unit_name)
         max_val = to_simulation_units(self._value_range[1], unit_name)
         corr_len = to_simulation_units(self._correlation_length, 'length')
 
         # Get mesh coordinates and bounding box
-        coords = np.array(mesh.ngmesh.Coordinates())
+        coords = mesh.ngmesh.Coordinates()
         bbox_min, bbox_max = coords.min(axis=0), coords.max(axis=0)
 
         # Create control point grid with spacing = correlation_length
@@ -232,19 +216,19 @@ class LocalizedPeaksField(CoefficientField):
 
     def __init__(
         self,
-        seed: int,
         num_peaks: int,
         peak_value: u.Quantity,
         background_value: u.Quantity,
         peak_width: u.Quantity,
+        seed: int = 0,
     ):
         """Initialize a localized peaks field.
 
-        :param seed: Random seed for reproducibility (required).
         :param num_peaks: Number of Gaussian peaks to place.
         :param peak_value: Maximum value at peak centers.
         :param background_value: Baseline value away from peaks.
         :param peak_width: Standard deviation (width) of Gaussian peaks.
+        :param seed: Random seed for reproducibility (default is 0).
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -275,7 +259,7 @@ class LocalizedPeaksField(CoefficientField):
         width = to_simulation_units(self._peak_width, 'length')
         height = peak_val - bg_val
 
-        coords = np.array(mesh.ngmesh.Coordinates())
+        coords = mesh.ngmesh.Coordinates()
 
         # Select random mesh nodes as peak centers
         n_nodes = len(coords)
