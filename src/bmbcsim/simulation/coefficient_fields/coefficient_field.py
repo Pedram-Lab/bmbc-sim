@@ -156,7 +156,7 @@ class NodalNoise(Coefficient):
         return f"NodalNoise(seed={self._seed}, value_range={self._value_range})"
 
 
-class SmoothRandom(Coefficient):
+class SmoothNoise(Coefficient):
     """Smooth random field with configurable correlation length.
 
     Uses radial basis function (RBF) interpolation from random values at
@@ -236,7 +236,7 @@ class SmoothRandom(Coefficient):
         return self._correlation_length
 
     def __repr__(self) -> str:
-        return (f"SmoothRandom(seed={self._seed}, "
+        return (f"SmoothNoise(seed={self._seed}, "
                 f"value_range={self._value_range}, "
                 f"correlation_length={self._correlation_length})")
 

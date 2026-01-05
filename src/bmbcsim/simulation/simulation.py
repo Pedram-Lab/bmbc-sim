@@ -242,13 +242,13 @@ class Simulation:
             fes = self._compartment_fes[compartment]
             coefficients = compartment.coefficients
 
-            for species, field in list(coefficients.initial_conditions.items()):
+            for species, coeff in list(coefficients.initial_conditions.items()):
                 coefficients.initial_conditions[species] = \
-                    field.to_coefficient_function(mesh, fes, 'molar concentration')
+                    coeff.to_coefficient_function(mesh, fes, 'molar concentration')
 
-            for species, field in list(coefficients.diffusion.items()):
+            for species, coeff in list(coefficients.diffusion.items()):
                 coefficients.diffusion[species] = \
-                    field.to_coefficient_function(mesh, fes, 'diffusivity')
+                    coeff.to_coefficient_function(mesh, fes, 'diffusivity')
 
             for reaction_key, (k_f, k_r) in list(coefficients.reactions.items()):
                 coefficients.reactions[reaction_key] = (
