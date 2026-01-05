@@ -235,6 +235,34 @@ class Simulation:
             logger.info("Total number of degrees of freedom for electrostatics: %d.",
                         self._el_fes.ndof)
 
+        # Convert all coefficient fields to CoefficientFunctions
+        # This must happen after FE spaces are created
+        logger.debug("Converting coefficient fields to CoefficientFunctions...")
+        for compartment in compartments:
+            fes = self._compartment_fes[compartment]
+            coefficients = compartment.coefficients
+
+            # Convert initial conditions
+            for species, value in list(coefficients.initial_conditions.items()):
+                coefficients.initial_conditions[species] = \
+                    compartment.to_coefficient_function(value, 'molar concentration', fes)
+
+            # Convert diffusion coefficients
+            for species, value in list(coefficients.diffusion.items()):
+                coefficients.diffusion[species] = \
+                    compartment.to_coefficient_function(value, 'diffusivity', fes)
+
+            # Convert reaction rate constants
+            for reaction_key, (k_f, k_r) in list(coefficients.reactions.items()):
+                k_f_cf = compartment.to_coefficient_function(k_f, None, fes)
+                k_r_cf = compartment.to_coefficient_function(k_r, None, fes)
+                coefficients.reactions[reaction_key] = (k_f_cf, k_r_cf)
+
+            # Convert permittivity
+            if coefficients.permittivity is not None:
+                coefficients.permittivity = \
+                    compartment.to_coefficient_function(coefficients.permittivity, 'permittivity', fes)
+
         # Set up the solution vectors
         for species in self.species:
             logger.debug("Initializing concentrations for species %s.", species)
