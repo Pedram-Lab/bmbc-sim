@@ -14,7 +14,7 @@ from scipy.interpolate import RBFInterpolator
 from bmbcsim.units import to_simulation_units
 
 
-class CoefficientField(ABC):
+class Coefficient(ABC):
     """Abstract base class for coefficient fields.
 
     Coefficient fields generate spatially-varying values that can be used as
@@ -38,7 +38,7 @@ class CoefficientField(ABC):
         """
 
 
-class ConstantField(CoefficientField):
+class Constant(Coefficient):
     """Uniform constant value across the domain.
 
     This field type captures the existing functionality of specifying a single
@@ -66,10 +66,10 @@ class ConstantField(CoefficientField):
         return self._value
 
     def __repr__(self) -> str:
-        return f"ConstantField(value={self._value})"
+        return f"Constant(value={self._value})"
 
 
-class PiecewiseConstantField(CoefficientField):
+class PiecewiseConstant(Coefficient):
     """Piecewise constant values across different regions.
 
     This field type allows specifying different constant values for different
@@ -108,10 +108,10 @@ class PiecewiseConstantField(CoefficientField):
         return self._region_values
 
     def __repr__(self) -> str:
-        return f"PiecewiseConstantField(region_values={self._region_values})"
+        return f"PiecewiseConstant(region_values={self._region_values})"
 
 
-class NodalNoiseField(CoefficientField):
+class NodalNoise(Coefficient):
     """Uncorrelated random values at each mesh node.
 
     Each mesh node receives an independent random value uniformly distributed
@@ -153,10 +153,10 @@ class NodalNoiseField(CoefficientField):
         return self._seed
 
     def __repr__(self) -> str:
-        return f"NodalNoiseField(seed={self._seed}, value_range={self._value_range})"
+        return f"NodalNoise(seed={self._seed}, value_range={self._value_range})"
 
 
-class SmoothRandomField(CoefficientField):
+class SmoothRandom(Coefficient):
     """Smooth random field with configurable correlation length.
 
     Uses radial basis function (RBF) interpolation from random values at
@@ -236,12 +236,12 @@ class SmoothRandomField(CoefficientField):
         return self._correlation_length
 
     def __repr__(self) -> str:
-        return (f"SmoothRandomField(seed={self._seed}, "
+        return (f"SmoothRandom(seed={self._seed}, "
                 f"value_range={self._value_range}, "
                 f"correlation_length={self._correlation_length})")
 
 
-class LocalizedPeaksField(CoefficientField):
+class LocalizedPeaks(Coefficient):
     """Random field with localized Gaussian peaks.
 
     Creates a background value with a specified number of Gaussian peaks
@@ -324,7 +324,7 @@ class LocalizedPeaksField(CoefficientField):
         return self._peak_node_indices
 
     def __repr__(self) -> str:
-        return (f"LocalizedPeaksField(seed={self._seed}, "
+        return (f"LocalizedPeaks(seed={self._seed}, "
                 f"num_peaks={self._num_peaks}, "
                 f"peak_value={self._peak_value}, "
                 f"background_value={self._background_value}, "

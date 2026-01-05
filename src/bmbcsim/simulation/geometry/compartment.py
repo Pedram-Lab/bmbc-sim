@@ -6,17 +6,13 @@ import astropy.constants as const
 import ngsolve as ngs
 
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
-from bmbcsim.simulation.coefficient_fields.coefficient_field import (
-    CoefficientField,
-    ConstantField,
-    PiecewiseConstantField,
-)
+import bmbcsim.simulation.coefficient_fields as cf
 from bmbcsim.units import to_simulation_units, BASE_UNITS
 
 
 # Define type aliases to shorten type annotations
 S = ChemicalSpecies
-C = CoefficientField
+C = cf.Coefficient
 
 
 class Region:
@@ -88,17 +84,17 @@ class Compartment:
 
     def _to_coefficient_field(
             self,
-            value: u.Quantity | dict[str, u.Quantity] | CoefficientField
-    ) -> CoefficientField:
+            value: u.Quantity | dict[str, u.Quantity] | cf.Coefficient
+    ) -> cf.Coefficient:
         """Convert a value to a CoefficientField.
 
         :param value: The value to convert (scalar, dict, or CoefficientField).
         :returns: A CoefficientField instance.
         """
-        if isinstance(value, CoefficientField):
+        if isinstance(value, cf.Coefficient):
             return value
         elif isinstance(value, u.Quantity):
-            return ConstantField(value)
+            return cf.Constant(value)
         else:
             # Dictionary of region -> value
             regions = set(value.keys())
@@ -112,12 +108,12 @@ class Compartment:
                     self.get_region_names(full_names=True)
                 )
             }
-            return PiecewiseConstantField(value, full_names)
+            return cf.PiecewiseConstant(value, full_names)
 
     def initialize_species(
             self,
             species: S,
-            value: u.Quantity | dict[str, u.Quantity] | CoefficientField
+            value: u.Quantity | dict[str, u.Quantity] | cf.Coefficient
     ) -> None:
         """Set the initial concentration of a species in the compartment.
 
@@ -136,7 +132,7 @@ class Compartment:
     def add_diffusion(
             self,
             species: S,
-            diffusivity: u.Quantity | dict[str, u.Quantity] | CoefficientField
+            diffusivity: u.Quantity | dict[str, u.Quantity] | cf.Coefficient
     ) -> None:
         """Add a diffusion event to the compartment.
 
@@ -244,8 +240,8 @@ class Compartment:
             self,
             reactants: list[S],
             products: list[S],
-            k_f: u.Quantity | dict[str, u.Quantity] | CoefficientField,
-            k_r: u.Quantity | dict[str, u.Quantity] | CoefficientField
+            k_f: u.Quantity | dict[str, u.Quantity] | cf.Coefficient,
+            k_r: u.Quantity | dict[str, u.Quantity] | cf.Coefficient
     ) -> None:
         """Add a reaction event to the compartment.
 
