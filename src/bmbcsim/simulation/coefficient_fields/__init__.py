@@ -7,6 +7,7 @@ diffusion coefficients, and other simulation parameters with spatial variation.
 from bmbcsim.simulation.coefficient_fields.coefficient_field import (
     CoefficientField,
     ConstantField,
+    PiecewiseConstantField,
     NodalNoiseField,
     SmoothRandomField,
     LocalizedPeaksField,
@@ -15,6 +16,7 @@ from bmbcsim.simulation.coefficient_fields.coefficient_field import (
 __all__ = [
     "CoefficientField",
     "ConstantField",
+    "PiecewiseConstantField",
     "NodalNoiseField",
     "SmoothRandomField",
     "LocalizedPeaksField",

@@ -69,6 +69,48 @@ class ConstantField(CoefficientField):
         return f"ConstantField(value={self._value})"
 
 
+class PiecewiseConstantField(CoefficientField):
+    """Piecewise constant values across different regions.
+
+    This field type allows specifying different constant values for different
+    regions within a compartment.
+    """
+
+    def __init__(
+        self,
+        region_values: dict[str, u.Quantity],
+        region_full_names: dict[str, str],
+    ):
+        """Initialize a piecewise constant field.
+
+        :param region_values: Dictionary mapping region names to values with units.
+        :param region_full_names: Dictionary mapping region names to their full names
+            (used for mesh material lookup).
+        """
+        self._region_values = region_values
+        self._region_full_names = region_full_names
+
+    def to_coefficient_function(
+        self,
+        mesh: ngs.Mesh,
+        fes: ngs.FESpace,
+        unit_name: str,
+    ) -> ngs.CoefficientFunction:
+        coeff = {
+            self._region_full_names[region]: to_simulation_units(value, unit_name)
+            for region, value in self._region_values.items()
+        }
+        return mesh.MaterialCF(coeff)
+
+    @property
+    def region_values(self) -> dict[str, u.Quantity]:
+        """Return the region-to-value mapping."""
+        return self._region_values
+
+    def __repr__(self) -> str:
+        return f"PiecewiseConstantField(region_values={self._region_values})"
+
+
 class NodalNoiseField(CoefficientField):
     """Uncorrelated random values at each mesh node.
 
@@ -147,13 +189,6 @@ class SmoothRandomField(CoefficientField):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        """Generate a smooth random field via RBF interpolation.
-
-        :param mesh: The NGSolve mesh object.
-        :param fes: The finite element space for this compartment.
-        :param unit_name: The physical unit name for conversion.
-        :returns: A GridFunction with smoothly varying random values.
-        """
         rng = np.random.default_rng(self._seed)
         min_val = to_simulation_units(self._value_range[0], unit_name)
         max_val = to_simulation_units(self._value_range[1], unit_name)
@@ -245,13 +280,6 @@ class LocalizedPeaksField(CoefficientField):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        """Generate a field with localized Gaussian peaks.
-
-        :param mesh: The NGSolve mesh object.
-        :param fes: The finite element space for this compartment.
-        :param unit_name: The physical unit name for conversion.
-        :returns: A GridFunction with Gaussian peaks at random mesh nodes.
-        """
         rng = np.random.default_rng(self._seed)
 
         peak_val = to_simulation_units(self._peak_value, unit_name)

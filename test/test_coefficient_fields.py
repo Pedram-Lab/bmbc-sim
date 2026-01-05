@@ -10,6 +10,7 @@ from bmbcsim.geometry import create_sphere_geometry
 from bmbcsim.units import mM
 from bmbcsim.simulation.coefficient_fields import (
     ConstantField,
+    PiecewiseConstantField,
     NodalNoiseField,
     SmoothRandomField,
     LocalizedPeaksField,
@@ -45,6 +46,52 @@ def test_constant_field_value_property():
     """ConstantField exposes its value via property."""
     field = ConstantField(value=2.0 * mM)
     assert field.value == 2.0 * mM
+
+
+# PiecewiseConstantField tests
+@pytest.fixture
+def two_region_mesh():
+    """Create a mesh with two regions for testing piecewise fields."""
+    from netgen import occ
+    left = occ.Box(occ.Pnt(0, 0, 0), occ.Pnt(1, 1, 1))
+    right = occ.Box(occ.Pnt(1, 0, 0), occ.Pnt(2, 1, 1))
+    left.mat("cell:left")
+    right.mat("cell:right")
+    geo = occ.OCCGeometry(occ.Glue([left, right]))
+    return ngs.Mesh(geo.GenerateMesh(maxh=0.3))
+
+
+@pytest.fixture
+def two_region_fes(two_region_mesh):
+    """Create FE space for two-region mesh."""
+    return ngs.Compress(ngs.H1(two_region_mesh, order=1, definedon="cell:left|cell:right"))
+
+
+def test_piecewise_constant_produces_different_values_per_region(two_region_mesh, two_region_fes):
+    """PiecewiseConstantField produces different values in different regions."""
+    field = PiecewiseConstantField(
+        region_values={"left": 1.0 * mM, "right": 2.0 * mM},
+        region_full_names={"left": "cell:left", "right": "cell:right"},
+    )
+    cf = field.to_coefficient_function(two_region_mesh, two_region_fes, 'molar concentration')
+
+    gf = ngs.GridFunction(two_region_fes)
+    gf.Set(cf)
+    values = gf.vec.FV().NumPy()
+
+    # Values should be either 1.0 or 2.0 (not all the same)
+    assert np.min(values) == pytest.approx(1.0)
+    assert np.max(values) == pytest.approx(2.0)
+
+
+def test_piecewise_constant_region_values_property():
+    """PiecewiseConstantField exposes its region_values via property."""
+    region_vals = {"left": 1.0 * mM, "right": 2.0 * mM}
+    field = PiecewiseConstantField(
+        region_values=region_vals,
+        region_full_names={"left": "cell:left", "right": "cell:right"},
+    )
+    assert field.region_values == region_vals
 
 
 # NodalNoiseField tests

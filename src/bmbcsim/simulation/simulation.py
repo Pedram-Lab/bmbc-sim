@@ -235,33 +235,30 @@ class Simulation:
             logger.info("Total number of degrees of freedom for electrostatics: %d.",
                         self._el_fes.ndof)
 
-        # Convert all coefficient fields to CoefficientFunctions
+        # Convert all CoefficientFields to NGSolve CoefficientFunctions
         # This must happen after FE spaces are created
         logger.debug("Converting coefficient fields to CoefficientFunctions...")
         for compartment in compartments:
             fes = self._compartment_fes[compartment]
             coefficients = compartment.coefficients
 
-            # Convert initial conditions
-            for species, value in list(coefficients.initial_conditions.items()):
+            for species, field in list(coefficients.initial_conditions.items()):
                 coefficients.initial_conditions[species] = \
-                    compartment.to_coefficient_function(value, 'molar concentration', fes)
+                    field.to_coefficient_function(mesh, fes, 'molar concentration')
 
-            # Convert diffusion coefficients
-            for species, value in list(coefficients.diffusion.items()):
+            for species, field in list(coefficients.diffusion.items()):
                 coefficients.diffusion[species] = \
-                    compartment.to_coefficient_function(value, 'diffusivity', fes)
+                    field.to_coefficient_function(mesh, fes, 'diffusivity')
 
-            # Convert reaction rate constants
             for reaction_key, (k_f, k_r) in list(coefficients.reactions.items()):
-                k_f_cf = compartment.to_coefficient_function(k_f, None, fes)
-                k_r_cf = compartment.to_coefficient_function(k_r, None, fes)
-                coefficients.reactions[reaction_key] = (k_f_cf, k_r_cf)
+                coefficients.reactions[reaction_key] = (
+                    k_f.to_coefficient_function(mesh, fes, None),
+                    k_r.to_coefficient_function(mesh, fes, None),
+                )
 
-            # Convert permittivity
             if coefficients.permittivity is not None:
                 coefficients.permittivity = \
-                    compartment.to_coefficient_function(coefficients.permittivity, 'permittivity', fes)
+                    coefficients.permittivity.to_coefficient_function(mesh, fes, 'permittivity')
 
         # Set up the solution vectors
         for species in self.species:
