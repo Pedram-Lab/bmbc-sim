@@ -25,14 +25,14 @@ class Coefficient(ABC):
     @abstractmethod
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
         """Generate an NGSolve coefficient function.
 
-        :param mesh: The NGSolve mesh object.
-        :param fes: The finite element space for this compartment.
+        :param region: The NGSolve region (volume or boundary).
+        :param fes: The finite element space for this region.
         :param unit_name: The physical unit name for conversion (e.g., 'molar concentration').
         :returns: An NGSolve CoefficientFunction representing the field.
         """
@@ -54,10 +54,11 @@ class Constant(Coefficient):
 
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
+        del region, fes  # Unused for constant values
         return ngs.CoefficientFunction(to_simulation_units(self._value, unit_name))
 
     @property
@@ -92,15 +93,16 @@ class PiecewiseConstant(Coefficient):
 
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
+        del fes  # Unused
         coeff = {
-            self._region_full_names[region]: to_simulation_units(value, unit_name)
-            for region, value in self._region_values.items()
+            self._region_full_names[r]: to_simulation_units(value, unit_name)
+            for r, value in self._region_values.items()
         }
-        return mesh.MaterialCF(coeff)
+        return region.mesh.MaterialCF(coeff)
 
     @property
     def region_values(self) -> dict[str, u.Quantity]:
@@ -135,10 +137,11 @@ class NodalNoise(Coefficient):
 
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
+        del region  # Unused - DOFs come from fes
         rng = np.random.default_rng(self._seed)
         min_val = to_simulation_units(self._value_range[0], unit_name)
         max_val = to_simulation_units(self._value_range[1], unit_name)
@@ -185,7 +188,7 @@ class SmoothNoise(Coefficient):
 
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
@@ -194,9 +197,9 @@ class SmoothNoise(Coefficient):
         max_val = to_simulation_units(self._value_range[1], unit_name)
         corr_len = to_simulation_units(self._correlation_length, 'length')
 
-        # Get mesh coordinates and bounding box
-        coords = mesh.ngmesh.Coordinates()
-        bbox_min, bbox_max = coords.min(axis=0), coords.max(axis=0)
+        # Get DOF coordinates (handles compressed boundary spaces correctly)
+        dof_coords = _get_dof_coordinates(region, fes)
+        bbox_min, bbox_max = dof_coords.min(axis=0), dof_coords.max(axis=0)
 
         # Create control point grid with spacing = correlation_length
         grid_points = []
@@ -219,9 +222,9 @@ class SmoothNoise(Coefficient):
             epsilon=1.0 / corr_len,
         )
 
-        # Interpolate to mesh nodes
+        # Interpolate to DOF coordinates
         gf = ngs.GridFunction(fes)
-        interpolated = np.clip(rbf(coords[:fes.ndof]), min_val, max_val)
+        interpolated = np.clip(rbf(dof_coords), min_val, max_val)
         gf.vec.FV().NumPy()[:] = interpolated
         return gf
 
@@ -276,7 +279,7 @@ class LocalizedPeaks(Coefficient):
 
     def to_coefficient_function(
         self,
-        mesh: ngs.Mesh,
+        region: ngs.Region,
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
@@ -287,22 +290,23 @@ class LocalizedPeaks(Coefficient):
         width = to_simulation_units(self._peak_width, 'length')
         height = peak_val - bg_val
 
-        coords = mesh.ngmesh.Coordinates()
+        # Get DOF coordinates (handles compressed boundary spaces correctly)
+        dof_coords = _get_dof_coordinates(region, fes)
 
-        # Select random mesh nodes as peak centers
-        n_nodes = len(coords)
-        actual_num_peaks = min(self._num_peaks, n_nodes)
+        # Select random DOFs as peak centers (not global mesh nodes)
+        n_dofs = fes.ndof
+        actual_num_peaks = min(self._num_peaks, n_dofs)
         self._peak_node_indices = rng.choice(
-            n_nodes, size=actual_num_peaks, replace=False
+            n_dofs, size=actual_num_peaks, replace=False
         )
-        peak_centers = coords[self._peak_node_indices]
+        peak_centers = dof_coords[self._peak_node_indices]
 
-        # Compute field values at all nodes
+        # Compute field values at all DOFs
         gf = ngs.GridFunction(fes)
-        values = np.full(fes.ndof, bg_val)
+        values = np.full(n_dofs, bg_val)
 
         for center in peak_centers:
-            dist_sq = np.sum((coords[:fes.ndof] - center) ** 2, axis=1)
+            dist_sq = np.sum((dof_coords - center) ** 2, axis=1)
             values += height * np.exp(-dist_sq / (2 * width ** 2))
 
         gf.vec.FV().NumPy()[:] = values
@@ -329,3 +333,30 @@ class LocalizedPeaks(Coefficient):
                 f"peak_value={self._peak_value}, "
                 f"background_value={self._background_value}, "
                 f"peak_width={self._peak_width})")
+
+
+def _get_dof_coordinates(region: ngs.Region, fes: ngs.FESpace) -> np.ndarray:
+    """Get coordinates of DOFs for an H1 order=1 FE space.
+
+    Iterates through the region's elements to map DOFs to their vertex
+    coordinates. Works for both volume and boundary regions.
+
+    :param region: The NGSolve region (volume or boundary).
+    :param fes: The finite element space (H1 order=1).
+    :returns: Array of shape (ndof, 3) with DOF coordinates.
+    """
+    mesh = region.mesh
+    all_coords = np.array(mesh.ngmesh.Coordinates())
+
+    dof_coords = np.zeros((fes.ndof, 3))
+    seen_dofs = set()
+
+    for el in region.Elements():
+        dofs = fes.GetDofNrs(el)
+        verts = list(el.vertices)
+        for dof, vert in zip(dofs, verts):
+            if dof >= 0 and dof not in seen_dofs:
+                dof_coords[dof] = all_coords[vert.nr]
+                seen_dofs.add(dof)
+
+    return dof_coords

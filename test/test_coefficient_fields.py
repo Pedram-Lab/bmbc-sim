@@ -19,16 +19,22 @@ def simple_mesh():
 
 
 @pytest.fixture
+def volume_region(simple_mesh):
+    """Create a volume region from the simple mesh."""
+    return simple_mesh.Materials("sphere")
+
+
+@pytest.fixture
 def fes(simple_mesh):
     """Create FE space for testing."""
     return ngs.H1(simple_mesh, order=1)
 
 
 # cf.Constant tests
-def test_constant_field_produces_uniform_values(simple_mesh, fes):
+def test_constant_field_produces_uniform_values(volume_region, fes):
     """cf.Constant produces uniform values across all nodes."""
     field = cf.Constant(value=1.5 * mM)
-    coeff_func = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf = ngs.GridFunction(fes)
     gf.Set(coeff_func)
@@ -61,14 +67,20 @@ def two_region_fes(two_region_mesh):
     return ngs.Compress(ngs.H1(two_region_mesh, order=1, definedon="cell:left|cell:right"))
 
 
-def test_piecewise_constant_produces_different_values_per_region(two_region_mesh, two_region_fes):
+@pytest.fixture
+def two_region_volume(two_region_mesh):
+    """Create a volume region from the two-region mesh."""
+    return two_region_mesh.Materials("cell:left|cell:right")
+
+
+def test_piecewise_constant_produces_different_values_per_region(two_region_volume, two_region_fes):
     """cf.PiecewiseConstant produces different values in different regions."""
     field = cf.PiecewiseConstant(
         region_values={"left": 1.0 * mM, "right": 2.0 * mM},
         region_full_names={"left": "cell:left", "right": "cell:right"},
     )
     coeff_func = field.to_coefficient_function(
-        two_region_mesh, two_region_fes, "molar concentration"
+        two_region_volume, two_region_fes, "molar concentration"
     )
 
     gf = ngs.GridFunction(two_region_fes)
@@ -91,13 +103,13 @@ def test_piecewise_constant_region_values_property():
 
 
 # cf.NodalNoise tests
-def test_nodal_noise_seed_reproducibility(simple_mesh, fes):
+def test_nodal_noise_seed_reproducibility(volume_region, fes):
     """Same seed produces identical results."""
     field1 = cf.NodalNoise(seed=42, value_range=(0 * mM, 1 * mM))
     field2 = cf.NodalNoise(seed=42, value_range=(0 * mM, 1 * mM))
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -110,13 +122,13 @@ def test_nodal_noise_seed_reproducibility(simple_mesh, fes):
     )
 
 
-def test_nodal_noise_different_seeds_differ(simple_mesh, fes):
+def test_nodal_noise_different_seeds_differ(volume_region, fes):
     """Different seeds produce different results."""
     field1 = cf.NodalNoise(seed=42, value_range=(0 * mM, 1 * mM))
     field2 = cf.NodalNoise(seed=43, value_range=(0 * mM, 1 * mM))
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -129,10 +141,10 @@ def test_nodal_noise_different_seeds_differ(simple_mesh, fes):
     )
 
 
-def test_nodal_noise_values_in_range(simple_mesh, fes):
+def test_nodal_noise_values_in_range(volume_region, fes):
     """All generated values are within specified range."""
     field = cf.NodalNoise(seed=42, value_range=(0.5 * mM, 1.5 * mM))
-    coeff_func = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf = ngs.GridFunction(fes)
     gf.Set(coeff_func)
@@ -143,7 +155,7 @@ def test_nodal_noise_values_in_range(simple_mesh, fes):
 
 
 # cf.SmoothNoise tests
-def test_smooth_field_seed_reproducibility(simple_mesh, fes):
+def test_smooth_field_seed_reproducibility(volume_region, fes):
     """Same seed produces identical results."""
     field1 = cf.SmoothNoise(
         seed=42,
@@ -156,8 +168,8 @@ def test_smooth_field_seed_reproducibility(simple_mesh, fes):
         correlation_length=2.0 * u.um,
     )
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -170,7 +182,7 @@ def test_smooth_field_seed_reproducibility(simple_mesh, fes):
     )
 
 
-def test_smooth_field_different_seeds_differ(simple_mesh, fes):
+def test_smooth_field_different_seeds_differ(volume_region, fes):
     """Different seeds produce different results."""
     field1 = cf.SmoothNoise(
         seed=42,
@@ -183,8 +195,8 @@ def test_smooth_field_different_seeds_differ(simple_mesh, fes):
         correlation_length=2.0 * u.um,
     )
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -197,14 +209,14 @@ def test_smooth_field_different_seeds_differ(simple_mesh, fes):
     )
 
 
-def test_smooth_field_values_in_range(simple_mesh, fes):
+def test_smooth_field_values_in_range(volume_region, fes):
     """All generated values are within specified range."""
     field = cf.SmoothNoise(
         seed=42,
         value_range=(0.5 * mM, 1.5 * mM),
         correlation_length=2.0 * u.um,
     )
-    coeff_func = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf = ngs.GridFunction(fes)
     gf.Set(coeff_func)
@@ -215,7 +227,7 @@ def test_smooth_field_values_in_range(simple_mesh, fes):
 
 
 # cf.LocalizedPeaks tests
-def test_peaks_field_seed_reproducibility(simple_mesh, fes):
+def test_peaks_field_seed_reproducibility(volume_region, fes):
     """Same seed produces identical results."""
     field1 = cf.LocalizedPeaks(
         seed=42,
@@ -232,8 +244,8 @@ def test_peaks_field_seed_reproducibility(simple_mesh, fes):
         peak_width=1.0 * u.um,
     )
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -246,7 +258,7 @@ def test_peaks_field_seed_reproducibility(simple_mesh, fes):
     )
 
 
-def test_peaks_field_different_seeds_differ(simple_mesh, fes):
+def test_peaks_field_different_seeds_differ(volume_region, fes):
     """Different seeds produce different results."""
     field1 = cf.LocalizedPeaks(
         seed=42,
@@ -263,8 +275,8 @@ def test_peaks_field_different_seeds_differ(simple_mesh, fes):
         peak_width=1.0 * u.um,
     )
 
-    coeff_func1 = field1.to_coefficient_function(simple_mesh, fes, 'molar concentration')
-    coeff_func2 = field2.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func1 = field1.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_func2 = field2.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf1 = ngs.GridFunction(fes)
     gf2 = ngs.GridFunction(fes)
@@ -277,7 +289,7 @@ def test_peaks_field_different_seeds_differ(simple_mesh, fes):
     )
 
 
-def test_peaks_field_peak_count(simple_mesh, fes):
+def test_peaks_field_peak_count(volume_region, fes):
     """Correct number of peaks generated."""
     field = cf.LocalizedPeaks(
         seed=42,
@@ -286,13 +298,13 @@ def test_peaks_field_peak_count(simple_mesh, fes):
         background_value=0.1 * mM,
         peak_width=1.0 * u.um,
     )
-    _ = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    _ = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     assert field.peak_node_indices is not None
     assert len(field.peak_node_indices) == 5
 
 
-def test_peaks_field_background_value_present(simple_mesh, fes):
+def test_peaks_field_background_value_present(volume_region, fes):
     """Background value is the minimum value far from peaks."""
     field = cf.LocalizedPeaks(
         seed=42,
@@ -301,7 +313,7 @@ def test_peaks_field_background_value_present(simple_mesh, fes):
         background_value=0.1 * mM,
         peak_width=0.5 * u.um,
     )
-    coeff_func = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf = ngs.GridFunction(fes)
     gf.Set(coeff_func)
@@ -311,7 +323,7 @@ def test_peaks_field_background_value_present(simple_mesh, fes):
     assert np.min(values) < 0.2
 
 
-def test_peaks_field_peak_value_reached(simple_mesh, fes):
+def test_peaks_field_peak_value_reached(volume_region, fes):
     """Peak value is approximately reached at peak centers."""
     field = cf.LocalizedPeaks(
         seed=42,
@@ -320,7 +332,7 @@ def test_peaks_field_peak_value_reached(simple_mesh, fes):
         background_value=0.1 * mM,
         peak_width=1.0 * u.um,
     )
-    coeff_func = field.to_coefficient_function(simple_mesh, fes, 'molar concentration')
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
 
     gf = ngs.GridFunction(fes)
     gf.Set(coeff_func)

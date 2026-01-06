@@ -249,30 +249,34 @@ class Simulation:
         for compartment in compartments:
             fes = self._compartment_fes[compartment]
             coefficients = compartment.coefficients
+            # Get the volume region for this compartment
+            region_names = '|'.join(compartment.get_region_names(full_names=True))
+            volume_region = mesh.Materials(region_names)
 
             for species, coeff in list(coefficients.initial_conditions.items()):
                 coefficients.initial_conditions[species] = \
-                    coeff.to_coefficient_function(mesh, fes, 'molar concentration')
+                    coeff.to_coefficient_function(volume_region, fes, 'molar concentration')
 
             for species, coeff in list(coefficients.diffusion.items()):
                 coefficients.diffusion[species] = \
-                    coeff.to_coefficient_function(mesh, fes, 'diffusivity')
+                    coeff.to_coefficient_function(volume_region, fes, 'diffusivity')
 
             for reaction_key, (k_f, k_r) in list(coefficients.reactions.items()):
                 coefficients.reactions[reaction_key] = (
-                    k_f.to_coefficient_function(mesh, fes, None),
-                    k_r.to_coefficient_function(mesh, fes, None),
+                    k_f.to_coefficient_function(volume_region, fes, None),
+                    k_r.to_coefficient_function(volume_region, fes, None),
                 )
 
             if coefficients.permittivity is not None:
                 coefficients.permittivity = \
-                    coefficients.permittivity.to_coefficient_function(mesh, fes, 'permittivity')
+                    coefficients.permittivity.to_coefficient_function(volume_region, fes, 'permittivity')
 
         # Finalize transport coefficients that use spatial fields
         for membrane in self.simulation_geometry.membranes.values():
             fes = self._membrane_fes[membrane]
+            boundary_region = mesh.Boundaries(membrane.name)
             for _, _, _, transport_mech in membrane.get_transport():
-                transport_mech.finalize_coefficients(mesh, fes)
+                transport_mech.finalize_coefficients(boundary_region, fes)
 
         # Set up the solution vectors
         for species in self.species:

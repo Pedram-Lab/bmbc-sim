@@ -90,19 +90,19 @@ class Transport(abc.ABC):
             parameter.Set(new_value)
 
 
-    def finalize_coefficients(self, mesh: ngs.Mesh, fes: ngs.FESpace) -> None:
+    def finalize_coefficients(self, region: ngs.Region, fes: ngs.FESpace) -> None:
         """Convert deferred spatial coefficients to CoefficientFunctions.
 
         Called during simulation setup after membrane FE spaces are created.
         This converts the coefficient specs stored by _register_coefficient
         into actual NGSolve CoefficientFunctions as instance attributes.
 
-        :param mesh: The NGSolve mesh object.
+        :param region: The NGSolve region (typically a boundary region).
         :param fes: The finite element space for this membrane.
         """
         for attr_name, spec in list(self._coefficient_specs.items()):
             field, physical_name, temporal = spec
-            spatial_cf = field.to_coefficient_function(mesh, fes, physical_name)
+            spatial_cf = field.to_coefficient_function(region, fes, physical_name)
 
             if temporal is not None:
                 # Multiply by time-dependent parameter
