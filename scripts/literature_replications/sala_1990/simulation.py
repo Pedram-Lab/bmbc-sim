@@ -114,9 +114,10 @@ channel_current = I / (2 * F)
 
 # Add transport mechanisms to the membranes
 # Time dependent influx
+spike = lambda t: 1.0 if t < t_off else 0.0
 membrane.add_transport(
     species=ca,
-    transport=transport.GeneralFlux(lambda t: channel_current if t < t_off else 0 * u.mol / u.s),
+    transport=transport.GeneralFlux(flux=channel_current, temporal=spike),
     source=None,
     target=cell
 )

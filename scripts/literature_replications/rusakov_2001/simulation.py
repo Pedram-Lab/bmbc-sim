@@ -77,8 +77,10 @@ synapse_boundary.add_transport(ca, t, neuropil, synapse_ecs)
 # Compute the channel flux on the presynaptic membrane
 const_F = const.e.si * const.N_A
 Q = N_CHANNELS * CHANNEL_CURRENT / (2 * const_F)
-t = transport.GeneralFlux(lambda t: Q * t * TIME_CONSTANT * math.exp(-t * TIME_CONSTANT))
-presynaptic_membrane.add_transport(ca, t, synapse_ecs, presynapse)
+# Alpha function: flux(t) = Q * (t*τ) * exp(-t*τ)
+spike = lambda t: (t * TIME_CONSTANT) * math.exp(-t * TIME_CONSTANT)
+flux = transport.GeneralFlux(flux=Q, temporal=spike)
+presynaptic_membrane.add_transport(ca, flux, synapse_ecs, presynapse)
 
 # Run the simulation
 simulation.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)

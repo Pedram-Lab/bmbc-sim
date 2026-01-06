@@ -142,15 +142,15 @@ def test_nodal_noise_values_in_range(simple_mesh, fes):
     assert np.all(values <= 1.5)
 
 
-# cf.SmoothRandom tests
+# cf.SmoothNoise tests
 def test_smooth_field_seed_reproducibility(simple_mesh, fes):
     """Same seed produces identical results."""
-    field1 = cf.SmoothRandom(
+    field1 = cf.SmoothNoise(
         seed=42,
         value_range=(0 * mM, 1 * mM),
         correlation_length=2.0 * u.um,
     )
-    field2 = cf.SmoothRandom(
+    field2 = cf.SmoothNoise(
         seed=42,
         value_range=(0 * mM, 1 * mM),
         correlation_length=2.0 * u.um,
@@ -172,12 +172,12 @@ def test_smooth_field_seed_reproducibility(simple_mesh, fes):
 
 def test_smooth_field_different_seeds_differ(simple_mesh, fes):
     """Different seeds produce different results."""
-    field1 = cf.SmoothRandom(
+    field1 = cf.SmoothNoise(
         seed=42,
         value_range=(0 * mM, 1 * mM),
         correlation_length=2.0 * u.um,
     )
-    field2 = cf.SmoothRandom(
+    field2 = cf.SmoothNoise(
         seed=43,
         value_range=(0 * mM, 1 * mM),
         correlation_length=2.0 * u.um,
@@ -199,7 +199,7 @@ def test_smooth_field_different_seeds_differ(simple_mesh, fes):
 
 def test_smooth_field_values_in_range(simple_mesh, fes):
     """All generated values are within specified range."""
-    field = cf.SmoothRandom(
+    field = cf.SmoothNoise(
         seed=42,
         value_range=(0.5 * mM, 1.5 * mM),
         correlation_length=2.0 * u.um,
@@ -344,12 +344,12 @@ def test_nodal_noise_in_simulation(simple_mesh, tmp_path):
 
 
 def test_smooth_field_in_simulation(simple_mesh, tmp_path):
-    """cf.SmoothRandom works in a full simulation context."""
+    """cf.SmoothNoise works in a full simulation context."""
     sim = bmbcsim.Simulation("test_smooth", simple_mesh, result_root=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
 
     ca = sim.add_species("ca")
-    smooth_ic = cf.SmoothRandom(
+    smooth_ic = cf.SmoothNoise(
         seed=42,
         value_range=(0.1 * mM, 1.0 * mM),
         correlation_length=2.0 * u.um,
@@ -387,11 +387,79 @@ def test_random_diffusion_coefficient(simple_mesh, tmp_path):
     ca = sim.add_species("ca")
     cell.initialize_species(ca, 1.0 * mM)
 
-    random_diff = cf.SmoothRandom(
+    random_diff = cf.SmoothNoise(
         seed=42,
         value_range=(0.1 * u.um ** 2 / u.ms, 0.5 * u.um ** 2 / u.ms),
         correlation_length=2.0 * u.um,
     )
     cell.add_diffusion(ca, random_diff)
+
+    sim.run(end_time=0.1 * u.ms, time_step=0.01 * u.ms)
+
+
+# Surface coefficient tests
+import bmbcsim.simulation.transport as transport
+
+
+def test_surface_coefficient_in_transport(simple_mesh, tmp_path):
+    """cf.NodalNoise works as a surface coefficient in transport mechanisms."""
+    sim = bmbcsim.Simulation("test_surface", simple_mesh, result_root=tmp_path)
+    cell = sim.simulation_geometry.compartments["sphere"]
+    membrane = sim.simulation_geometry.membranes["boundary"]
+
+    ca = sim.add_species("ca")
+    cell.add_diffusion(ca, 0.2 * u.um ** 2 / u.ms)
+
+    # Use spatial field for flux on the membrane surface
+    flux = cf.NodalNoise(seed=42, value_range=(0.1 * u.mmol / u.ms, 0.5 * u.mmol / u.ms))
+    membrane.add_transport(ca, transport.GeneralFlux(flux=flux), source=None, target=cell)
+
+    sim.run(end_time=0.1 * u.ms, time_step=0.01 * u.ms)
+
+
+def test_surface_coefficient_with_temporal_modulation(simple_mesh, tmp_path):
+    """Surface coefficients can have temporal modulation."""
+    sim = bmbcsim.Simulation("test_temporal", simple_mesh, result_root=tmp_path)
+    cell = sim.simulation_geometry.compartments["sphere"]
+    membrane = sim.simulation_geometry.membranes["boundary"]
+
+    ca = sim.add_species("ca")
+    cell.add_diffusion(ca, 0.2 * u.um ** 2 / u.ms)
+
+    # Use spatial field with temporal modulation (active for first 0.05 ms)
+    flux = cf.NodalNoise(seed=42, value_range=(0.1 * u.mmol / u.ms, 0.5 * u.mmol / u.ms))
+    spike = lambda t: 1.0 if t < 0.05 * u.ms else 0.0
+    membrane.add_transport(
+        ca,
+        transport.GeneralFlux(flux=flux, temporal=spike),
+        source=None,
+        target=cell
+    )
+
+    sim.run(end_time=0.1 * u.ms, time_step=0.01 * u.ms)
+
+
+def test_smooth_surface_coefficient_in_passive_transport(simple_mesh, tmp_path):
+    """cf.SmoothNoise works as permeability in passive transport."""
+    sim = bmbcsim.Simulation("test_passive_surface", simple_mesh, result_root=tmp_path)
+    cell = sim.simulation_geometry.compartments["sphere"]
+    membrane = sim.simulation_geometry.membranes["boundary"]
+
+    ca = sim.add_species("ca")
+    cell.initialize_species(ca, 1.0 * mM)
+    cell.add_diffusion(ca, 0.2 * u.um ** 2 / u.ms)
+
+    # Use spatial field for permeability
+    perm = cf.SmoothNoise(
+        seed=42,
+        value_range=(0.1 * u.um ** 3 / u.ms, 0.5 * u.um ** 3 / u.ms),
+        correlation_length=2.0 * u.um,
+    )
+    membrane.add_transport(
+        ca,
+        transport.Passive(permeability=perm, outside_concentration=0.5 * mM),
+        source=cell,
+        target=None
+    )
 
     sim.run(end_time=0.1 * u.ms, time_step=0.01 * u.ms)
