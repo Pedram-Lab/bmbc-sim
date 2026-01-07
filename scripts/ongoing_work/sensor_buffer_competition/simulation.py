@@ -104,8 +104,10 @@ def run_simulation(buffer_conc, buffer_kd):
             k_r=sensor_kr
         )
 
-    # Transport
-    t = transport.Passive(permeability=lambda t: (0 if t < 1 * u.ms else 10) * u.um**3 / u.ms)
+    # Transport (permeability activates at t=1ms)
+    base_perm = 10 * u.um**3 / u.ms
+    spike = lambda t: 0.0 if t < 1 * u.ms else 1.0
+    t = transport.Passive(permeability=base_perm, temporal=spike)
     interface.add_transport(species=ca, transport=t,
                             source=compartments["top"], target=compartments["bottom"])
 

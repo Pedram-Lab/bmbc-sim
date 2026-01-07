@@ -75,10 +75,13 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
         )
 
     # Time-dependent influx that adds a defined amount of substance
+    # Flux = 6 * t * (1-t) [amol/s], which integrates to 1 amol over 1 second
     variable_influx = simulation.add_species("variable-influx", valence=0)
     cell.initialize_species(variable_influx, 0.2 * mM)
     cell.add_diffusion(variable_influx, 1 * u.um**2 / u.ms)
-    t = transport.GeneralFlux(lambda t: t * (1 * u.s - t) * 6 * u.amol / u.s**3)
+    base_flux = 1 * u.amol / u.s
+    spike = lambda t: 6 * (t / u.s) * (1 - t / u.s)
+    t = transport.GeneralFlux(flux=base_flux, temporal=spike)
     right_membrane.add_transport(
         species=variable_influx, transport=t, source=None, target=cell
     )
