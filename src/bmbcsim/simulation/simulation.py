@@ -11,6 +11,7 @@ import threadpoolctl
 from bmbcsim.logging import logger
 from bmbcsim.simulation.result_io import Recorder
 from bmbcsim.simulation.geometry.compartment import Compartment
+from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from bmbcsim.units import to_simulation_units
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
@@ -65,8 +66,9 @@ class Simulation:
 
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
-        self ._rd_fes: ngs.FESpace = None
-        self ._el_fes: ngs.FESpace = None
+        self._membrane_fes: dict[Membrane, ngs.FESpace] = {}
+        self._rd_fes: ngs.FESpace = None
+        self._el_fes: ngs.FESpace = None
         self._concentrations: dict[ChemicalSpecies, ngs.GridFunction] = {}
         self._pnp: PnpSolver = None
         self._diffusion: dict[ChemicalSpecies, DiffusionSolver] = {}
@@ -224,6 +226,12 @@ class Simulation:
             self._compartment_fes[compartment] = fes
             logger.debug("%s has %d degrees of freedom.", compartment, fes.ndof)
 
+        # Create FE spaces for membranes (surfaces)
+        for membrane in self.simulation_geometry.membranes.values():
+            fes = ngs.Compress(ngs.H1(mesh, order=1, definedon=mesh.Boundaries(membrane.name)))
+            self._membrane_fes[membrane] = fes
+            logger.debug("%s has %d boundary DOFs.", membrane.name, fes.ndof)
+
         # Note that the order of the compartment spaces is the same as the order of compartments
         self._rd_fes = ngs.FESpace([self._compartment_fes[c] for c in compartments])
         logger.info("Total number of degrees of freedom for reaction-diffusion: %d.",
@@ -234,6 +242,41 @@ class Simulation:
                                         + [ngs.FESpace("number", mesh) for _ in compartments])
             logger.info("Total number of degrees of freedom for electrostatics: %d.",
                         self._el_fes.ndof)
+
+        # Convert all CoefficientFields to NGSolve CoefficientFunctions
+        # This must happen after FE spaces are created
+        logger.debug("Converting coefficient fields to CoefficientFunctions...")
+        for compartment in compartments:
+            fes = self._compartment_fes[compartment]
+            coefficients = compartment.coefficients
+            # Get the volume region for this compartment
+            region_names = '|'.join(compartment.get_region_names(full_names=True))
+            volume_region = mesh.Materials(region_names)
+
+            for species, coeff in list(coefficients.initial_conditions.items()):
+                coefficients.initial_conditions[species] = \
+                    coeff.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+            for species, coeff in list(coefficients.diffusion.items()):
+                coefficients.diffusion[species] = \
+                    coeff.to_coefficient_function(volume_region, fes, 'diffusivity')
+
+            for reaction_key, (k_f, k_r) in list(coefficients.reactions.items()):
+                coefficients.reactions[reaction_key] = (
+                    k_f.to_coefficient_function(volume_region, fes, None),
+                    k_r.to_coefficient_function(volume_region, fes, None),
+                )
+
+            if coefficients.permittivity is not None:
+                coefficients.permittivity = \
+                    coefficients.permittivity.to_coefficient_function(volume_region, fes, 'permittivity')
+
+        # Finalize transport coefficients that use spatial fields
+        for membrane in self.simulation_geometry.membranes.values():
+            fes = self._membrane_fes[membrane]
+            boundary_region = mesh.Boundaries(membrane.name)
+            for _, _, _, transport_mech in membrane.get_transport():
+                transport_mech.finalize_coefficients(boundary_region, fes)
 
         # Set up the solution vectors
         for species in self.species:

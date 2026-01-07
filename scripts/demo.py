@@ -31,8 +31,10 @@ cell.add_reaction(
 # 0.2 millimolar per millisecond for the first 5 milliseconds
 membrane = sim.simulation_geometry.membranes["boundary"]
 buffer_substance = 1 * u.mmol / u.l * cell.volume
-flux = lambda t: buffer_substance / (5 * u.ms) if t < 5 * u.ms else 0 * u.mmol / u.ms
-membrane.add_transport(ca, transport.GeneralFlux(flux=flux), source=None, target=cell)
+base_flux = buffer_substance / (5 * u.ms)
+spike = lambda t: 1 if t < 5 * u.ms else 0
+flux = transport.GeneralFlux(flux=base_flux, temporal=spike)
+membrane.add_transport(ca, flux, source=None, target=cell)
 
 # Run the simulation for 10 milliseconds with a time step of 0.1 milliseconds
 # recording a snapshot of all species every 1 millisecond

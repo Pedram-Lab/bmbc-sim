@@ -135,8 +135,10 @@ def test_mechanics_with_dynamic_species(tmp_path):
     cell.initialize_species(ca, 0.0 * mM)
     cell.add_diffusion(ca, 5.0 * u.um**2 / u.ms)
 
-    # Add a source term to increase concentration over time
-    t = transport.GeneralFlux(flux=lambda t: (0.0 if t < 1.0 * u.ms else 1.0) * u.amol / u.ms)
+    # Add a source term to increase concentration over time (step function at t=1ms)
+    base_flux = 1.0 * u.amol / u.ms
+    spike = lambda t: 0.0 if t < 1.0 * u.ms else 1.0
+    t = transport.GeneralFlux(flux=base_flux, temporal=spike)
     influx_bnd.add_transport(species=ca, transport=t, source=None, target=cell)
 
     # Add elasticity and driving species
