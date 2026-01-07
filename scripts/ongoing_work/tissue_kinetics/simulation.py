@@ -198,10 +198,9 @@ target_cell.add_diffusion(ca, DIFFUSIVITY_CYTO)
 const_F = const.e.si * const.N_A  # Faraday constant [C/mol]
 Q = N_CHANNELS * CHANNEL_CURRENT / (2 * const_F)  # [mol/s] across the "permeable" membrane
 
-# Temporal pulse: Q * (t*τ) * exp(-t*τ)
-flux = transport.GeneralFlux(
-    lambda t: Q * (t * TIME_CONSTANT) * math.exp(-t * TIME_CONSTANT)
-)
+# Temporal pulse: flux(t) = Q * (t*τ) * exp(-t*τ)
+pulse = lambda t: (t * TIME_CONSTANT) * math.exp(-t * TIME_CONSTANT)
+flux = transport.GeneralFlux(flux=Q, temporal=pulse)
 
 # Direction: ECS -> permeable cell
 mem_perm.add_transport(ca, flux, ecs, target_cell)
