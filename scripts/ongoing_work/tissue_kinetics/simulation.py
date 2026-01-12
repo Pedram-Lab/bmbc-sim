@@ -79,7 +79,7 @@ print("Max domain size after scaling (in µm):", float(size2.max()))
 print("Target median cell diameter (in µm):", TARGET_CELL_DIAM)
 
 # --- 1e) open ECS by shrinking the cells ---
-ECS_RATIO = 0.2  # volumetric fraction to open ECS gaps
+ECS_RATIO = 0.1  # volumetric fraction to open ECS gaps, yields ~16% ECS
 geometry = geometry.shrink_cells(1 - ECS_RATIO, jitter=0.0)
 print("Cells after shrink:", len(geometry.cells))
 
@@ -166,6 +166,12 @@ geo = sim.simulation_geometry
 ecs = geo.compartments["ecs"]
 target_cell = geo.compartments[cell_names[PERMEABLE_CELLS[0]]]
 mem_perm = geo.membranes["permeable"]
+
+total_volume = ecs.volume + sum(geo.compartments[f"cell_{i}"].volume for i in range(n_cells))
+total_area = sum(geo.membranes[name].area for name in ("impermeable", "permeable"))
+print(f"Total volume of all compartments: {total_volume:.2f} µm^3")
+print(f"Total area of all membranes: {total_area:.2f} µm^2")
+print(f"ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
 
 print(f"Target cell index: {PERMEABLE_CELLS[0]}")
 print(f"Target cell volume: {target_cell.volume:.2f} µm^3")
