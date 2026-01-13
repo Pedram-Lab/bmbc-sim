@@ -56,11 +56,8 @@ class Membrane:
         """
         if source is None and target is None:
             raise ValueError("At least one of source or target must be a compartment.")
-        elif source is None and self.neighbor(target) is not None:
-            raise ValueError(f"'{target}' is not a boundary compartment.")
-        elif target is None and self.neighbor(source) is not None:
-            raise ValueError(f"'{source}' is not a boundary compartment.")
-        elif source is not None and target is not None:
+        # Allow None for internal membranes to create sinks/sources
+        if source is not None and target is not None:
             other = self.neighbor(source)
             if target != other:
                 raise ValueError(f"Membrane {self.name} does not connect "
