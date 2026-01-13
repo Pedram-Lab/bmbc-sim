@@ -11,21 +11,35 @@ import ngsolve as ngs
 import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
+from bmbcsim.simulation import coefficient_fields as cf
 
 # =========== 0) Simulation parameters ===========
 CA_ECS = 1.3 * u.mmol / u.L               # [Ca2+] ECS at rest (1.3 mM)
-CA_CELL0 = 0.0 * u.mmol / u.L             # Initial [Ca2+] in cell (0 mM)
-DIFFUSIVITY_ECS = 0.6 * u.um**2 / u.ms    # Diffusivity in ECS
-DIFFUSIVITY_CYTO = 0.22 * u.um**2 / u.ms  # Diffusivity in cytosol (adjust if needed)
+DIFFUSIVITY_ECS = 0.7 * u.um**2 / u.ms    # Free-solution diffusivity for Ca2+
 
-CHANNEL_CURRENT = 0.5 * u.pA
-N_CHANNELS = 88820
-TIME_CONSTANT = 1.0 / 10.0 / u.ms         # τ = 1 ms^{-1}
-END_TIME = 0.5 * u.s
-TIME_STEP = 1 * u.ms
+# Boundary condition parameters (Robin BC with tortuosity)
+TORTUOSITY = 1.6
+# Permeability reduced by tortuosity factor λ²
+BOUNDARY_PERMEABILITY = (1 / TORTUOSITY**2) * u.um**3 / u.ms  # ≈0.39 µm³/ms
 
-# Index of the permeable cell(s)
-PERMEABLE_CELLS = [29]
+# Synapse parameters - scaled for 20×20×1 µm = 400 µm³
+# 2 synapses/µm³ → 400 × 2 = 800 synapses
+N_SYNAPSES = 800                          # Total synaptic contacts
+N_CHANNELS_PER_SYNAPSE = 35               # NMDARs per synapse
+SYNAPSE_DIAMETER = 0.25 * u.um            # Patch diameter
+F_ACTIVE = 0.15                           # Fraction of active synapses
+I_CHANNEL = 0.5 * u.pA                    # Single channel current (tunable J₀)
+
+# NMDAR kinetics (biexponential)
+TAU1 = 80 * u.ms                          # Slow decay time constant
+TAU2 = 3 * u.ms                           # Fast rise time constant
+
+# Stimulation protocol (5 pulses at 100 Hz)
+PULSE_TIMES_MS = [0, 10, 20, 30, 40]      # Pulse times in ms
+
+# Simulation timing
+END_TIME = 1.0 * u.s
+TIME_STEP = 0.5 * u.ms
 
 # ================================================================
 # 1) Load and post-process geometry from VTK
@@ -126,12 +140,10 @@ if n_cells == 0:
     )
 
 # ================================================================
-# 1g) Cell and membrane names: all impermeable except specified ones
+# 1g) Cell and membrane names: all cells share "membrane" boundary
 # ================================================================
 cell_names = [f"cell_{i}" for i in range(n_cells)]
-bnd_names = ["impermeable"] * n_cells
-for idx in PERMEABLE_CELLS:
-    bnd_names[idx] = "permeable"
+bnd_names = ["membrane"] * n_cells
 
 # ================================================================
 # 1h) Generate NGSolve mesh with unique material and BC names
@@ -162,68 +174,96 @@ geo = sim.simulation_geometry
 # Compartments and membranes created by to_ngs_mesh:
 # - 'ecs' (the volume of the box minus the cells)
 # - 'cell_i' for each cell
-# - membranes with BC name: 'impermeable', 'permeable'
+# - 'membrane' (shared boundary of all cells with ECS)
 ecs = geo.compartments["ecs"]
-target_cell = geo.compartments[cell_names[PERMEABLE_CELLS[0]]]
-mem_perm = geo.membranes["permeable"]
-
-total_volume = ecs.volume + sum(geo.compartments[f"cell_{i}"].volume for i in range(n_cells))
-total_area = sum(geo.membranes[name].area for name in ("impermeable", "permeable"))
-print(f"Total volume of all compartments: {total_volume:.2f} µm^3")
-print(f"Total area of all membranes: {total_area:.2f} µm^2")
-print(f"ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
-
-print(f"Target cell index: {PERMEABLE_CELLS[0]}")
-print(f"Target cell volume: {target_cell.volume:.2f} µm^3")
-print(f"Target cell surface area: {mem_perm.area:.2f} µm^2")
+membrane = geo.membranes["membrane"]
 
 total_cell_volume = sum(geo.compartments[f"cell_{i}"].volume for i in range(n_cells))
-ecs_volume = ecs.volume
-print(f"Total volume: {total_cell_volume + ecs_volume:.2f} µm^3")
+total_volume = ecs.volume + total_cell_volume
+print(f"Total volume: {total_volume:.2f} µm^3")
+print(f"ECS volume: {ecs.volume:.2f} µm^3")
+print(f"ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
+print(f"Total membrane area: {membrane.area:.2f} µm^2")
 
 # ================================================================
 # 3) Species and initialization
 # ================================================================
 ca = sim.add_species("Ca")
-
-# Permeable cell at 0 mM (if already initialized, ignore error)
-target_cell.initialize_species(ca, CA_CELL0)
-# Before adding diffusion
 ecs.initialize_species(ca, CA_ECS)
+
+# Initialize cells at 0 to make system well-defined
+for i in range(n_cells):
+    cell = geo.compartments[f"cell_{i}"]
+    cell.initialize_species(ca, 0.0 * u.mmol / u.L)
 
 # ================================================================
 # 4) Diffusion
 # ================================================================
 ecs.add_diffusion(ca, DIFFUSIVITY_ECS)
-target_cell.add_diffusion(ca, DIFFUSIVITY_CYTO)
+
+# Add diffusion to cells (required for well-posed FEM system)
+DIFFUSIVITY_CYTO = 0.22 * u.um**2 / u.ms
+for i in range(n_cells):
+    cell = geo.compartments[f"cell_{i}"]
+    cell.add_diffusion(ca, DIFFUSIVITY_CYTO)
 
 # ================================================================
-# 5) Transport across 'permeable' membrane
+# 5) Ca2+ sink at distributed synapse patches
 # ================================================================
 # Q = N * I / (2 F)  (factor 2 for Ca2+)
 const_F = const.e.si * const.N_A  # Faraday constant [C/mol]
-Q = N_CHANNELS * CHANNEL_CURRENT / (2 * const_F)  # [mol/s] across the "permeable" membrane
+Q_per_synapse = N_CHANNELS_PER_SYNAPSE * I_CHANNEL / (2 * const_F)
 
-# Temporal pulse: flux(t) = Q * (t*τ) * exp(-t*τ)
-pulse = lambda t: (t * TIME_CONSTANT) * math.exp(-t * TIME_CONSTANT)
-flux = transport.GeneralFlux(flux=Q, temporal=pulse)
+# Number of active synapses (15% of total)
+n_active = int(N_SYNAPSES * F_ACTIVE)
+print(f"Active synapses: {n_active} (of {N_SYNAPSES} total)")
 
-# Direction: ECS -> permeable cell
-mem_perm.add_transport(ca, flux, ecs, target_cell)
+# Biexponential NMDAR waveform with multi-pulse stimulation
+def nmdar_waveform(t):
+    """
+    Biexponential NMDAR current: J(t) = e^(-t/τ₁) - e^(-t/τ₂)
+    Superposition of 5 pulses at 100 Hz (0, 10, 20, 30, 40 ms)
+    """
+    total = 0.0
+    t_ms = t.to(u.ms).value
+    tau1_ms = TAU1.to(u.ms).value
+    tau2_ms = TAU2.to(u.ms).value
+
+    for t_pulse in PULSE_TIMES_MS:
+        dt = t_ms - t_pulse
+        if dt >= 0:
+            total += math.exp(-dt / tau1_ms) - math.exp(-dt / tau2_ms)
+
+    return total
+
+# Distributed synapse patches using LocalizedPeaks
+# peak_width ≈ diameter/6 for effective 3σ coverage
+peak_width = SYNAPSE_DIAMETER / 6.0
+synapse_distribution = cf.LocalizedPeaks(
+    seed=0,
+    num_peaks=n_active,
+    peak_value=Q_per_synapse,
+    background_value=0.0 * u.mol / u.s,
+    peak_width=peak_width
+)
+
+# Ca2+ flux from ECS through membrane (sink - no target compartment)
+synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
+membrane.add_transport(ca, synapse_flux, ecs, None)
 
 # ================================================================
-# 6) Transport from external reservoir into ECS
+# 6) Robin BC: transport from external reservoir into ECS
 # ================================================================
-# Simple passive flux to maintain ECS concentration
-flux = transport.Passive(1 * u.um ** 3 / u.ms, CA_ECS)
+# Permeability accounts for tortuosity: P_eff = D_eff / L_char
+# where D_eff = D / λ² and λ = 1.6
+boundary_flux = transport.Passive(BOUNDARY_PERMEABILITY, CA_ECS)
 
-# Direction: ECS -> permeable cell
 for bnd in ["top", "bottom", "left", "right", "front", "back"]:
     boundary = geo.membranes[bnd]
-    boundary.add_transport(ca, flux, None, ecs)
+    boundary.add_transport(ca, boundary_flux, None, ecs)
 
 # ================================================================
 # 7) Run simulation
 # ================================================================
-sim.run(end_time=END_TIME, time_step=TIME_STEP, n_threads=4)
+sim.run(end_time=END_TIME, time_step=TIME_STEP, record_interval=10 * TIME_STEP, n_threads=4)
 print("Simulation completed.")
