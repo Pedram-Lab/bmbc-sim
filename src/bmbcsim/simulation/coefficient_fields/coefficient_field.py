@@ -14,6 +14,35 @@ from scipy.interpolate import RBFInterpolator
 from bmbcsim.units import to_simulation_units
 
 
+def _normalize_field(
+    gf: ngs.GridFunction,
+    region: ngs.Region,
+    target: u.Quantity | None,
+) -> ngs.CoefficientFunction:
+    """Optionally normalize a GridFunction to achieve a target integral.
+
+    :param gf: The generated GridFunction to normalize.
+    :param region: The NGSolve region for integration.
+    :param target: Target integral value, or None to skip normalization.
+    :returns: The (possibly scaled) CoefficientFunction.
+    """
+    if target is None:
+        return gf
+
+    integral = ngs.Integrate(gf, region.mesh, definedon=region)
+
+    if abs(integral) < 1e-15:
+        raise ValueError(
+            f"Cannot normalize: field has near-zero integral ({integral}). "
+            "Check that the coefficient produces non-trivial values."
+        )
+
+    target_sim = to_simulation_units(target, None)
+    scale_factor = target_sim / integral
+
+    return scale_factor * gf
+
+
 class Coefficient(ABC):
     """Abstract base class for coefficient fields.
 
@@ -124,16 +153,20 @@ class NodalNoise(Coefficient):
         self,
         value_range: tuple[u.Quantity, u.Quantity],
         seed: int = 0,
+        total: u.Quantity | None = None,
     ):
         """Initialize a nodal noise field.
 
         :param value_range: (min_value, max_value) tuple with units.
         :param seed: Random seed for reproducibility (default is 0).
+        :param total: Optional target integral. When provided, the field is scaled
+            so its integral over the region equals this value.
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
         self._seed = seed
         self._value_range = value_range
+        self._total = total
 
     def to_coefficient_function(
         self,
@@ -141,14 +174,13 @@ class NodalNoise(Coefficient):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        del region  # Unused - DOFs come from fes
         rng = np.random.default_rng(self._seed)
         min_val = to_simulation_units(self._value_range[0], unit_name)
         max_val = to_simulation_units(self._value_range[1], unit_name)
 
         gf = ngs.GridFunction(fes)
         gf.vec.FV().NumPy()[:] = rng.uniform(min_val, max_val, size=fes.ndof)
-        return gf
+        return _normalize_field(gf, region, self._total)
 
     @property
     def seed(self) -> int:
@@ -173,18 +205,22 @@ class SmoothNoise(Coefficient):
         value_range: tuple[u.Quantity, u.Quantity],
         correlation_length: u.Quantity,
         seed: int = 0,
+        total: u.Quantity | None = None,
     ):
         """Initialize a smooth random field.
 
         :param value_range: (min_value, max_value) tuple with units.
         :param correlation_length: Spatial scale of variations (e.g., 5 * u.um).
         :param seed: Random seed for reproducibility (default is 0).
+        :param total: Optional target integral. When provided, the field is scaled
+            so its integral over the region equals this value.
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
         self._seed = seed
         self._value_range = value_range
         self._correlation_length = correlation_length
+        self._total = total
 
     def to_coefficient_function(
         self,
@@ -226,7 +262,7 @@ class SmoothNoise(Coefficient):
         gf = ngs.GridFunction(fes)
         interpolated = np.clip(rbf(dof_coords), min_val, max_val)
         gf.vec.FV().NumPy()[:] = interpolated
-        return gf
+        return _normalize_field(gf, region, self._total)
 
     @property
     def seed(self) -> int:
@@ -259,6 +295,7 @@ class LocalizedPeaks(Coefficient):
         background_value: u.Quantity,
         peak_width: u.Quantity,
         seed: int = 0,
+        total: u.Quantity | None = None,
     ):
         """Initialize a localized peaks field.
 
@@ -267,6 +304,8 @@ class LocalizedPeaks(Coefficient):
         :param background_value: Baseline value away from peaks.
         :param peak_width: Standard deviation (width) of Gaussian peaks.
         :param seed: Random seed for reproducibility (default is 0).
+        :param total: Optional target integral. When provided, the field is scaled
+            so its integral over the region equals this value.
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -276,6 +315,7 @@ class LocalizedPeaks(Coefficient):
         self._background_value = background_value
         self._peak_width = peak_width
         self._peak_node_indices: np.ndarray | None = None
+        self._total = total
 
     def to_coefficient_function(
         self,
@@ -310,7 +350,7 @@ class LocalizedPeaks(Coefficient):
             values += height * np.exp(-dist_sq / (2 * width ** 2))
 
         gf.vec.FV().NumPy()[:] = values
-        return gf
+        return _normalize_field(gf, region, self._total)
 
     @property
     def seed(self) -> int:
