@@ -143,7 +143,7 @@ if n_cells == 0:
 # 1g) Cell and membrane names: all cells share "membrane" boundary
 # ================================================================
 cell_names = [f"cell_{i}" for i in range(n_cells)]
-bnd_names = ["membrane"] * n_cells
+bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
 # ================================================================
 # 1h) Generate NGSolve mesh with unique material and BC names
@@ -176,14 +176,16 @@ geo = sim.simulation_geometry
 # - 'cell_i' for each cell
 # - 'membrane' (shared boundary of all cells with ECS)
 ecs = geo.compartments["ecs"]
-membrane = geo.membranes["membrane"]
+cells = [geo.compartments[f"cell_{i}"] for i in range(n_cells)]
+membranes = [geo.membranes[f"membrane_{i}"] for i in range(n_cells)]
 
-total_cell_volume = sum(geo.compartments[f"cell_{i}"].volume for i in range(n_cells))
+total_cell_volume = sum(cell.volume for cell in cells)
 total_volume = ecs.volume + total_cell_volume
+total_membrane_area = sum(membrane.area for membrane in membranes)
 print(f"Total volume: {total_volume:.2f} µm^3")
 print(f"ECS volume: {ecs.volume:.2f} µm^3")
 print(f"ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
-print(f"Total membrane area: {membrane.area:.2f} µm^2")
+print(f"Total membrane area: {total_membrane_area:.2f} µm^2")
 
 # ================================================================
 # 3) Species and initialization
@@ -192,8 +194,7 @@ ca = sim.add_species("Ca")
 ecs.initialize_species(ca, CA_ECS)
 
 # Initialize cells at 0 to make system well-defined
-for i in range(n_cells):
-    cell = geo.compartments[f"cell_{i}"]
+for cell in cells:
     cell.initialize_species(ca, 0.0 * u.mmol / u.L)
 
 # ================================================================
@@ -203,8 +204,7 @@ ecs.add_diffusion(ca, DIFFUSIVITY_ECS)
 
 # Add diffusion to cells (required for well-posed FEM system)
 DIFFUSIVITY_CYTO = 0.22 * u.um**2 / u.ms
-for i in range(n_cells):
-    cell = geo.compartments[f"cell_{i}"]
+for cell in cells:
     cell.add_diffusion(ca, DIFFUSIVITY_CYTO)
 
 # ================================================================
@@ -215,8 +215,8 @@ const_F = const.e.si * const.N_A  # Faraday constant [C/mol]
 Q_per_synapse = N_CHANNELS_PER_SYNAPSE * I_CHANNEL / (2 * const_F)
 
 # Number of active synapses (15% of total)
-n_active = int(N_SYNAPSES * F_ACTIVE)
-print(f"Active synapses: {n_active} (of {N_SYNAPSES} total)")
+n_synapses_per_cell = int(N_SYNAPSES * F_ACTIVE / n_cells)
+print(f"Active synapses: {n_synapses_per_cell * n_cells} (of {N_SYNAPSES} total)")
 
 # Biexponential NMDAR waveform with multi-pulse stimulation
 def nmdar_waveform(t):
@@ -241,16 +241,17 @@ def nmdar_waveform(t):
 peak_width = SYNAPSE_DIAMETER / 6.0
 synapse_distribution = cf.LocalizedPeaks(
     seed=0,
-    num_peaks=n_active,
+    num_peaks=n_synapses_per_cell,
     peak_value=Q_per_synapse,
     background_value=0.0 * u.mol / u.s,
     peak_width=peak_width,
-    total=n_active * Q_per_synapse
+    total=n_synapses_per_cell * Q_per_synapse
 )
 
 # Ca2+ flux from ECS through membrane (sink - no target compartment)
 synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
-membrane.add_transport(ca, synapse_flux, ecs, None)
+for membrane, cell in zip(membranes, cells):
+    membrane.add_transport(ca, synapse_flux, ecs, cell)
 
 # ================================================================
 # 6) Robin BC: transport from external reservoir into ECS
