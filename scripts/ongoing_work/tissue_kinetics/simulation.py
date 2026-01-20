@@ -236,21 +236,19 @@ def nmdar_waveform(t):
 
     return total
 
+# Ca2+ flux from ECS through membrane (sink - no target compartment)
 # Distributed synapse patches using LocalizedPeaks
 # peak_width ≈ diameter/6 for effective 3σ coverage
-peak_width = SYNAPSE_DIAMETER / 6.0
-synapse_distribution = cf.LocalizedPeaks(
-    seed=0,
-    num_peaks=n_synapses_per_cell,
-    peak_value=Q_per_synapse,
-    background_value=0.0 * u.mol / u.s,
-    peak_width=peak_width,
-    total=n_synapses_per_cell * Q_per_synapse
-)
-
-# Ca2+ flux from ECS through membrane (sink - no target compartment)
-synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
 for membrane, cell in zip(membranes, cells):
+    synapse_distribution = cf.LocalizedPeaks(
+        seed=0,
+        num_peaks=n_synapses_per_cell,
+        peak_value=Q_per_synapse,
+        background_value=0.0 * u.mol / u.s,
+        peak_width=SYNAPSE_DIAMETER / 6.0,
+        total=n_synapses_per_cell * Q_per_synapse
+    )
+    synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
     membrane.add_transport(ca, synapse_flux, ecs, cell)
 
 # ================================================================
