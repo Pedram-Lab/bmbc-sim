@@ -39,7 +39,7 @@ PULSE_TIMES_MS = [0, 10, 20, 30, 40]      # Pulse times in ms
 
 # Simulation timing
 END_TIME = 1.0 * u.s
-TIME_STEP = 0.5 * u.ms
+TIME_STEP = 1.0 * u.ms
 
 # ================================================================
 # 1) Load and post-process geometry from VTK
@@ -244,7 +244,8 @@ synapse_distribution = cf.LocalizedPeaks(
     num_peaks=n_active,
     peak_value=Q_per_synapse,
     background_value=0.0 * u.mol / u.s,
-    peak_width=peak_width
+    peak_width=peak_width,
+    total=n_active * Q_per_synapse
 )
 
 # Ca2+ flux from ECS through membrane (sink - no target compartment)
