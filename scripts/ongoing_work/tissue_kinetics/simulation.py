@@ -35,7 +35,7 @@ TAU1 = 80 * u.ms                          # Slow decay time constant
 TAU2 = 3 * u.ms                           # Fast rise time constant
 
 # Stimulation protocol (5 pulses at 100 Hz)
-PULSE_TIMES_MS = [0, 10, 20, 30, 40]      # Pulse times in ms
+PULSE_TIMES = [0, 10, 20, 30, 40] * u.ms  # Pulse times in ms
 
 # Simulation timing
 END_TIME = 1.0 * u.s
@@ -225,14 +225,11 @@ def nmdar_waveform(t):
     Superposition of 5 pulses at 100 Hz (0, 10, 20, 30, 40 ms)
     """
     total = 0.0
-    t_ms = t.to(u.ms).value
-    tau1_ms = TAU1.to(u.ms).value
-    tau2_ms = TAU2.to(u.ms).value
 
-    for t_pulse in PULSE_TIMES_MS:
-        dt = t_ms - t_pulse
-        if dt >= 0:
-            total += math.exp(-dt / tau1_ms) - math.exp(-dt / tau2_ms)
+    for t_pulse in PULSE_TIMES:
+        dt = t - t_pulse
+        if dt >= 0 * u.ms:
+            total += math.exp(-dt / TAU1) - math.exp(-dt / TAU2)
 
     return total
 
