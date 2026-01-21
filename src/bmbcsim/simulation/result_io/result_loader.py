@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Sequence
 import xml.etree.ElementTree as ET
 
@@ -48,11 +49,12 @@ class ResultLoader:
             provided, the latest folder is returned.
         :returns: The result loader instance for the found folder.
         """
-        # Search for folders that contain results for the given simulation name
+        # Search for folders matching "{simulation_name}_YYYY-MM-DD-hhmmss" pattern
+        pattern = re.compile(re.escape(simulation_name) + r"_\d{4}-\d{2}-\d{2}-\d{6}$")
         result_folders = [
             d
             for d in os.listdir(results_root)
-            if d.startswith(simulation_name) and os.path.isdir(os.path.join(results_root, d))
+            if pattern.match(d) and os.path.isdir(os.path.join(results_root, d))
         ]
         if not result_folders:
             raise RuntimeError(
