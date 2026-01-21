@@ -122,11 +122,11 @@ class DiffusionSolver:
                 trg_c, trg_trial, trg_test = select_i(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
-                flux = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
+                # Note: area normalization is handled in Transport.finalize_coefficients
+                flux_density = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
 
-                if flux is not None:
-                    area = to_simulation_units(membrane.area, 'area')
-                    flux_density = (flux / area).Compile()
+                if flux_density is not None:
+                    flux_density = flux_density.Compile()
                     ds = ngs.ds(membrane.name)
                     if src_trial is not None:
                         transport_term += -flux_density * src_test * ds
@@ -156,11 +156,11 @@ class DiffusionSolver:
                 trg_c, trg_test = select_e(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
-                flux = transport.flux_rhs(src_c, trg_c)
+                # Note: area normalization is handled in Transport.finalize_coefficients
+                flux_density = transport.flux_rhs(src_c, trg_c)
 
-                if flux is not None:
-                    area = to_simulation_units(membrane.area, 'area')
-                    flux_density = (flux / area).Compile()
+                if flux_density is not None:
+                    flux_density = flux_density.Compile()
                     ds = ngs.ds(membrane.name)
                     if src_test is not None:
                         source_term += -flux_density * src_test * ds

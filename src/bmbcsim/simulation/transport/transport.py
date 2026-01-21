@@ -5,6 +5,7 @@ import ngsolve as ngs
 import astropy.units as u
 
 import bmbcsim.simulation.coefficient_fields as cf
+from bmbcsim.units import to_simulation_units
 
 
 TransportCoefficient = u.Quantity | cf.Coefficient
@@ -90,7 +91,12 @@ class Transport(abc.ABC):
             parameter.Set(new_value)
 
 
-    def finalize_coefficients(self, region: ngs.Region, fes: ngs.FESpace) -> None:
+    def finalize_coefficients(
+            self,
+            region: ngs.Region,
+            fes: ngs.FESpace,
+            membrane_area: u.Quantity
+    ) -> None:
         """Convert deferred spatial coefficients to CoefficientFunctions.
 
         Called during simulation setup after membrane FE spaces are created.
@@ -99,10 +105,19 @@ class Transport(abc.ABC):
 
         :param region: The NGSolve region (typically a boundary region).
         :param fes: The finite element space for this membrane.
+        :param membrane_area: The area of the membrane for flux normalization.
         """
+        area = to_simulation_units(membrane_area, 'area')
+
         for attr_name, spec in list(self._coefficient_specs.items()):
             field, physical_name, temporal = spec
             spatial_cf = field.to_coefficient_function(region, fes, physical_name)
+
+            # Normalize flux-like coefficients by membrane area if needed
+            # "catalytic activity" (mol/s) and "volumetric flow rate" (µm³/s) are total fluxes
+            is_flux_quantity = physical_name in ("catalytic activity", "volumetric flow rate")
+            if is_flux_quantity and field.needs_area_normalization:
+                spatial_cf = spatial_cf / area
 
             if temporal is not None:
                 # Multiply by time-dependent parameter

@@ -51,6 +51,11 @@ class Coefficient(ABC):
     Subclasses implement specific field generation strategies.
     """
 
+    # Whether this coefficient needs to be divided by membrane area when used
+    # as a flux. True for total flux values (mol/s), False for flux densities
+    # where the integral already equals the target total.
+    needs_area_normalization: bool = True
+
     @abstractmethod
     def to_coefficient_function(
         self,
@@ -167,6 +172,7 @@ class NodalNoise(Coefficient):
         self._seed = seed
         self._value_range = value_range
         self._total = total
+        self.needs_area_normalization = (total is None)
 
     def to_coefficient_function(
         self,
@@ -221,6 +227,7 @@ class SmoothNoise(Coefficient):
         self._value_range = value_range
         self._correlation_length = correlation_length
         self._total = total
+        self.needs_area_normalization = (total is None)
 
     def to_coefficient_function(
         self,
@@ -316,6 +323,7 @@ class LocalizedPeaks(Coefficient):
         self._peak_width = peak_width
         self._peak_node_indices: np.ndarray | None = None
         self._total = total
+        self.needs_area_normalization = (total is None)
 
     def to_coefficient_function(
         self,

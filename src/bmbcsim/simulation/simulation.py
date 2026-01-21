@@ -276,7 +276,7 @@ class Simulation:
             fes = self._membrane_fes[membrane]
             boundary_region = mesh.Boundaries(membrane.name)
             for _, _, _, transport_mech in membrane.get_transport():
-                transport_mech.finalize_coefficients(boundary_region, fes)
+                transport_mech.finalize_coefficients(boundary_region, fes, membrane.area)
 
         # Set up the solution vectors
         for species in self.species:
