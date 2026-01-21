@@ -9,6 +9,7 @@ import xarray as xr
 
 import bmbcsim
 from bmbcsim.simulation import transport
+from bmbcsim.simulation import coefficient_fields as cf
 from bmbcsim.units import mM
 
 
@@ -74,16 +75,33 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
             species=constant_influx, transport=t, source=None, target=cell
         )
 
+    # Constant influx with a spatially distributed flux
+    spatial_influx = simulation.add_species("spatial-influx", valence=0)
+    cell.initialize_species(spatial_influx, 0.3 * mM)
+    cell.add_diffusion(spatial_influx, 1 * u.um**2 / u.ms)
+    coeff = cf.LocalizedPeaks(
+        seed=0,
+        num_peaks=1,
+        peak_value=1.0 * u.amol / u.s,
+        background_value=0.0 * u.amol / u.s,
+        peak_width=0.2 * u.um,
+        total=1.0 * u.amol / u.s,
+    )
+    t = transport.GeneralFlux(flux=coeff)
+    right_membrane.add_transport(
+        species=spatial_influx, transport=t, source=None, target=cell
+    )
+
     # Time-dependent influx that adds a defined amount of substance
     # Flux = 6 * t * (1-t) [amol/s], which integrates to 1 amol over 1 second
-    variable_influx = simulation.add_species("variable-influx", valence=0)
-    cell.initialize_species(variable_influx, 0.2 * mM)
-    cell.add_diffusion(variable_influx, 1 * u.um**2 / u.ms)
+    temporal_influx = simulation.add_species("temporal-influx", valence=0)
+    cell.initialize_species(temporal_influx, 0.2 * mM)
+    cell.add_diffusion(temporal_influx, 1 * u.um**2 / u.ms)
     base_flux = 1 * u.amol / u.s
     spike = lambda t: 6 * (t / u.s) * (1 - t / u.s)
     t = transport.GeneralFlux(flux=base_flux, temporal=spike)
     right_membrane.add_transport(
-        species=variable_influx, transport=t, source=None, target=cell
+        species=temporal_influx, transport=t, source=None, target=cell
     )
 
     # Run the simulation
@@ -118,9 +136,13 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
         assert influx_results.isel(time=0) == pytest.approx(0.1)
         assert influx_results.isel(time=-1) == pytest.approx(1 / width + 0.1, rel=1e-3)
 
-        limited_influx_results = point_values.sel(species="variable-influx")
-        assert limited_influx_results.isel(time=0) == pytest.approx(0.2)
-        assert limited_influx_results.isel(time=-1) == pytest.approx(
+        spatial_results = point_values.sel(species="spatial-influx")
+        assert spatial_results.isel(time=0) == pytest.approx(0.3)
+        assert spatial_results.isel(time=-1) == pytest.approx(1 / width + 0.3, rel=1e-3)
+
+        temporal_results = point_values.sel(species="temporal-influx")
+        assert temporal_results.isel(time=0) == pytest.approx(0.2)
+        assert temporal_results.isel(time=-1) == pytest.approx(
             1 / width + 0.2, rel=1e-3
         )
 
@@ -147,15 +169,21 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
         influx_results = total_substance.sel(species="constant-influx", region=region)
         assert influx_results.isel(time=0) == pytest.approx(0.1 * width)
         assert influx_results.isel(time=-1) == pytest.approx(
-            (1 / width + 0.1) * width, rel=1e-3
+            1 + 0.1 * width, rel=1e-3
         )
 
-        limited_influx_results = total_substance.sel(
-            species="variable-influx", region=region
+        spatial_results = total_substance.sel(species="spatial-influx", region=region)
+        assert spatial_results.isel(time=0) == pytest.approx(0.3 * width)
+        assert spatial_results.isel(time=-1) == pytest.approx(
+            1 + 0.3 * width, rel=1e-3
         )
-        assert limited_influx_results.isel(time=0) == pytest.approx(0.2 * width)
-        assert limited_influx_results.isel(time=-1) == pytest.approx(
-            (1 / width + 0.2) * width, rel=1e-3
+
+        temporal_results = total_substance.sel(
+            species="temporal-influx", region=region
+        )
+        assert temporal_results.isel(time=0) == pytest.approx(0.2 * width)
+        assert temporal_results.isel(time=-1) == pytest.approx(
+            1 + 0.2 * width, rel=1e-3
         )
 
     if visualize:
@@ -164,7 +192,8 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
             "too-high",
             "deplete",
             "constant-influx",
-            "variable-influx",
+            "spatial-influx",
+            "temporal-influx",
         ]
         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, gridspec_kw={"wspace": 0})
         fig.suptitle(f"Volume: {cell.volume}")
@@ -179,7 +208,7 @@ def test_fluxes_from_to_outside(tmp_path, width, visualize=False, skip_assert=Fa
         ax1.legend()
 
         for s in species:
-            ax2.plot(time / 1000, point_values.sel(species=s).T, label=s)
+            ax2.plot(time / 1000, total_substance.sel(species=s, region=region).T, label=s)
         ax2.set_xlabel("Time [s]")
         ax2.set_title("Substance [amol]")
         ax2.grid(True)
