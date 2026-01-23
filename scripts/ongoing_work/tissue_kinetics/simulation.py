@@ -23,8 +23,8 @@ TORTUOSITY = 1.6
 BOUNDARY_PERMEABILITY = (1 / TORTUOSITY**2) * u.um**3 / u.ms  # ≈0.39 µm³/ms
 
 # Synapse parameters - scaled for 20×20×1 µm = 400 µm³
-# 2 synapses/µm³ → 400 × 2 = 800 synapses
-N_SYNAPSES = 800                          # Total synaptic contacts
+# 1 synapse/µm³ → 400 synapses
+N_SYNAPSES = 400                          # Total synaptic contacts
 N_CHANNELS_PER_SYNAPSE = 35               # NMDARs per synapse
 SYNAPSE_DIAMETER = 0.25 * u.um            # Patch diameter
 F_ACTIVE = 0.15                           # Fraction of active synapses
@@ -214,9 +214,18 @@ for cell in cells:
 const_F = const.e.si * const.N_A  # Faraday constant [C/mol]
 Q_per_synapse = N_CHANNELS_PER_SYNAPSE * I_CHANNEL / (2 * const_F)
 
-# Number of active synapses (15% of total)
-n_synapses_per_cell = int(N_SYNAPSES * F_ACTIVE / n_cells)
-print(f"Active synapses: {n_synapses_per_cell * n_cells} (of {N_SYNAPSES} total)")
+# Number of active synapses (15% of total), distributed randomly across cells
+total_active_synapses = int(N_SYNAPSES * F_ACTIVE)
+base_synapses_per_cell = total_active_synapses // n_cells
+remainder = total_active_synapses % n_cells
+
+# Randomly select which cells get an extra synapse
+rng = np.random.default_rng(seed=42)
+cells_with_extra = rng.choice(n_cells, size=remainder, replace=False)
+synapses_per_cell = np.full(n_cells, base_synapses_per_cell)
+synapses_per_cell[cells_with_extra] += 1
+
+print(f"Active synapses: {synapses_per_cell.sum()} (of {N_SYNAPSES} total)")
 
 # Biexponential NMDAR waveform with multi-pulse stimulation
 def nmdar_waveform(t):
@@ -236,14 +245,18 @@ def nmdar_waveform(t):
 # Ca2+ flux from ECS through membrane (sink - no target compartment)
 # Distributed synapse patches using LocalizedPeaks
 # peak_width ≈ diameter/6 for effective 3σ coverage
-for membrane, cell in zip(membranes, cells):
+for i, (membrane, cell) in enumerate(zip(membranes, cells)):
+    n_syn = synapses_per_cell[i]
+    if n_syn == 0:
+        continue
+
     synapse_distribution = cf.LocalizedPeaks(
         seed=0,
-        num_peaks=n_synapses_per_cell,
+        num_peaks=n_syn,
         peak_value=Q_per_synapse,
         background_value=0.0 * u.mol / u.s,
         peak_width=SYNAPSE_DIAMETER / 6.0,
-        total=n_synapses_per_cell * Q_per_synapse
+        total=n_syn * Q_per_synapse
     )
     synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
     membrane.add_transport(ca, synapse_flux, ecs, cell)
