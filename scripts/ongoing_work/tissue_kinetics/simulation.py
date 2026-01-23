@@ -30,8 +30,8 @@ SYNAPSE_DIAMETER = 0.25 * u.um            # Patch diameter
 F_ACTIVE = 0.15                           # Fraction of active synapses
 I_CHANNEL = 0.5 * u.pA                    # Single channel current (tunable J₀)
 
-# NMDAR kinetics (biexponential)
-TAU1 = 80 * u.ms                          # Slow decay time constant
+# NMDAR kinetics (biexponential - parameters chosen to match pulse from [Rusakov & Fine, 2003])
+TAU1 = 10 * u.ms                          # Slow decay time constant
 TAU2 = 3 * u.ms                           # Fast rise time constant
 
 # Stimulation protocol (5 pulses at 100 Hz)
