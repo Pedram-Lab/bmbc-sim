@@ -11,6 +11,7 @@ authors = [
 ]
 dependencies = [
   'astropy',
+  'h5py',
   'jupyter',
   'matplotlib',
   'networkx',
