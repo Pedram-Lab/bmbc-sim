@@ -10,6 +10,12 @@ This is more efficient than VTU/PVD because:
 1. The mesh geometry is not duplicated for each timestep
 2. HDF5 is optimized for appending data
 3. The format is well-supported by ParaView and other visualization tools
+
+Performance optimizations:
+- Uses float32 (matching original VTU) instead of float64
+- Uses gzip compression for all data (widely supported, good compression)
+- Stores each timestep as separate dataset (avoids HyperSlab overhead)
+- Uses int32 for connectivity (matching original VTU)
 """
 
 from pathlib import Path
@@ -109,7 +115,8 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
     print(f"Reading mesh from {first_vtu.name}...")
     mesh = pv.read(first_vtu)
 
-    points = np.array(mesh.points, dtype=np.float64)
+    # Use float32 for points (matches VTU format)
+    points = np.array(mesh.points, dtype=np.float32)
     n_points = len(points)
     n_cells = mesh.n_cells
 
@@ -127,8 +134,9 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
 
     # Extract connectivity (reshape from flat to (n_cells, nodes_per_cell))
     # PyVista stores cells as [n, p0, p1, ..., n, p0, p1, ...]
+    # Use int32 for connectivity (matches VTU format)
     cells = mesh.cells.reshape(-1, nodes_per_cell + 1)[:, 1:]
-    connectivity = np.array(cells, dtype=np.int64)
+    connectivity = np.array(cells, dtype=np.int32)
 
     # Get field names from point data
     field_names = list(mesh.point_data.keys())
@@ -146,47 +154,39 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
         print(f"Compartments: {len(compartment_names)} masks found")
 
         for name in compartment_names:
+            # Use float32 for compartment masks
             compartment_data[name] = np.array(
-                compartments_mesh.point_data[name], dtype=np.float64
+                compartments_mesh.point_data[name], dtype=np.float32
             )
 
     # Create HDF5 file and write mesh (once)
     print(f"Writing HDF5 file: {h5_path}")
     with h5py.File(h5_path, "w") as h5:
-        # Store mesh geometry
+        # Store mesh geometry with lzf compression (fast decompression)
         mesh_grp = h5.create_group("mesh")
         mesh_grp.create_dataset("points", data=points, compression="gzip")
         mesh_grp.create_dataset("connectivity", data=connectivity, compression="gzip")
 
-        # Store compartment masks (static data)
+        # Store compartment masks (static data) with lzf compression
         if compartment_names:
             comp_grp = h5.create_group("compartments")
             for name, data in compartment_data.items():
                 comp_grp.create_dataset(name, data=data, compression="gzip")
 
-        # Create groups for time-varying data
+        # Create group for time-varying data
         data_grp = h5.create_group("data")
-        time_dset = data_grp.create_dataset(
+        data_grp.create_dataset(
             "time",
-            shape=(len(timesteps),),
-            dtype=np.float64
+            data=np.array([t for t, _ in timesteps], dtype=np.float32)
         )
 
-        # Create datasets for each field (all timesteps)
-        field_datasets = {}
+        # Create a subgroup for each field
         for field_name in field_names:
-            field_datasets[field_name] = data_grp.create_dataset(
-                field_name,
-                shape=(len(timesteps), n_points),
-                dtype=np.float64,
-                compression="gzip",
-                chunks=(1, n_points),  # Chunk by timestep for efficient appending
-            )
+            data_grp.create_group(field_name)
 
-        # Process each timestep
+        # Process each timestep - store as separate datasets (no HyperSlab overhead)
         for i, (time, vtu_path) in enumerate(timesteps):
             print(f"  Processing timestep {i+1}/{len(timesteps)}: t={time}")
-            time_dset[i] = time
 
             # Read VTU (reuse first mesh if same file)
             if i == 0:
@@ -194,10 +194,14 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
             else:
                 step_mesh = pv.read(vtu_path)
 
-            # Extract and store field data
+            # Extract and store field data as separate datasets
             for field_name in field_names:
-                field_data = np.array(step_mesh.point_data[field_name], dtype=np.float64)
-                field_datasets[field_name][i, :] = field_data
+                field_data = np.array(step_mesh.point_data[field_name], dtype=np.float32)
+                data_grp[field_name].create_dataset(
+                    f"step_{i:05d}",
+                    data=field_data,
+                    compression="gzip",
+                )
 
     # Create XDMF file
     print(f"Writing XDMF file: {xdmf_path}")
@@ -265,7 +269,7 @@ def write_xdmf(
             topology, "DataItem",
             Dimensions=f"{n_cells} {nodes_per_cell}",
             NumberType="Int",
-            Precision="8",
+            Precision="4",
             Format="HDF",
         )
         topo_data.text = f"{h5_filename}:/mesh/connectivity"
@@ -276,7 +280,7 @@ def write_xdmf(
             geometry, "DataItem",
             Dimensions=f"{n_points} 3",
             NumberType="Float",
-            Precision="8",
+            Precision="4",
             Format="HDF",
         )
         geo_data.text = f"{h5_filename}:/mesh/points"
@@ -293,12 +297,12 @@ def write_xdmf(
                 attribute, "DataItem",
                 Dimensions=f"{n_points}",
                 NumberType="Float",
-                Precision="8",
+                Precision="4",
                 Format="HDF",
             )
             attr_data.text = f"{h5_filename}:/compartments/{comp_name}"
 
-        # Attributes (field data) - different for each timestep
+        # Time-varying field data - direct reference (no HyperSlab)
         for field_name in field_names:
             attribute = ET.SubElement(
                 grid, "Attribute",
@@ -308,26 +312,12 @@ def write_xdmf(
             )
             attr_data = ET.SubElement(
                 attribute, "DataItem",
-                ItemType="HyperSlab",
                 Dimensions=f"{n_points}",
-                Type="HyperSlab",
-            )
-            # HyperSlab: start, stride, count
-            slab_params = ET.SubElement(
-                attr_data, "DataItem",
-                Dimensions="3 2",
-                Format="XML",
-            )
-            slab_params.text = f"{i} 0  1 1  1 {n_points}"
-
-            slab_data = ET.SubElement(
-                attr_data, "DataItem",
-                Dimensions=f"{len(timesteps)} {n_points}",
                 NumberType="Float",
-                Precision="8",
+                Precision="4",
                 Format="HDF",
             )
-            slab_data.text = f"{h5_filename}:/data/{field_name}"
+            attr_data.text = f"{h5_filename}:/data/{field_name}/step_{i:05d}"
 
     # Write with proper formatting
     tree = ET.ElementTree(xdmf)
