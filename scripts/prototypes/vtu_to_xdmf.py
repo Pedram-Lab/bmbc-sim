@@ -162,16 +162,32 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
     # Create HDF5 file and write mesh (once)
     print(f"Writing HDF5 file: {h5_path}")
     with h5py.File(h5_path, "w") as h5:
-        # Store mesh geometry with lzf compression (fast decompression)
-        mesh_grp = h5.create_group("mesh")
-        mesh_grp.create_dataset("points", data=points, compression="gzip")
-        mesh_grp.create_dataset("connectivity", data=connectivity, compression="gzip")
+        # Chunking strategy: We always read entire arrays at once, so use chunks
+        # that span the full extent of the data we read together.
+        # - For points (n, 3): chunk all 3 coords together, use rows that fit ~1MB
+        # - For 1D arrays: single chunk (entire array read at once)
+        chunk_size_1d = (n_points,)  # Single chunk for 1D arrays
+        # For 2D points: ~1MB chunks = 262144 floats / 3 coords ≈ 87381 rows
+        chunk_rows = min(n_points, 87381)
+        chunk_size_points = (chunk_rows, 3)
+        chunk_size_conn = (min(n_cells, 65536), nodes_per_cell)
 
-        # Store compartment masks (static data) with lzf compression
+        # Store mesh geometry
+        mesh_grp = h5.create_group("mesh")
+        mesh_grp.create_dataset(
+            "points", data=points, compression="gzip", compression_opts=1, chunks=chunk_size_points
+        )
+        mesh_grp.create_dataset(
+            "connectivity", data=connectivity, compression="gzip", compression_opts=1, chunks=chunk_size_conn
+        )
+
+        # Store compartment masks (static data)
         if compartment_names:
             comp_grp = h5.create_group("compartments")
             for name, data in compartment_data.items():
-                comp_grp.create_dataset(name, data=data, compression="gzip")
+                comp_grp.create_dataset(
+                    name, data=data, compression="gzip", compression_opts=1, chunks=chunk_size_1d
+                )
 
         # Create group for time-varying data
         data_grp = h5.create_group("data")
@@ -184,7 +200,7 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
         for field_name in field_names:
             data_grp.create_group(field_name)
 
-        # Process each timestep - store as separate datasets (no HyperSlab overhead)
+        # Process each timestep - store as separate datasets
         for i, (time, vtu_path) in enumerate(timesteps):
             print(f"  Processing timestep {i+1}/{len(timesteps)}: t={time}")
 
@@ -200,7 +216,8 @@ def convert_pvd_to_xdmf(pvd_path: Path, output_dir: Path | None = None) -> tuple
                 data_grp[field_name].create_dataset(
                     f"step_{i:05d}",
                     data=field_data,
-                    compression="gzip",
+                    compression="gzip", compression_opts=1,
+                    chunks=chunk_size_1d,
                 )
 
     # Create XDMF file
