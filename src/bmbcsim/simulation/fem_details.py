@@ -199,12 +199,11 @@ class DiffusionSolver:
     def _prepare_operators(self):
         """Assemble matrices and compute the system/preconditioner."""
         self._stiffness_form.Assemble()
-        stiffness_mat = self._stiffness_form.mat.DeleteZeroElements(1e-10)
+        stiffness_mat = self._stiffness_form.mat.DeleteZeroElements(1e-15)
         self._stiffness = ngs_to_csr(stiffness_mat)
 
         self._mass_form.Assemble()
-        mass_mat = self._mass_form.mat.DeleteZeroElements(1e-10)
-        mass_csr = ngs_to_csr(mass_mat)
+        mass_csr = ngs_to_csr(self._mass_form.mat)
 
         m_star = mass_csr + self._dt * self._stiffness
         m_ilu = spla.spilu(m_star.T, fill_factor=5)
