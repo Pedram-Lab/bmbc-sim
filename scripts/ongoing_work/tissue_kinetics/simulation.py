@@ -35,7 +35,7 @@ TAU1 = 10 * u.ms                          # Slow decay time constant
 TAU2 = 3 * u.ms                           # Fast rise time constant
 
 # Stimulation protocol (5 pulses at 100 Hz)
-PULSE_TIMES = [0, 10, 20, 30, 40] * u.ms  # Pulse times in ms
+PULSE_TIMES = [300, 310, 320, 330, 340] * u.ms  # Pulse times in ms
 
 # Simulation timing
 END_TIME = 1.0 * u.s
