@@ -35,6 +35,7 @@ class VtkDetails(_FormatDetails):
 
     def __init__(self, results_root: str):
         self._results_root = results_root
+        self._snapshots = []
 
     def get_snapshots(self) -> list[tuple]:
         snapshot_xml = os.path.join(self._results_root, "snapshot.pvd")
