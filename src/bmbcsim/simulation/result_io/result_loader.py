@@ -1,4 +1,5 @@
 import os
+from abc import ABC, abstractmethod
 from typing import Sequence
 import xml.etree.ElementTree as ET
 
@@ -10,6 +11,105 @@ import h5py
 from bmbcsim.units import BASE_UNITS
 
 
+class _FormatDetails(ABC):
+    """Abstract base for format-specific loading logic."""
+
+    @abstractmethod
+    def __init__(self, results_root: str): ...
+
+    @abstractmethod
+    def get_snapshots(self) -> list[tuple]:
+        """Return list of (time_quantity, extra_info) tuples."""
+
+    @abstractmethod
+    def load_regions(self) -> pv.UnstructuredGrid:
+        """Load the region indicator grid."""
+
+    @abstractmethod
+    def load_snapshot(self, step: int) -> pv.UnstructuredGrid:
+        """Load field data for a given step."""
+
+
+class VtkDetails(_FormatDetails):
+    """Reads results stored as VTU/PVD files (legacy format)."""
+
+    def __init__(self, results_root: str):
+        self._results_root = results_root
+
+    def get_snapshots(self) -> list[tuple]:
+        snapshot_xml = os.path.join(self._results_root, "snapshot.pvd")
+        tree = ET.parse(snapshot_xml)
+        root = tree.getroot()
+        snapshots = [
+            (float(ds.get("timestep")) * BASE_UNITS["time"], ds.get("file"))
+            for ds in root.findall(".//DataSet")
+        ]
+        snapshots.sort(key=lambda x: x[0])
+        return snapshots
+
+    def load_regions(self) -> pv.UnstructuredGrid:
+        return pv.read(os.path.join(self._results_root, "compartments.vtu"))
+
+    def load_snapshot(self, step: int) -> pv.UnstructuredGrid:
+        path = os.path.join(self._results_root, self._snapshots[step][1])
+        return pv.read(path)
+
+    def set_snapshots(self, snapshots: list[tuple]):
+        """Store snapshots reference for use in load_snapshot."""
+        self._snapshots = snapshots
+
+
+class XdmfDetails(_FormatDetails):
+    """Reads results stored as XDMF/HDF5 files."""
+
+    def __init__(self, results_root: str):
+        self._h5_path = os.path.join(results_root, "snapshot.h5")
+
+        with h5py.File(self._h5_path, "r") as h5:
+            self._compartment_names = list(h5["compartments"].keys())
+            self._field_names = [
+                k for k in h5["data"].keys() if k != "time"
+            ]
+
+    def get_snapshots(self) -> list[tuple]:
+        with h5py.File(self._h5_path, "r") as h5:
+            times = np.array(h5["data/time"])
+        return [
+            (float(t) * BASE_UNITS["time"], None)
+            for t in times
+        ]
+
+    def load_regions(self) -> pv.UnstructuredGrid:
+        with h5py.File(self._h5_path, "r") as h5:
+            grid = self._build_grid(h5)
+            for name in self._compartment_names:
+                grid.point_data[name] = np.array(h5[f"compartments/{name}"])
+        return grid
+
+    def load_snapshot(self, step: int) -> pv.UnstructuredGrid:
+        with h5py.File(self._h5_path, "r") as h5:
+            grid = self._build_grid(h5)
+            for field_name in self._field_names:
+                grid.point_data[field_name] = np.array(
+                    h5[f"data/{field_name}/step_{step:05d}"]
+                )
+        return grid
+
+    @staticmethod
+    def _build_grid(h5) -> pv.UnstructuredGrid:
+        """Build a PyVista UnstructuredGrid from HDF5 mesh data."""
+        points = np.array(h5["mesh/points"])
+        connectivity = np.array(h5["mesh/connectivity"])
+        n_cells = len(connectivity)
+
+        cells = np.empty((n_cells, 5), dtype=np.int64)
+        cells[:, 0] = 4
+        cells[:, 1:] = connectivity
+        celltypes = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
+
+        return pv.UnstructuredGrid(cells, celltypes, points)
+
+
 class ResultLoader:
     """A class to load results from a specified directory."""
 
@@ -18,43 +118,25 @@ class ResultLoader:
         self.path = results_path
         self.results_root = os.path.abspath(self.path)
 
-        # Auto-detect format
+        # Auto-detect format and create appropriate details backend
         h5_path = os.path.join(self.results_root, "snapshot.h5")
+        pvd_path = os.path.join(self.results_root, "snapshot.pvd")
         if os.path.exists(h5_path):
-            self._format = "hdf5"
-            self._h5_path = h5_path
-            self._load_hdf5_metadata()
+            self._details = XdmfDetails(self.results_root)
+        elif os.path.exists(pvd_path):
+            self._details = VtkDetails(self.results_root)
         else:
-            self._format = "pvd"
-            self._load_pvd_metadata()
+            raise RuntimeError(
+                f"Could not find recognized results files in {self.results_root}."
+            )
+
+        # Load snapshot list
+        self.snapshots = self._details.get_snapshots()
+        if isinstance(self._details, VtkDetails):
+            self._details.set_snapshots(self.snapshots)
 
         # Initialize variables for caching
         self.cell_to_region, self.regions = self._get_cell_to_region()
-
-    def _load_pvd_metadata(self):
-        """Load metadata from PVD/VTU format."""
-        snapshot_xml = os.path.join(self.results_root, "snapshot.pvd")
-        tree = ET.parse(snapshot_xml)
-        root = tree.getroot()
-
-        self.snapshots = [
-            (float(ds.get("timestep")) * BASE_UNITS["time"], ds.get("file"))
-            for ds in root.findall(".//DataSet")
-        ]
-        self.snapshots.sort(key=lambda x: x[0])
-
-    def _load_hdf5_metadata(self):
-        """Load metadata from HDF5 format."""
-        with h5py.File(self._h5_path, "r") as h5:
-            times = np.array(h5["data/time"])
-            self.snapshots = [
-                (float(t) * BASE_UNITS["time"], None)
-                for t in times
-            ]
-            self._compartment_names = list(h5["compartments"].keys())
-            self._field_names = [
-                k for k in h5["data"].keys() if k != "time"
-            ]
 
     @classmethod
     def find(
@@ -109,34 +191,9 @@ class ResultLoader:
         """Return the number of snapshots available."""
         return len(self.snapshots)
 
-    # Compute region sizes (volumes)
     def load_regions(self) -> pv.UnstructuredGrid:
         """Load the geometry of the simulation containing all regions."""
-        if self._format == "hdf5":
-            return self._load_regions_hdf5()
-        return pv.read(os.path.join(self.results_root, "compartments.vtu"))
-
-    def _load_regions_hdf5(self) -> pv.UnstructuredGrid:
-        """Load regions from HDF5."""
-        with h5py.File(self._h5_path, "r") as h5:
-            grid = self._build_grid(h5)
-            for name in self._compartment_names:
-                grid.point_data[name] = np.array(h5[f"compartments/{name}"])
-        return grid
-
-    def _build_grid(self, h5) -> pv.UnstructuredGrid:
-        """Build a PyVista UnstructuredGrid from HDF5 mesh data."""
-        points = np.array(h5["mesh/points"])
-        connectivity = np.array(h5["mesh/connectivity"])
-        n_cells = len(connectivity)
-
-        # Build VTK-style cell array: [4, v0, v1, v2, v3, ...]
-        cells = np.empty((n_cells, 5), dtype=np.int64)
-        cells[:, 0] = 4
-        cells[:, 1:] = connectivity
-        celltypes = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
-
-        return pv.UnstructuredGrid(cells, celltypes, points)
+        return self._details.load_regions()
 
     def compute_region_sizes(self) -> dict[str, float]:
         """Compute the sizes (volumes) of each region."""
@@ -163,21 +220,7 @@ class ResultLoader:
         if step >= len(self):
             raise IndexError(f"Step {step} is out of range for available snapshots.")
 
-        if self._format == "hdf5":
-            return self._load_snapshot_hdf5(step)
-
-        path = os.path.join(self.results_root, self.snapshots[step][1])
-        return pv.read(path)
-
-    def _load_snapshot_hdf5(self, step: int) -> pv.UnstructuredGrid:
-        """Load a snapshot from HDF5."""
-        with h5py.File(self._h5_path, "r") as h5:
-            grid = self._build_grid(h5)
-            for field_name in self._field_names:
-                grid.point_data[field_name] = np.array(
-                    h5[f"data/{field_name}/step_{step:05d}"]
-                )
-        return grid
+        return self._details.load_snapshot(step)
 
     def load_point_values(
         self, step: int, points: Sequence[float] | Sequence[Sequence[float]]
