@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import pyvista as pv
 import numpy as np
 import xarray as xr
+import h5py
 
 from bmbcsim.units import BASE_UNITS
 
@@ -15,22 +16,45 @@ class ResultLoader:
     def __init__(self, results_path: str):
         """Initialize the ResultLoader with the given directory for results."""
         self.path = results_path
-
-        # Load metadata from the VTK time series summary file
         self.results_root = os.path.abspath(self.path)
+
+        # Auto-detect format
+        h5_path = os.path.join(self.results_root, "snapshot.h5")
+        if os.path.exists(h5_path):
+            self._format = "hdf5"
+            self._h5_path = h5_path
+            self._load_hdf5_metadata()
+        else:
+            self._format = "pvd"
+            self._load_pvd_metadata()
+
+        # Initialize variables for caching
+        self.cell_to_region, self.regions = self._get_cell_to_region()
+
+    def _load_pvd_metadata(self):
+        """Load metadata from PVD/VTU format."""
         snapshot_xml = os.path.join(self.results_root, "snapshot.pvd")
         tree = ET.parse(snapshot_xml)
         root = tree.getroot()
 
-        # collect (timestep, filename) tuples and sort by timestep
         self.snapshots = [
             (float(ds.get("timestep")) * BASE_UNITS["time"], ds.get("file"))
             for ds in root.findall(".//DataSet")
         ]
         self.snapshots.sort(key=lambda x: x[0])
 
-        # Initialize variables for caching
-        self.cell_to_region, self.regions = self._get_cell_to_region()
+    def _load_hdf5_metadata(self):
+        """Load metadata from HDF5 format."""
+        with h5py.File(self._h5_path, "r") as h5:
+            times = np.array(h5["data/time"])
+            self.snapshots = [
+                (float(t) * BASE_UNITS["time"], None)
+                for t in times
+            ]
+            self._compartment_names = list(h5["compartments"].keys())
+            self._field_names = [
+                k for k in h5["data"].keys() if k != "time"
+            ]
 
     @classmethod
     def find(
@@ -88,7 +112,31 @@ class ResultLoader:
     # Compute region sizes (volumes)
     def load_regions(self) -> pv.UnstructuredGrid:
         """Load the geometry of the simulation containing all regions."""
+        if self._format == "hdf5":
+            return self._load_regions_hdf5()
         return pv.read(os.path.join(self.results_root, "compartments.vtu"))
+
+    def _load_regions_hdf5(self) -> pv.UnstructuredGrid:
+        """Load regions from HDF5."""
+        with h5py.File(self._h5_path, "r") as h5:
+            grid = self._build_grid(h5)
+            for name in self._compartment_names:
+                grid.point_data[name] = np.array(h5[f"compartments/{name}"])
+        return grid
+
+    def _build_grid(self, h5) -> pv.UnstructuredGrid:
+        """Build a PyVista UnstructuredGrid from HDF5 mesh data."""
+        points = np.array(h5["mesh/points"])
+        connectivity = np.array(h5["mesh/connectivity"])
+        n_cells = len(connectivity)
+
+        # Build VTK-style cell array: [4, v0, v1, v2, v3, ...]
+        cells = np.empty((n_cells, 5), dtype=np.int64)
+        cells[:, 0] = 4
+        cells[:, 1:] = connectivity
+        celltypes = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
+
+        return pv.UnstructuredGrid(cells, celltypes, points)
 
     def compute_region_sizes(self) -> dict[str, float]:
         """Compute the sizes (volumes) of each region."""
@@ -115,8 +163,21 @@ class ResultLoader:
         if step >= len(self):
             raise IndexError(f"Step {step} is out of range for available snapshots.")
 
+        if self._format == "hdf5":
+            return self._load_snapshot_hdf5(step)
+
         path = os.path.join(self.results_root, self.snapshots[step][1])
         return pv.read(path)
+
+    def _load_snapshot_hdf5(self, step: int) -> pv.UnstructuredGrid:
+        """Load a snapshot from HDF5."""
+        with h5py.File(self._h5_path, "r") as h5:
+            grid = self._build_grid(h5)
+            for field_name in self._field_names:
+                grid.point_data[field_name] = np.array(
+                    h5[f"data/{field_name}/step_{step:05d}"]
+                )
+        return grid
 
     def load_point_values(
         self, step: int, points: Sequence[float] | Sequence[Sequence[float]]

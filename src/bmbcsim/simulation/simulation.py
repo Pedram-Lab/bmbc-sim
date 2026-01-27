@@ -9,7 +9,7 @@ import numpy as np
 import threadpoolctl
 
 from bmbcsim.logging import logger
-from bmbcsim.simulation.result_io import Recorder
+from bmbcsim.simulation.result_io import XdmfRecorder
 from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
@@ -150,7 +150,7 @@ class Simulation:
             self._setup(dt)
 
             name_to_concentration = {s.name: self._concentrations[s] for s in self.species}
-            recorder = Recorder(record_interval)
+            recorder = XdmfRecorder(record_interval)
             recorder.setup(
                 directory=self.result_directory,
                 mesh=self.simulation_geometry.mesh,
