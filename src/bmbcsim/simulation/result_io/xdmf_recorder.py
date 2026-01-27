@@ -32,6 +32,8 @@ class XdmfRecorder:
         self._times: list[float] = []
         self._grid_functions: dict[str, ngs.GridFunction] = {}
         self._n_components: int = 0
+        self._deformation: ngs.GridFunction | None = None
+        self._vertex_indices: np.ndarray | None = None
 
     def setup(
         self,
@@ -40,6 +42,7 @@ class XdmfRecorder:
         compartments: list[Compartment],
         concentrations: dict[str, ngs.GridFunction],
         potential: ngs.GridFunction | None,
+        deformation: ngs.GridFunction | None,
         start_time: u.Quantity,
     ) -> None:
         """Prepare XDMF/HDF5 output files and write static mesh data."""
@@ -126,6 +129,12 @@ class XdmfRecorder:
 
         self._field_names = list(self._grid_functions.keys())
 
+        # Store deformation GridFunction and the vertex index array needed
+        # to remap full-mesh deformation DOFs to the duplicated-vertex layout
+        if deformation is not None:
+            self._deformation = deformation
+            self._vertex_indices = np.concatenate(dof_to_vertex_maps)
+
         logger.info(
             "Writing XDMF/HDF5 output to %s (%d points, %d cells)",
             self._h5_path, self._n_points, self._n_cells,
@@ -160,6 +169,8 @@ class XdmfRecorder:
             data_grp = h5.create_group("data")
             for field_name in self._field_names:
                 data_grp.create_group(field_name)
+            if self._deformation is not None:
+                data_grp.create_group("deformation")
 
         # Record initial state
         self.record(start_time)
@@ -179,7 +190,18 @@ class XdmfRecorder:
                     [gf.components[i].vec.FV().NumPy() for i in range(self._n_components)]
                 ).astype(np.float32)
 
+            # Extract deformation vector field (full-mesh VectorH1 → duplicated vertices)
+            # VectorH1 stores DOFs in component-major order: [x0..xN, y0..yN, z0..zN]
+            deformation_data = None
+            if self._deformation is not None:
+                components = [
+                    self._deformation.components[d].vec.FV().NumPy()[self._vertex_indices]
+                    for d in range(3)
+                ]
+                deformation_data = np.column_stack(components).astype(np.float32)
+
             chunk_1d = (self._n_points,)
+            chunk_vec = (min(self._n_points, 87381), 3)
             with h5py.File(self._h5_path, "a") as h5:
                 data_grp = h5["data"]
                 for field_name in self._field_names:
@@ -188,6 +210,13 @@ class XdmfRecorder:
                         data=fields[field_name],
                         compression="gzip", compression_opts=1,
                         chunks=chunk_1d,
+                    )
+                if deformation_data is not None:
+                    data_grp["deformation"].create_dataset(
+                        f"step_{self._step_count:05d}",
+                        data=deformation_data,
+                        compression="gzip", compression_opts=1,
+                        chunks=chunk_vec,
                     )
 
             self._times.append(float(sim_time))
@@ -277,6 +306,19 @@ class XdmfRecorder:
                     NumberType="Float", Precision="4", Format="HDF",
                 )
                 attr_data.text = f"{h5_filename}:/data/{field_name}/step_{i:05d}"
+
+            # Deformation vector field
+            if self._deformation is not None:
+                attribute = ET.SubElement(
+                    grid, "Attribute",
+                    Name="deformation", AttributeType="Vector", Center="Node",
+                )
+                attr_data = ET.SubElement(
+                    attribute, "DataItem",
+                    Dimensions=f"{self._n_points} 3",
+                    NumberType="Float", Precision="4", Format="HDF",
+                )
+                attr_data.text = f"{h5_filename}:/data/deformation/step_{i:05d}"
 
         tree = ET.ElementTree(xdmf)
         ET.indent(tree, space="  ")

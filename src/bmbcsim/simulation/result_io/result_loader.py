@@ -330,5 +330,8 @@ class ResultLoader:
 
 
 def _get_species_names(data: pv.UnstructuredGrid) -> list[str]:
-    """Extract species names from the point data of a PyVista UnstructuredGrid."""
-    return [name for name in data.point_data.keys() if not name.startswith("vtk")]
+    """Extract species names (scalar fields) from point data."""
+    return [
+        name for name, arr in data.point_data.items()
+        if not name.startswith("vtk") and arr.ndim == 1
+    ]

@@ -157,7 +157,8 @@ class Simulation:
                 compartments=self.simulation_geometry.compartments.values(),
                 concentrations=name_to_concentration,
                 potential=self._pnp.potential if self.electrostatics else None,
-                start_time=start_time.copy()
+                deformation=self._mechanics.deformation if self.mechanics else None,
+                start_time=start_time.copy(),
             )
 
             t = start_time.copy()
