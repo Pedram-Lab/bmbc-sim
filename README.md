@@ -59,7 +59,9 @@ sim.run(end_time=10.0 * u.ms, time_step=0.1 * u.ms, record_interval=1.0 * u.ms)
 ```
 This runs a simple reaction-diffusion simulation in a spherical cell and stores the results in the `results/demo_<timestamp>` folder.
 The `ResultLoader` API then lets you post-process outputs into pandas/xarray structures.
-All results are saved as VTK files for easy visualization in [Paraview](https://www.paraview.org/) or similar tools.
+All results are saved as XDMF files for easy visualization in [Paraview](https://www.paraview.org/) or similar tools.
+Please use the 'Xdmf Reader' (no 'S' or 'T' version) in Paraview to load the files.
+If the visualization is slow, consider only loading the point arrays you need under 'properties'.
 
 This should give you an output like this:
 ![Demo Simulation Output](demo.gif)
