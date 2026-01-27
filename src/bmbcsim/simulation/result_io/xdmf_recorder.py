@@ -106,13 +106,17 @@ class XdmfRecorder:
 
         self._n_cells = len(connectivity)
 
-        # Build one indicator per compartment (covers all regions of that compartment)
-        self._compartment_names = [c.name for c in compartments]
+        # Build one indicator per region
+        region_names = []
+        for compartment in compartments:
+            region_names.extend(compartment.get_region_names(full_names=True))
+        self._compartment_names = region_names
         indicators = {}
         for i, compartment in enumerate(compartments):
-            ind = np.zeros(total_dofs, dtype=np.float32)
-            ind[offsets[i]:offsets[i + 1]] = 1.0
-            indicators[compartment.name] = ind
+            for region in compartment.get_region_names(full_names=True):
+                ind = np.zeros(total_dofs, dtype=np.float32)
+                ind[offsets[i]:offsets[i + 1]] = 1.0
+                indicators[region] = ind
 
         # Store GridFunction references for direct DOF extraction in record()
         for species, gf in concentrations.items():
