@@ -562,9 +562,9 @@ class MechanicSolver:
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
-                species, strength = driving
+                species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
-                term = strength * concentration
+                term = strength * (concentration - baseline)
                 chemical_pressure = term if chemical_pressure is None else chemical_pressure + term
 
         # Set up bulk term

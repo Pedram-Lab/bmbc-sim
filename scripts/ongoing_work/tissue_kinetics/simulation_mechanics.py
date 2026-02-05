@@ -227,7 +227,8 @@ ecs.initialize_species(ecm, ECM_CONCENTRATION)
 ecs.initialize_species(ecm_ca, 1.0 * u.mmol / u.L)
 
 # ECM_Ca drives mechanical deformation: increased binding causes local contraction/expansion
-ecs.add_driving_species(ecm_ca, ECM_CA_COUPLING)
+# Use initial ECM_Ca concentration as baseline so no deformation at equilibrium
+ecs.add_driving_species(ecm_ca, ECM_CA_COUPLING, baseline=1.0 * u.mmol / u.L)
 
 # Initialize cells at 0 to make system well-defined
 for cell in cells:
