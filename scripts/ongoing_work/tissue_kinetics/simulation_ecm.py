@@ -18,9 +18,15 @@ CA_ECS = 1.3 * u.mmol / u.L               # [Ca2+] ECS at rest (1.3 mM)
 DIFFUSIVITY_ECS = 0.7 * u.um**2 / u.ms    # Free-solution diffusivity for Ca2+
 
 # ECM parameters
-ECM_CONCENTRATION = 1.0 * u.mmol / u.L        # Fixed negative charge concentration in ECM (1.0 mM)
+ECM_TOTAL = 2.0 * u.mmol / u.L                # Total ECM binding sites (conserved: [ECM] + [ECM_Ca])
 ECM_KF = 10.0 * u.L / (u.mmol * u.s)          # Binding rate (10.0 /(mM·s))
 ECM_KR = 0.1 / u.ms                           # Unbinding rate (0.1/ms)
+
+# Equilibrium concentrations for Ca + ECM ↔ ECM_Ca
+# At equilibrium: [ECM_Ca] = K * [Ca] * E_total / (1 + K * [Ca])
+ECM_K = (ECM_KF / ECM_KR).decompose()         # Equilibrium constant K = kf/kr
+ECM_CA_EQUILIBRIUM = ECM_K * CA_ECS * ECM_TOTAL / (1 + ECM_K * CA_ECS)
+ECM_CONCENTRATION = ECM_TOTAL - ECM_CA_EQUILIBRIUM  # Free ECM at equilibrium
 
 # Boundary condition parameters (Robin BC with tortuosity)
 TORTUOSITY = 1.6
@@ -200,7 +206,7 @@ ecm = sim.add_species("ECM")
 ecm_ca = sim.add_species("ECM_Ca")
 ecs.initialize_species(ca, CA_ECS)
 ecs.initialize_species(ecm, ECM_CONCENTRATION)
-ecs.initialize_species(ecm_ca, 1.0 * u.mmol / u.L)
+ecs.initialize_species(ecm_ca, ECM_CA_EQUILIBRIUM)
 
 # Initialize cells at 0 to make system well-defined
 for cell in cells:
