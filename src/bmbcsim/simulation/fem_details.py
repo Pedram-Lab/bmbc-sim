@@ -557,23 +557,27 @@ class MechanicSolver:
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
 
-        # Build chemical pressure term from driving species
-        chemical_pressure = None
+        # Set up bulk term (neo-Hookean elasticity)
+        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
+        trial = self._fes.TrialFunction()
+        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        self._stiffness += ngs.Variation(
+            neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx
+        )
+
+        # Add chemical pressure term restricted to compartments with driving species
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
                 species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
-                term = strength * (concentration - baseline)
-                chemical_pressure = term if chemical_pressure is None else chemical_pressure + term
-
-        # Set up bulk term
-        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
-        trial = self._fes.TrialFunction()
-        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
-        self._stiffness += ngs.Variation(
-            neo_hooke(deformation_tensor, mu, lam, chemical_pressure).Compile() * ngs.dx
-        )
+                chemical_pressure = strength * (concentration - baseline)
+                # Restrict chemical pressure to this compartment's regions
+                region_names = compartment.get_region_names(full_names=True)
+                dx_compartment = ngs.dx(definedon=mesh.Materials('|'.join(region_names)))
+                self._stiffness += ngs.Variation(
+                    (chemical_pressure * ngs.Det(deformation_tensor)).Compile() * dx_compartment
+                )
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
@@ -640,21 +644,16 @@ class MechanicSolver:
             concentration.vec.FV().NumPy()[:] *= volume_ratio
 
 
-def neo_hooke(f, mu, lam, chemical_pressure=None):
-    """Neo-Hookean material model with optional chemical pressure.
+def neo_hooke(f, mu, lam):
+    """Neo-Hookean material model.
 
     :param f: Deformation gradient tensor (F = I + grad(u)).
     :param mu: Shear modulus (first Lamé parameter).
     :param lam: Second Lamé parameter.
-    :param chemical_pressure: Optional chemical pressure term (coupling_strength * concentration).
-        When provided, adds a pressure-like term that drives volume change.
     """
     det_f = ngs.Det(f)
-    energy = mu * (
+    return mu * (
         0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
         + mu / lam * det_f ** (-lam / mu)
         - 1
     )
-    if chemical_pressure is not None:
-        energy += chemical_pressure * det_f
-    return energy
