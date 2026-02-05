@@ -33,7 +33,7 @@ class SimulationGeometry:
 
         # Names can refer to multiple mesh_regions, so check if they're unique
         mesh_region_to_name = {}
-        for name in set(mesh.GetMaterials()):
+        for name in sorted(set(mesh.GetMaterials())):
             mesh_region = mesh.Materials(name)
             if len(mesh_region.Split()) != 1:
                 raise ValueError(f'Region name "{name}" is not unique.')
@@ -58,7 +58,7 @@ class SimulationGeometry:
         # Process interfaces
         boundaries = {
             bnd: name
-            for name in set(mesh.GetBoundaries())
+            for name in sorted(set(mesh.GetBoundaries()))
             for bnd in mesh.Boundaries(name).Split()
         }
         self._full_interface_info = []
