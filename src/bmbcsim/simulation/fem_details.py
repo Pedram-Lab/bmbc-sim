@@ -27,20 +27,24 @@ class DiffusionSolver:
             self,
             mass_form,
             stiffness_form,
-            transport,
+            membrane_transport,
+            drift,
             source_term,
             dt,
             reassemble,
     ):
         self._mass_form = mass_form
         self._stiffness_form = stiffness_form
-        self._transport = transport
+        self._membrane_transport = membrane_transport
+        self._drift = drift
         self._source_term = source_term
         self._dt = dt
         self._reassemble = reassemble
 
         # Operators are (optionally) rebuilt on every step when reassemble=True
         self._stiffness = None
+        self._mass = None
+        self._lumped_mass = None
         self._m_star = None
         self._preconditioner = None
         self._prepare_operators()
@@ -97,8 +101,8 @@ class DiffusionSolver:
             # Set up mass matrix
             mass += trial * test * ngs.dx
 
-        # Handle implicit transport terms
-        transport_term = ngs.BilinearForm(fes, check_unused=False)
+        # Handle implicit membrane transport terms
+        membrane_transport = ngs.BilinearForm(fes, check_unused=False)
         for membrane in simulation_geometry.membranes.values():
             for s, source, target, transport in membrane.get_transport():
                 if s != species:
@@ -129,9 +133,9 @@ class DiffusionSolver:
                     flux_density = (flux / area).Compile()
                     ds = ngs.ds(membrane.name)
                     if src_trial is not None:
-                        transport_term += -flux_density * src_test * ds
+                        membrane_transport += -flux_density * src_test * ds
                     if trg_trial is not None:
-                        transport_term += flux_density * trg_test * ds
+                        membrane_transport += flux_density * trg_test * ds
 
         # Handle explicit transport terms
         for membrane in simulation_geometry.membranes.values():
@@ -167,8 +171,10 @@ class DiffusionSolver:
                     if trg_test is not None:
                         source_term += flux_density * trg_test * ds
 
-        # Handle potential terms
+        # Handle potential terms (electrostatic drift; implicit in diffusion half-step)
+        drift = None
         if potential is not None and species.valence != 0:
+            drift = ngs.BilinearForm(fes, check_unused=False)
             beta = to_simulation_units(const.e.si / (const.k_B * 310 * u.K))
             h = ngs.specialcf.mesh_size
             for i, compartment in enumerate(compartments):
@@ -178,19 +184,20 @@ class DiffusionSolver:
                 # Drift term D * β * valence * u * ∇φ·∇v
                 grad_phi = ngs.grad(potential[i])
                 directional_test = ngs.InnerProduct(grad_phi, ngs.grad(test))
-                drift = beta * species.valence * trial
+                drift_term = beta * species.valence * trial
 
                 # SUPG regularization D * τ * (∇φ·∇u)(∇φ·∇v) with parameter τ ~ h/(2|∇φ|)
                 tau = h / (2 * grad_phi.Norm() + 1e-6)
                 supg = tau * (grad_phi * ngs.grad(trial))
 
-                transport_term += (-d * (supg + drift) * directional_test).Compile() * ngs.dx
+                drift += (-d * (supg + drift_term) * directional_test).Compile() * ngs.dx
 
         # Assemble the mass and stiffness matrices
         return cls(
             mass,
             stiffness,
-            transport_term,
+            membrane_transport,
+            drift,
             source_term,
             dt,
             reassemble,
@@ -206,42 +213,50 @@ class DiffusionSolver:
         mass_mat = self._mass_form.mat.DeleteZeroElements(1e-10)
         mass_csr = ngs_to_csr(mass_mat)
 
-        m_star = mass_csr + self._dt * self._stiffness
+        self._mass = mass_csr
+        self._lumped_mass = np.asarray(mass_csr.sum(axis=1)).flatten()
+
+        # M* uses dt/2 for Strang splitting half-steps
+        half_dt = self._dt / 2
+        m_star = mass_csr + half_dt * self._stiffness
         m_ilu = spla.spilu(m_star.T, fill_factor=5)
         self._preconditioner = spla.LinearOperator(
             m_star.shape, matvec=m_ilu.solve, dtype=np.float64
         )
         self._m_star = m_star
 
-    def step(self, concentration: ngs.GridFunction):
-        """Apply the implicit Euler step to the concentration vector."""
+    def prepare(self):
+        """Reassemble diffusion operators if needed (e.g., after mesh deformation).
+
+        Call once per timestep from the simulation loop, before the first
+        diffusion half-step.
+        """
         if self._reassemble:
             self._prepare_operators()
 
-        # Assemble matrices
-        self._transport.Assemble()
-        self._source_term.Assemble()
-        transport = self._transport.mat.DeleteZeroElements(1e-10)
-        transport_csr = ngs_to_csr(transport)
-
-        # Compute the residual
+    def diffusion_half_step(self, concentration: ngs.GridFunction):
+        """Apply a half-step of implicit diffusion (with drift if applicable)."""
+        half_dt = self._dt / 2
         c = concentration.vec.FV().NumPy().copy()
-        res = self._dt * (
-            self._source_term.vec.FV().NumPy() - self._stiffness * c + transport_csr * c
-        )
 
-        # Create the system matrix: M^* - dt * transport
-        transport_csr.data *= -self._dt
-        system_matrix_csr = spla.LinearOperator(
-            transport_csr.shape,
-            matvec=lambda x: self._m_star @ x + transport_csr @ x,
-            dtype=np.float64,
-        )
+        if self._drift is not None:
+            # Assemble drift (potential may have been updated since last call)
+            self._drift.Assemble()
+            drift_csr = ngs_to_csr(self._drift.mat.DeleteZeroElements(1e-10))
 
-        # Solve using scipy GMRES
+            rhs = half_dt * (drift_csr @ c - self._stiffness @ c)
+            system = spla.LinearOperator(
+                self._m_star.shape,
+                matvec=lambda x: self._m_star @ x - half_dt * (drift_csr @ x),
+                dtype=np.float64,
+            )
+        else:
+            rhs = -half_dt * (self._stiffness @ c)
+            system = self._m_star
+
         solution, info = spla.gmres(
-            system_matrix_csr,
-            res,
+            system,
+            rhs,
             M=self._preconditioner,
             rtol=1e-6,
             atol=1e-12,
@@ -253,8 +268,21 @@ class DiffusionSolver:
         elif info < 0:
             print(f"Error: GMRES failed with error code {info}")
 
-        # Update the concentration
         concentration.vec.FV().NumPy()[:] += solution
+
+    def transport_step(self, concentration: ngs.GridFunction):
+        """Apply explicit membrane transport using lumped mass."""
+        self._membrane_transport.Assemble()
+        self._source_term.Assemble()
+        transport_csr = ngs_to_csr(
+            self._membrane_transport.mat.DeleteZeroElements(1e-10)
+        )
+
+        c = concentration.vec.FV().NumPy()
+        rhs = self._dt * (
+            self._source_term.vec.FV().NumPy() + transport_csr @ c
+        )
+        c[:] += rhs / self._lumped_mass
 
 
 class ReactionSolver:
