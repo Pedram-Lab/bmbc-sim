@@ -39,8 +39,8 @@ plt.show()
 
 # === Define points in Cartesian coordinates (x, y, z) ===
 # For example: points along the x axis from near the membrane (20 μm) to the center (0 μm)
-distances = [19.75, 10.25, 5.25, 0.25]  # μm from the center
-points = [(d, 0, 0) for d in distances]  # points along the x axis
+distances = [0.25, 5.0, 10.0, 20.0]  # μm from the center
+points = [(20.0 - d, 0, 0) for d in distances]  # points along the x axis
 
 # === Prepare structure to store results ===
 TARGET_SPECIES = "Ca"
