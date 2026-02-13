@@ -163,18 +163,27 @@ class Simulation:
 
             t = start_time.copy()
             for _ in trange(n_steps):
+                # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
+
+                # 1. Mechanics — deform mesh before geometry-dependent steps
                 if self.mechanics:
-                    # Update mechanical deformation before geometry-dependent steps
                     self._mechanics.step()
                     self._mechanics.adjust_concentrations(self._concentrations)
                     self.simulation_geometry.update_measures()
 
-                # Update the concentrations via a first-order splitting approach:
-                # 1. Update the electrostatic potential (if applicable)
+                # Reassemble diffusion operators once per timestep (after mesh deformation)
+                for solver in self._diffusion.values():
+                    solver.prepare()
+
+                # 2. Diffusion half-step (implicit, with drift)
+                for species, c in self._concentrations.items():
+                    self._diffusion[species].diffusion_half_step(c)
+
+                # 3. Electrostatics (if applicable)
                 if self.electrostatics:
                     self._pnp.step()
 
-                # 2. Independently apply reaction kinetics using diagonal newton (implicit)
+                # 4. Reactions (implicit Newton)
                 old_concentrations = np.stack(
                     [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
                 )
@@ -195,14 +204,16 @@ class Simulation:
                         max_newton_iterations,
                     )
 
-                # 3. Diffuse and transport the concentrations (implicit)
-                # Update all transport mechanisms to the current simulation time
+                # 5. Transport (explicit membrane transport)
                 for membrane in self.simulation_geometry.membranes.values():
                     for _, _, _, transport in membrane.get_transport():
                         transport.update_flux(t)
-                # Update each species by solving the implicit diffusion equation
                 for species, c in self._concentrations.items():
-                    self._diffusion[species].step(c)
+                    self._diffusion[species].transport_step(c)
+
+                # 6. Diffusion half-step (implicit, with drift)
+                for species, c in self._concentrations.items():
+                    self._diffusion[species].diffusion_half_step(c)
 
                 t += time_step
                 recorder.record(current_time=t)

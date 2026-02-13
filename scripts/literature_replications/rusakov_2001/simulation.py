@@ -32,7 +32,7 @@ N_CHANNELS = 39                       # Fig. 4
 
 # Simulation parameters
 MESH_SIZE = 0.1 * u.um
-TIME_STEP = 1.0 * u.us
+TIME_STEP = 0.2 * u.us
 END_TIME = 1.5 * u.ms
 
 # Create the geometry
