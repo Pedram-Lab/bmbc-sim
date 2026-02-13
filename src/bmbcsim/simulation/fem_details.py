@@ -43,7 +43,6 @@ class DiffusionSolver:
 
         # Operators are (optionally) rebuilt on every step when reassemble=True
         self._stiffness = None
-        self._mass = None
         self._lumped_mass = None
         self._m_star = None
         self._preconditioner = None
@@ -210,15 +209,12 @@ class DiffusionSolver:
         self._stiffness = ngs_to_csr(stiffness_mat)
 
         self._mass_form.Assemble()
-        mass_mat = self._mass_form.mat.DeleteZeroElements(1e-10)
-        mass_csr = ngs_to_csr(mass_mat)
-
-        self._mass = mass_csr
-        self._lumped_mass = np.asarray(mass_csr.sum(axis=1)).flatten()
+        self._lumped_mass = np.asarray(ngs_to_csr(self._mass_form.mat).sum(axis=1)).flatten()
 
         # M* uses dt/2 for Strang splitting half-steps
+        # Use lumped (diagonal) mass to preserve the discrete maximum principle
         half_dt = self._dt / 2
-        m_star = mass_csr + half_dt * self._stiffness
+        m_star = sps.diags(self._lumped_mass) + half_dt * self._stiffness
         m_ilu = spla.spilu(m_star.T, fill_factor=5)
         self._preconditioner = spla.LinearOperator(
             m_star.shape, matvec=m_ilu.solve, dtype=np.float64
