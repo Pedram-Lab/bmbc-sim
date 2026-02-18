@@ -35,9 +35,9 @@ if PRE_OR_POST_SYNAPTIC == "pre":
     END_TIME = 1.5 * u.ms
     RECORD_INTERVAL = 10 * u.us
 elif PRE_OR_POST_SYNAPTIC == "post":
-    TIME_STEP = 0.5 * u.us
+    TIME_STEP = 0.2 * u.us
     END_TIME = 80 * u.ms
-    RECORD_INTERVAL = 0.1 * u.ms
+    RECORD_INTERVAL = 0.5 * u.ms
 else:
     raise ValueError(f"Invalid value for PRE_OR_POST_SYNAPTIC: {PRE_OR_POST_SYNAPTIC}")
 
