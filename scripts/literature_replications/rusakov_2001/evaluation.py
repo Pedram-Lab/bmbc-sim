@@ -20,7 +20,7 @@ time = total_substance.coords["time"].values
 # Calculate volumes by region (for average concentration)
 regions = total_substance.coords['region'].values
 region_sizes = loader.compute_region_sizes()
-interesting_regions = ["synapse_ecs", "presynapse", "neuropil"]
+interesting_regions = ["synapse_ecs", "presynapse", "postsynapse", "neuropil"]
 
 # Plot total mass in all interesting compartments (account for porosity in neuropil)
 fig, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
@@ -35,6 +35,7 @@ axes[0].set_ylabel("Average concentration [mM]")
 total_ca = (
     total_substance.sel(region="synapse_ecs", species="Ca")
     + total_substance.sel(region="presynapse", species="Ca")
+    + total_substance.sel(region="postsynapse", species="Ca")
     + 0.12 * total_substance.sel(region="neuropil", species="Ca")
 )
 mass_conservation_error = np.abs(total_ca - total_ca.isel(time=0)) / total_ca.isel(time=0)

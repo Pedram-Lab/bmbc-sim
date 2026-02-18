@@ -27,17 +27,15 @@ class DiffusionSolver:
             self,
             mass_form,
             stiffness_form,
-            membrane_transport,
+            transport_form,
             drift,
-            source_term,
             dt,
             reassemble,
     ):
         self._mass_form = mass_form
         self._stiffness_form = stiffness_form
-        self._membrane_transport = membrane_transport
+        self._transport_form = transport_form
         self._drift = drift
-        self._source_term = source_term
         self._dt = dt
         self._reassemble = reassemble
 
@@ -86,7 +84,6 @@ class DiffusionSolver:
         stiffness = ngs.BilinearForm(fes, check_unused=False)
         trial_and_test = tuple(zip(*fes.TnT()))
         compartment_to_index = {compartment: i for i, compartment in enumerate(compartments)}
-        source_term = ngs.LinearForm(fes)
 
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
@@ -100,49 +97,14 @@ class DiffusionSolver:
             # Set up mass matrix
             mass += trial * test * ngs.dx
 
-        # Handle implicit membrane transport terms
-        membrane_transport = ngs.BilinearForm(fes, check_unused=False)
+        # Handle membrane transport terms
+        transport_form = ngs.LinearForm(fes)
         for membrane in simulation_geometry.membranes.values():
             for s, source, target, transport in membrane.get_transport():
                 if s != species:
                     continue
 
-                def select_i(compartment, concentration, tnt):
-                    if compartment is None:
-                        return None, None, None
-                    idx = compartment_to_index[compartment]
-                    porosity = compartment.coefficients.porosity
-                    if porosity is None:
-                        return concentration.components[idx], *tnt[idx]
-                    else:
-                        return (
-                            concentration.components[idx],
-                            tnt[idx][0],             # For porous flux,
-                            tnt[idx][1] / porosity,  # scale test function
-                        )
-
-                src_c, src_trial, src_test = select_i(source, concentration, trial_and_test)
-                trg_c, trg_trial, trg_test = select_i(target, concentration, trial_and_test)
-
-                # Calculate the flux density through the membrane
-                # Note: area normalization is handled in Transport.finalize_coefficients
-                flux_density = transport.flux_lhs(src_c, trg_c, src_trial, trg_trial)
-
-                if flux_density is not None:
-                    flux_density = flux_density.Compile()
-                    ds = ngs.ds(membrane.name)
-                    if src_trial is not None:
-                        membrane_transport += -flux_density * src_test * ds
-                    if trg_trial is not None:
-                        membrane_transport += flux_density * trg_test * ds
-
-        # Handle explicit transport terms
-        for membrane in simulation_geometry.membranes.values():
-            for s, source, target, transport in membrane.get_transport():
-                if s != species:
-                    continue
-
-                def select_e(compartment, concentration, tnt):
+                def select(compartment, concentration, tnt):
                     if compartment is None:
                         return None, None
                     idx = compartment_to_index[compartment]
@@ -155,20 +117,21 @@ class DiffusionSolver:
                             tnt[idx][1] / porosity,
                         )
 
-                src_c, src_test = select_e(source, concentration, trial_and_test)
-                trg_c, trg_test = select_e(target, concentration, trial_and_test)
+                src_c, src_test = select(source, concentration, trial_and_test)
+                trg_c, trg_test = select(target, concentration, trial_and_test)
 
                 # Calculate the flux density through the membrane
                 # Note: area normalization is handled in Transport.finalize_coefficients
-                flux_density = transport.flux_rhs(src_c, trg_c)
+                flux_density = transport.flux(src_c, trg_c)
 
                 if flux_density is not None:
-                    flux_density = flux_density.Compile()
+                    area = to_simulation_units(membrane.area, 'area')
+                    flux_density = (flux_density / area).Compile()
                     ds = ngs.ds(membrane.name)
                     if src_test is not None:
-                        source_term += -flux_density * src_test * ds
+                        transport_form += -flux_density * src_test * ds
                     if trg_test is not None:
-                        source_term += flux_density * trg_test * ds
+                        transport_form += flux_density * trg_test * ds
 
         # Handle potential terms (electrostatic drift; implicit in diffusion half-step)
         drift = None
@@ -195,9 +158,8 @@ class DiffusionSolver:
         return cls(
             mass,
             stiffness,
-            membrane_transport,
+            transport_form,
             drift,
-            source_term,
             dt,
             reassemble,
         )
@@ -268,16 +230,10 @@ class DiffusionSolver:
 
     def transport_step(self, concentration: ngs.GridFunction):
         """Apply explicit membrane transport using lumped mass."""
-        self._membrane_transport.Assemble()
-        self._source_term.Assemble()
-        transport_csr = ngs_to_csr(
-            self._membrane_transport.mat.DeleteZeroElements(1e-10)
-        )
+        self._transport_form.Assemble()
 
         c = concentration.vec.FV().NumPy()
-        rhs = self._dt * (
-            self._source_term.vec.FV().NumPy() + transport_csr @ c
-        )
+        rhs = self._dt * self._transport_form.vec.FV().NumPy()
         c[:] += rhs / self._lumped_mass
 
 
