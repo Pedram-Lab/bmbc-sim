@@ -213,6 +213,56 @@ class GeneralFlux(Transport):
         return self.flux_value
 
 
+class ProportionalFlux(Transport):
+    """Transport with flux gated by source concentration.
+
+    Scales flux by a clamped linear ramp of source concentration:
+    - c >= saturation: full flux (scale = 1)
+    - c <= depletion: zero flux (scale = 0)
+    - depletion < c < saturation: linear interpolation
+    """
+    flux_value: ngs.CoefficientFunction
+    saturation: ngs.CoefficientFunction
+    depletion: ngs.CoefficientFunction
+
+    def __init__(
+            self,
+            flux: TransportCoefficient,
+            saturation: TransportCoefficient,
+            depletion: TransportCoefficient,
+            temporal: Callable[[u.Quantity], float] = None
+    ):
+        """Create a new proportional transport mechanism.
+
+        :param flux: The maximum flux across the membrane (units: substance/time).
+        :param saturation: Concentration above which full flux is attained.
+        :param depletion: Concentration below which flux is zero.
+        :param temporal: Optional time modulation factor for spatial coefficients.
+            The final value is: spatial_field(x) * temporal(t)
+        """
+        super().__init__()
+        self._register_coefficient("flux_value", flux, "catalytic activity", temporal)
+        self._register_coefficient("saturation", saturation, "molar concentration")
+        self._register_coefficient("depletion", depletion, "molar concentration")
+
+
+    def flux(self, source, target):
+        del target  # Unused
+        if source is None:
+            raise ValueError("ProportionalFlux requires a source compartment.")
+        proportionality_range = self.saturation - self.depletion
+        scale = ngs.IfPos(
+            source - self.saturation,
+            1.0,
+            ngs.IfPos(
+                source - self.depletion,
+                (source - self.depletion) / proportionality_range,
+                0.0,
+            ),
+        )
+        return self.flux_value * scale
+
+
 class Transparent(Transport):
     """Transport mechanism that aims to make the membrane as transparent as
     possible by mimicking the diffusive speed on both sides of the membrane.

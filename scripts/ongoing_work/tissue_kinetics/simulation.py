@@ -258,7 +258,12 @@ for i, (membrane, cell) in enumerate(zip(membranes, cells)):
         peak_width=SYNAPSE_DIAMETER / 6.0,
         total=n_syn * Q_per_synapse
     )
-    synapse_flux = transport.GeneralFlux(flux=synapse_distribution, temporal=nmdar_waveform)
+    synapse_flux = transport.ProportionalFlux(
+        flux=synapse_distribution,
+        saturation=CA_ECS,                    # 1.3 mM — full flux at resting [Ca2+]
+        depletion=0.47 * u.mmol / u.L,       # 0.47 mM — zero flux below this
+        temporal=nmdar_waveform
+    )
     membrane.add_transport(ca, synapse_flux, ecs, cell)
 
 # ================================================================
