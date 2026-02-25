@@ -125,8 +125,7 @@ class DiffusionSolver:
                 flux_density = transport.flux(src_c, trg_c)
 
                 if flux_density is not None:
-                    area = to_simulation_units(membrane.area, 'area')
-                    flux_density = (flux_density / area).Compile()
+                    flux_density = flux_density.Compile()
                     ds = ngs.ds(membrane.name)
                     if src_test is not None:
                         transport_form += -flux_density * src_test * ds
