@@ -250,6 +250,8 @@ for i, (membrane, cell) in enumerate(zip(membranes, cells)):
     if n_syn == 0:
         continue
 
+    # Localized peaks with saturation and depletion with linear response
+    # similar to [Ryan, Cook; 2023]
     synapse_distribution = cf.LocalizedPeaks(
         seed=0,
         num_peaks=n_syn,
@@ -260,7 +262,7 @@ for i, (membrane, cell) in enumerate(zip(membranes, cells)):
     )
     synapse_flux = transport.ProportionalFlux(
         flux=synapse_distribution,
-        saturation=CA_ECS,                    # 1.3 mM — full flux at resting [Ca2+]
+        saturation=CA_ECS,                   # 1.3 mM — full flux at resting [Ca2+]
         depletion=0.47 * u.mmol / u.L,       # 0.47 mM — zero flux below this
         temporal=nmdar_waveform
     )
