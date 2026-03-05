@@ -1,4 +1,4 @@
-from .transport import Transport, Passive, Active, GeneralFlux, Transparent
+from .transport import Transport, Passive, Active, GeneralFlux, ProportionalFlux, Transparent
 
 
 __all__ = [
@@ -6,5 +6,6 @@ __all__ = [
     "Passive",
     "Active",
     "GeneralFlux",
+    "ProportionalFlux",
     "Transparent"
 ]

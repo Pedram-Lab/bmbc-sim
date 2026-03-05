@@ -218,22 +218,26 @@ class Compartment:
             self,
             species: S,
             coupling_strength: u.Quantity,
+            baseline: u.Quantity = 0.0 * u.mmol / u.L,
     ) -> None:
-        """Set the species whose concentration drives mechanical contraction.
+        """Set the species whose concentration drives mechanical deformation.
 
         The coupling strength represents the pressure generated per unit concentration.
-        For example, a value of 1 kPa/mM means that 1 mM of the species generates
+        For example, a value of 1 kPa/mM means that 1 mM above baseline generates
         1 kPa of chemical pressure driving contraction.
 
-        :param species: Chemical species that drives contraction.
+        :param species: Chemical species that drives deformation.
         :param coupling_strength: Pressure generated per unit concentration (e.g., kPa/mM).
+        :param baseline: Baseline concentration at which no deformation occurs (default: 0).
+            Concentrations below baseline cause expansion; above baseline cause contraction.
         :raises ValueError: If a driving species is already defined for this compartment.
         """
         if self.coefficients.driving_species is not None:
             raise ValueError(f"Driving species already defined for compartment '{self.name}'")
 
         strength = to_simulation_units(coupling_strength, None)
-        self.coefficients.driving_species = (species, strength)
+        baseline_value = to_simulation_units(baseline, 'molar concentration')
+        self.coefficients.driving_species = (species, strength, baseline_value)
 
 
     def add_reaction(
@@ -302,4 +306,4 @@ class SimulationDetails:
     permittivity: C | None = field(default=None)
     porosity: float | None = field(default=None)
     elasticity: tuple[float, float] | None = field(default=None)  # (E, nu)
-    driving_species: tuple[S, float] | None = field(default=None)  # (species, strength)
+    driving_species: tuple[S, float, float] | None = field(default=None)  # (species, strength, baseline)

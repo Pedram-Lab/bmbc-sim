@@ -5,10 +5,11 @@ import ngsolve as ngs
 import astropy.units as u
 
 import bmbcsim.simulation.coefficient_fields as cf
+from bmbcsim.units import to_simulation_units
 
 
 TransportCoefficient = u.Quantity | cf.Coefficient
-_CoefficientSpec = tuple[cf.Coefficient, str | None, Callable | None]
+_CoefficientSpec = tuple[cf.Coefficient, str | None, Callable | None, bool]
 
 
 class Transport(abc.ABC):
@@ -17,6 +18,8 @@ class Transport(abc.ABC):
     def __init__(self):
         self._mutable_coefficients: list[tuple[Callable, ngs.Parameter]] = []
         self._coefficient_specs: dict[str, _CoefficientSpec] = {}
+        self._finalized_coefficients: list[str] = []
+        self._spatial_coefficients: dict[str, ngs.CoefficientFunction] = {}
 
 
     def flux(
@@ -56,7 +59,12 @@ class Transport(abc.ABC):
             parameter.Set(new_value)
 
 
-    def finalize_coefficients(self, region: ngs.Region, fes: ngs.FESpace) -> None:
+    def finalize_coefficients(
+            self,
+            region: ngs.Region,
+            fes: ngs.FESpace,
+            membrane_area: u.Quantity
+    ) -> None:
         """Convert deferred spatial coefficients to CoefficientFunctions.
 
         Called during simulation setup after membrane FE spaces are created.
@@ -65,10 +73,18 @@ class Transport(abc.ABC):
 
         :param region: The NGSolve region (typically a boundary region).
         :param fes: The finite element space for this membrane.
+        :param membrane_area: The area of the membrane for flux normalization.
         """
+        area = to_simulation_units(membrane_area, 'area')
+
         for attr_name, spec in list(self._coefficient_specs.items()):
-            field, physical_name, temporal = spec
+            field, physical_name, temporal, normalize_by_area = spec
             spatial_cf = field.to_coefficient_function(region, fes, physical_name)
+
+            if normalize_by_area and field.needs_area_normalization:
+                spatial_cf = spatial_cf / area
+
+            self._spatial_coefficients[attr_name] = spatial_cf
 
             if temporal is not None:
                 # Multiply by time-dependent parameter
@@ -78,6 +94,7 @@ class Transport(abc.ABC):
             else:
                 setattr(self, attr_name, spatial_cf)
 
+            self._finalized_coefficients.append(attr_name)
             del self._coefficient_specs[attr_name]
 
 
@@ -86,7 +103,8 @@ class Transport(abc.ABC):
             attr_name: str,
             coeff: TransportCoefficient,
             physical_name: str = None,
-            temporal: Callable[[u.Quantity], float] = None
+            temporal: Callable[[u.Quantity], float] = None,
+            normalize_by_area: bool = False
     ) -> None:
         """Register a coefficient for deferred conversion.
 
@@ -97,12 +115,14 @@ class Transport(abc.ABC):
             conversion.
         :param temporal: Optional time modulation factor. The final value is:
             spatial_value(x) * temporal(t).
+        :param normalize_by_area: Whether to divide by membrane area during
+            finalization. Use for coefficients that represent total fluxes.
         """
         if isinstance(coeff, u.Quantity):
             coeff = cf.Constant(coeff)
         if not isinstance(coeff, cf.Coefficient):
             raise ValueError("Coefficient must be Quantity or cf.Coefficient.")
-        self._coefficient_specs[attr_name] = (coeff, physical_name, temporal)
+        self._coefficient_specs[attr_name] = (coeff, physical_name, temporal, normalize_by_area)
 
 
 class Passive(Transport):
@@ -128,7 +148,8 @@ class Passive(Transport):
         """
         super().__init__()
         self._register_coefficient(
-            "permeability", permeability, "volumetric flow rate", temporal
+            "permeability", permeability, "volumetric flow rate", temporal,
+            normalize_by_area=True
         )
         if outside_concentration is not None:
             self._register_coefficient(
@@ -163,7 +184,8 @@ class Active(Transport):
             The final value is: spatial_field(x) * temporal(t)
         """
         super().__init__()
-        self._register_coefficient("v_max", v_max, "catalytic activity", temporal)
+        self._register_coefficient("v_max", v_max, "catalytic activity", temporal,
+                                    normalize_by_area=True)
         self._register_coefficient("km", km, "molar concentration")
 
 
@@ -190,7 +212,8 @@ class GeneralFlux(Transport):
             The final value is: spatial_field(x) * temporal(t)
         """
         super().__init__()
-        self._register_coefficient("flux_value", flux, "catalytic activity", temporal)
+        self._register_coefficient("flux_value", flux, "catalytic activity", temporal,
+                                    normalize_by_area=True)
 
 
     def flux(self, source, target):
@@ -198,18 +221,68 @@ class GeneralFlux(Transport):
         return self.flux_value
 
 
+class ProportionalFlux(Transport):
+    """Transport with flux gated by source concentration.
+
+    Scales flux by a clamped linear ramp of source concentration:
+    - c >= saturation: full flux (scale = 1)
+    - c <= depletion: zero flux (scale = 0)
+    - depletion < c < saturation: linear interpolation
+    """
+    flux_value: ngs.CoefficientFunction
+    saturation: ngs.CoefficientFunction
+    depletion: ngs.CoefficientFunction
+
+    def __init__(
+            self,
+            flux: TransportCoefficient,
+            saturation: TransportCoefficient,
+            depletion: TransportCoefficient,
+            temporal: Callable[[u.Quantity], float] = None
+    ):
+        """Create a new proportional transport mechanism.
+
+        :param flux: The maximum flux across the membrane (units: substance/time).
+        :param saturation: Concentration above which full flux is attained.
+        :param depletion: Concentration below which flux is zero.
+        :param temporal: Optional time modulation factor for spatial coefficients.
+            The final value is: spatial_field(x) * temporal(t)
+        """
+        super().__init__()
+        self._register_coefficient("flux_value", flux, "catalytic activity", temporal,
+                                    normalize_by_area=True)
+        self._register_coefficient("saturation", saturation, "molar concentration")
+        self._register_coefficient("depletion", depletion, "molar concentration")
+
+
+    def flux(self, source, target):
+        del target  # Unused
+        if source is None:
+            raise ValueError("ProportionalFlux requires a source compartment.")
+        proportionality_range = self.saturation - self.depletion
+        scale = ngs.IfPos(
+            source - self.saturation,
+            1.0,
+            ngs.IfPos(
+                source - self.depletion,
+                (source - self.depletion) / proportionality_range,
+                0.0,
+            ),
+        )
+        return self.flux_value * scale
+
+
 class Transparent(Transport):
     """Transport mechanism that aims to make the membrane as transparent as
     possible by mimicking the diffusive speed on both sides of the membrane.
     """
-    src_diffusivity: ngs.CoefficientFunction
-    tgt_diffusivity: ngs.CoefficientFunction
+    permeability: ngs.CoefficientFunction
     outside_concentration: ngs.CoefficientFunction | None = None
 
     def __init__(
             self,
-            source_diffusivity: TransportCoefficient,
-            target_diffusivity: TransportCoefficient,
+            source_diffusivity: u.Quantity,
+            target_diffusivity: u.Quantity,
             outside_concentration: u.Quantity = None,
             temporal: Callable[[u.Quantity], float] = None
     ):
@@ -226,11 +299,11 @@ class Transparent(Transport):
             The final value is: spatial_field(x) * temporal(t)
         """
         super().__init__()
-        self._register_coefficient(
-            "src_diffusivity", source_diffusivity, "diffusivity", temporal
+        permeability = 2 * source_diffusivity * target_diffusivity / (
+            source_diffusivity + target_diffusivity
         )
         self._register_coefficient(
-            "tgt_diffusivity", target_diffusivity, "diffusivity", temporal
+            "permeability", permeability, temporal=temporal, normalize_by_area=True
         )
         if outside_concentration is not None:
             self._register_coefficient(
@@ -240,7 +313,4 @@ class Transparent(Transport):
     def flux(self, source, target):
         s = source if source is not None else self.outside_concentration
         t = target if target is not None else self.outside_concentration
-        permeability = 2 * self.src_diffusivity * self.tgt_diffusivity / (
-            self.src_diffusivity + self.tgt_diffusivity
-        )
-        return permeability * (s - t)
+        return self.permeability * (s - t)

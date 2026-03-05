@@ -475,3 +475,99 @@ def test_smooth_surface_coefficient_in_passive_transport(simple_mesh, tmp_path):
     )
 
     sim.run(end_time=0.1 * u.ms, time_step=0.01 * u.ms)
+
+
+# Normalization tests
+def test_nodal_noise_total_normalization(volume_region, fes):
+    """NodalNoise with total parameter normalizes to target integral."""
+    target_total = 100 * u.amol
+    field = cf.NodalNoise(
+        seed=42,
+        value_range=(0.1 * mM, 1.0 * mM),
+        total=target_total,
+    )
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    # Integrate over region to verify total
+    integral = ngs.Integrate(coeff_func, volume_region.mesh, definedon=volume_region)
+    assert integral == pytest.approx(100.0, rel=1e-10)
+
+
+def test_smooth_noise_total_normalization(volume_region, fes):
+    """SmoothNoise with total parameter normalizes to target integral."""
+    target_total = 50 * u.amol
+    field = cf.SmoothNoise(
+        seed=42,
+        value_range=(0.1 * mM, 1.0 * mM),
+        correlation_length=2.0 * u.um,
+        total=target_total,
+    )
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    integral = ngs.Integrate(coeff_func, volume_region.mesh, definedon=volume_region)
+    assert integral == pytest.approx(50.0, rel=1e-10)
+
+
+def test_localized_peaks_total_normalization(volume_region, fes):
+    """LocalizedPeaks with total parameter normalizes to target integral."""
+    target_total = 75 * u.amol
+    field = cf.LocalizedPeaks(
+        seed=42,
+        num_peaks=3,
+        peak_value=10.0 * mM,
+        background_value=0.1 * mM,
+        peak_width=1.0 * u.um,
+        total=target_total,
+    )
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    integral = ngs.Integrate(coeff_func, volume_region.mesh, definedon=volume_region)
+    assert integral == pytest.approx(75.0, rel=1e-10)
+
+
+def test_normalization_preserves_spatial_pattern(volume_region, fes):
+    """Normalization preserves the relative spatial distribution."""
+    # Create two fields with same seed - one normalized, one not
+    field_unnorm = cf.SmoothNoise(
+        seed=42,
+        value_range=(0.1 * mM, 1.0 * mM),
+        correlation_length=2.0 * u.um,
+    )
+    field_norm = cf.SmoothNoise(
+        seed=42,
+        value_range=(0.1 * mM, 1.0 * mM),
+        correlation_length=2.0 * u.um,
+        total=50 * u.amol,
+    )
+
+    coeff_unnorm = field_unnorm.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff_norm = field_norm.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    # Get values at DOFs
+    gf_unnorm = ngs.GridFunction(fes)
+    gf_norm = ngs.GridFunction(fes)
+    gf_unnorm.Set(coeff_unnorm)
+    gf_norm.Set(coeff_norm)
+
+    vals_unnorm = gf_unnorm.vec.FV().NumPy()
+    vals_norm = gf_norm.vec.FV().NumPy()
+
+    # Ratios should be constant (spatial pattern preserved)
+    ratios = vals_norm / vals_unnorm
+    np.testing.assert_array_almost_equal(ratios, ratios[0], decimal=10)
+
+
+def test_normalization_without_total_unchanged(volume_region, fes):
+    """Without total parameter, field values match original behavior."""
+    field_no_total = cf.NodalNoise(seed=42, value_range=(0.1 * mM, 1.0 * mM))
+    field_none_total = cf.NodalNoise(seed=42, value_range=(0.1 * mM, 1.0 * mM), total=None)
+
+    coeff1 = field_no_total.to_coefficient_function(volume_region, fes, 'molar concentration')
+    coeff2 = field_none_total.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    gf1 = ngs.GridFunction(fes)
+    gf2 = ngs.GridFunction(fes)
+    gf1.Set(coeff1)
+    gf2.Set(coeff2)
+
+    np.testing.assert_array_equal(gf1.vec.FV().NumPy(), gf2.vec.FV().NumPy())

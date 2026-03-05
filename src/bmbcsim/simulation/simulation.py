@@ -9,7 +9,7 @@ import numpy as np
 import threadpoolctl
 
 from bmbcsim.logging import logger
-from bmbcsim.simulation.result_io import XdmfRecorder
+from bmbcsim.simulation.result_io import XdmfRecorder, write_coefficient_fields
 from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
@@ -161,6 +161,17 @@ class Simulation:
                 start_time=start_time.copy(),
             )
 
+            write_coefficient_fields(
+                directory=self.result_directory,
+                h5_filename="snapshot.h5",
+                mesh=self.simulation_geometry.mesh,
+                compartments=self.simulation_geometry.compartments,
+                membranes=self.simulation_geometry.membranes,
+                rd_fes=self._rd_fes,
+                membrane_fes=self._membrane_fes,
+                species=self.species,
+            )
+
             t = start_time.copy()
             for _ in trange(n_steps):
                 # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
@@ -288,7 +299,7 @@ class Simulation:
             fes = self._membrane_fes[membrane]
             boundary_region = mesh.Boundaries(membrane.name)
             for _, _, _, transport_mech in membrane.get_transport():
-                transport_mech.finalize_coefficients(boundary_region, fes)
+                transport_mech.finalize_coefficients(boundary_region, fes, membrane.area)
 
         # Set up the solution vectors
         for species in self.species:
