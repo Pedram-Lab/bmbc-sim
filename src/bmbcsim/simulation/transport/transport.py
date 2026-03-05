@@ -18,6 +18,8 @@ class Transport(abc.ABC):
     def __init__(self):
         self._mutable_coefficients: list[tuple[Callable, ngs.Parameter]] = []
         self._coefficient_specs: dict[str, _CoefficientSpec] = {}
+        self._finalized_coefficients: list[str] = []
+        self._spatial_coefficients: dict[str, ngs.CoefficientFunction] = {}
 
 
     def flux(
@@ -85,6 +87,8 @@ class Transport(abc.ABC):
             if is_flux_quantity and field.needs_area_normalization:
                 spatial_cf = spatial_cf / area
 
+            self._spatial_coefficients[attr_name] = spatial_cf
+
             if temporal is not None:
                 # Multiply by time-dependent parameter
                 time_param = ngs.Parameter(temporal(0.0 * u.s))
@@ -93,6 +97,7 @@ class Transport(abc.ABC):
             else:
                 setattr(self, attr_name, spatial_cf)
 
+            self._finalized_coefficients.append(attr_name)
             del self._coefficient_specs[attr_name]
 
 

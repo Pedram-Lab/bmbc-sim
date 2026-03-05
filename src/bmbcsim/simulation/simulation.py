@@ -9,7 +9,7 @@ import numpy as np
 import threadpoolctl
 
 from bmbcsim.logging import logger
-from bmbcsim.simulation.result_io import XdmfRecorder
+from bmbcsim.simulation.result_io import XdmfRecorder, write_coefficient_fields
 from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
@@ -159,6 +159,17 @@ class Simulation:
                 potential=self._pnp.potential if self.electrostatics else None,
                 deformation=self._mechanics.deformation if self.mechanics else None,
                 start_time=start_time.copy(),
+            )
+
+            write_coefficient_fields(
+                directory=self.result_directory,
+                h5_filename="snapshot.h5",
+                mesh=self.simulation_geometry.mesh,
+                compartments=self.simulation_geometry.compartments,
+                membranes=self.simulation_geometry.membranes,
+                rd_fes=self._rd_fes,
+                membrane_fes=self._membrane_fes,
+                species=self.species,
             )
 
             t = start_time.copy()
