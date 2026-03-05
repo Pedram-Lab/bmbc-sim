@@ -228,7 +228,8 @@ def _collect_surface_coefficients(
                 if cf is None:
                     continue
 
-                field_name = f"{species.name}_{attr_name}"
+                transport_type = type(transport).__name__
+                field_name = f"{species.name}_{transport_type}_{attr_name}"
                 gf = ngs.GridFunction(fes)
                 gf.Set(cf, definedon=boundary_region)
                 fields[field_name] = gf.vec.FV().NumPy().copy().astype(np.float32)
