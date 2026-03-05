@@ -9,6 +9,7 @@ from bmbcsim.logging import logger
 from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.simulation.result_io.xdmf_recorder import extract_dof_values
 
 
 def write_coefficient_fields(
@@ -21,12 +22,12 @@ def write_coefficient_fields(
     membrane_fes: dict[Membrane, ngs.FESpace],
     species: list[ChemicalSpecies],
 ) -> None:
-    """Write all coefficient fields to HDF5 and generate a coefficients.xdmf file.
+    """Write out coefficient fields.
 
-    Appends volumetric and surface coefficient data to the existing snapshot.h5
-    file and writes a coefficients.xdmf metadata file referencing it.
+    Appends volumetric and surface coefficient data to snapshot.h5 and writes
+    separate XDMF metadata files for volume and surface coefficients.
 
-    :param directory: The result directory containing snapshot.h5.
+    :param directory: Result directory containing snapshot.h5.
     :param h5_filename: Name of the HDF5 file (typically "snapshot.h5").
     :param mesh: The NGSolve mesh.
     :param compartments: Dict of compartment name -> Compartment.
@@ -35,15 +36,15 @@ def write_coefficient_fields(
     :param membrane_fes: Dict of Membrane -> boundary FE space.
     :param species: List of chemical species in the simulation.
     """
+    # Initialize paths and collect coefficient data
     h5_path = os.path.join(directory, h5_filename)
-    vol_xdmf_path = os.path.join(directory, "coefficients.xdmf")
+    vol_xdmf_path = os.path.join(directory, "volume_coefficients.xdmf")
     surf_xdmf_path = os.path.join(directory, "surface_coefficients.xdmf")
 
     compartment_list = list(compartments.values())
-    n_components = len(compartment_list)
 
     volume_fields = _collect_volume_coefficients(
-        compartment_list, rd_fes, n_components, species
+        compartment_list, rd_fes, species
     )
     surface_data = _collect_surface_coefficients(mesh, membranes, membrane_fes)
 
@@ -97,8 +98,7 @@ def write_coefficient_fields(
 
 def _collect_volume_coefficients(
     compartments: list[Compartment],
-    rd_fes: ngs.FESpace,
-    n_components: int,
+    vol_fes: ngs.FESpace,
     species: list[ChemicalSpecies],
 ) -> dict[str, np.ndarray]:
     """Collect all volumetric coefficient fields from compartment SimulationDetails.
@@ -107,9 +107,10 @@ def _collect_volume_coefficients(
     """
     fields: dict[str, np.ndarray] = {}
 
+    # Collect initial conditions and diffusivities for each species
     for sp in species:
         data = _project_volume_field(
-            compartments, rd_fes, n_components,
+            compartments, vol_fes,
             lambda c, s=sp: c.coefficients.initial_conditions.get(s),
         )
         if data is not None:
@@ -117,7 +118,7 @@ def _collect_volume_coefficients(
 
     for sp in species:
         data = _project_volume_field(
-            compartments, rd_fes, n_components,
+            compartments, vol_fes,
             lambda c, s=sp: c.coefficients.diffusion.get(s),
         )
         if data is not None:
@@ -134,7 +135,7 @@ def _collect_volume_coefficients(
         product_str = "+".join(s.name for s in products)
 
         kf_data = _project_volume_field(
-            compartments, rd_fes, n_components,
+            compartments, vol_fes,
             lambda c, k=reaction_key: (
                 c.coefficients.reactions[k][0] if k in c.coefficients.reactions else None
             ),
@@ -143,7 +144,7 @@ def _collect_volume_coefficients(
             fields[f"kf_{reactant_str}_to_{product_str}"] = kf_data
 
         kr_data = _project_volume_field(
-            compartments, rd_fes, n_components,
+            compartments, vol_fes,
             lambda c, k=reaction_key: (
                 c.coefficients.reactions[k][1] if k in c.coefficients.reactions else None
             ),
@@ -151,8 +152,9 @@ def _collect_volume_coefficients(
         if kr_data is not None:
             fields[f"kr_{reactant_str}_to_{product_str}"] = kr_data
 
+    # Collect permittivity if defined in any compartment
     data = _project_volume_field(
-        compartments, rd_fes, n_components,
+        compartments, vol_fes,
         lambda c: c.coefficients.permittivity,
     )
     if data is not None:
@@ -163,16 +165,14 @@ def _collect_volume_coefficients(
 
 def _project_volume_field(
     compartments: list[Compartment],
-    rd_fes: ngs.FESpace,
-    n_components: int,
+    fes: ngs.FESpace,
     get_cf,
 ) -> np.ndarray | None:
-    """Project a coefficient function from each compartment onto rd_fes.
-
-    Returns concatenated DOF values (same layout as species data in snapshot.h5),
-    or None if no compartment has the field.
+    """Project a coefficient function from each compartment onto the
+    reaction-diffusion FE space to have the same layout as species data in
+    snapshot.h5.
     """
-    gf = ngs.GridFunction(rd_fes)
+    gf = ngs.GridFunction(fes)
     gf.vec[:] = 0.0
 
     any_set = False
@@ -185,9 +185,7 @@ def _project_volume_field(
     if not any_set:
         return None
 
-    return np.concatenate(
-        [gf.components[i].vec.FV().NumPy() for i in range(n_components)]
-    ).astype(np.float32)
+    return extract_dof_values(gf)
 
 
 def _collect_surface_coefficients(
@@ -202,6 +200,7 @@ def _collect_surface_coefficients(
     result = {}
 
     for membrane_name, membrane in membranes.items():
+        # Extract coefficients
         fes = membrane_fes.get(membrane)
         if fes is None or fes.ndof == 0:
             continue
@@ -217,11 +216,13 @@ def _collect_surface_coefficients(
         if not has_coefficients:
             continue
 
+        # If there are coefficients, build the surface mesh for this membrane
+        # and interpolate coefficients onto it
         boundary_region = mesh.Boundaries(membrane_name)
         points, connectivity = _build_surface_mesh(boundary_region, fes)
 
         fields = {}
-        for species, source, target, transport in transport_list:
+        for species, _, _, transport in transport_list:
             for attr_name in transport._finalized_coefficients:
                 cf = transport._spatial_coefficients.get(attr_name)
                 if cf is None:
@@ -240,20 +241,17 @@ def _collect_surface_coefficients(
 
 def _build_surface_mesh(
     boundary_region: ngs.Region,
-    fes: ngs.FESpace,
+    membrane_fes: ngs.FESpace,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build surface mesh (points, triangles) for a membrane boundary.
-
-    Returns (points (ndof, 3) float32, connectivity (n_triangles, 3) int32).
-    """
+    """Build surface mesh (points, triangles) for a membrane boundary."""
+    # Extract coordinates of all vertices in the boundary region and build a mapping to global DOFs
     all_coords = np.array(boundary_region.mesh.ngmesh.Coordinates(), dtype=np.float32)
-
-    dof_coords = np.zeros((fes.ndof, 3), dtype=np.float32)
+    dof_coords = np.zeros((membrane_fes.ndof, 3), dtype=np.float32)
     seen: set[int] = set()
     triangles: list[list[int]] = []
 
     for el in boundary_region.Elements():
-        dofs = fes.GetDofNrs(el)
+        dofs = membrane_fes.GetDofNrs(el)
         verts = list(el.vertices)
         tri = []
         for dof, vert in zip(dofs, verts):

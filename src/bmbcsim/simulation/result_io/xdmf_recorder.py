@@ -11,6 +11,24 @@ from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.units import to_simulation_units
 
 
+def extract_dof_values(gf: ngs.GridFunction, n_components: int = None) -> np.ndarray:
+    """Extract DOF values from a compound GridFunction, concatenated across components.
+
+    This produces the same flat array layout used in snapshot.h5 — one block of
+    DOF values per compartment component, in compartment order.
+
+    :param gf: A compound GridFunction on a compound FE space.
+    :param n_components: Number of leading components to extract. If None,
+        all components are used. Useful when the FE space has extra components
+        (e.g., Lagrange multipliers for electrostatics).
+    :returns: 1-D float32 array of length sum(component.ndof).
+    """
+    components = gf.components[:n_components]
+    return np.concatenate(
+        [comp.vec.FV().NumPy() for comp in components]
+    ).astype(np.float32)
+
+
 class XdmfRecorder:
     """Records simulation quantities to XDMF/HDF5 format.
 
@@ -186,9 +204,7 @@ class XdmfRecorder:
             # Extract field values directly from GridFunction DOFs
             fields = {}
             for field_name, gf in self._grid_functions.items():
-                fields[field_name] = np.concatenate(
-                    [gf.components[i].vec.FV().NumPy() for i in range(self._n_components)]
-                ).astype(np.float32)
+                fields[field_name] = extract_dof_values(gf, self._n_components)
 
             # Extract deformation vector field (full-mesh VectorH1 → duplicated vertices)
             # VectorH1 stores DOFs in component-major order: [x0..xN, y0..yN, z0..zN]
