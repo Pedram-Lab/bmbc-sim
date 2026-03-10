@@ -112,7 +112,6 @@ def create_rusakov_geometry(
         glial_cutout = occ.Cone(occ.gp_Ax2(occ.Pnt(0, 0, -h), occ.Z), r_base, 0.0, h, 2 * pi)
         glia = glia - glial_cutout
 
-    glia = glia.MakeFillet(glia.edges, gw / 4)
     glia.bc("glial_membrane")
     glia.mat("glia")
 
