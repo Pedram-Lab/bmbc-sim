@@ -91,7 +91,7 @@ if PRE_OR_POST_SYNAPTIC == "pre":
     # Compute the channel flux on the presynaptic membrane
     CHANNEL_CURRENT = 0.5 * u.pA     # Sec. "Presynaptic calcium influx"
     TIME_CONSTANT = 10 / u.ms        # Sec. "Presynaptic calcium influx"
-    M50 = 39                         # Fig. 4 (number of channels required for 50% depletion)
+    M50 = 36                         # Fig. 4 (number of channels required for 50% depletion)
 
     # flux(t) = Q * (t*τ) * exp(-t*τ)
     Q = M50 * CHANNEL_CURRENT / (2 * const_F)
