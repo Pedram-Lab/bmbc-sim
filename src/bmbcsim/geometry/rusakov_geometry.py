@@ -56,12 +56,14 @@ def create_rusakov_geometry(
     sr = to_simulation_units(synapse_radius, 'length')
     gd = to_simulation_units(glia_distance, 'length')
     gw = to_simulation_units(glia_width, 'length')
+    maxh = to_simulation_units(mesh_size, 'length')
 
     gca = to_simulation_units(glial_coverage_angle, 'angle')
 
     # Create the containing box
     box = occ.Box(occ.Pnt(-ts/2, -ts/2, -ts/2), occ.Pnt(ts/2, ts/2, ts/2))
     box.faces.col = (0.5, 0.5, 0.5)
+    box.faces.maxh = maxh * float(max(1.0, total_size / u.um))  # Coarser mesh near the boundaries
     box.bc("neuropil_boundary")
     box.mat("neuropil")
 
@@ -69,21 +71,20 @@ def create_rusakov_geometry(
     pre_synapse_cutout = occ.HalfSpace(occ.Pnt(0, 0, -cs/2), occ.Dir(0, 0, -1)) \
         .bc("presynaptic_membrane")
     pre_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - pre_synapse_cutout
-    pre_synapse = pre_synapse.MakeFillet(pre_synapse.edges, sr / 12.)
     pre_synapse.faces.col = (1, 0, 0)
-    pre_synapse.faces[1].bc("terminal_membrane")
+    pre_synapse.faces.maxh = maxh
     pre_synapse.mat("presynapse")
 
     post_synapse_cutout = occ.HalfSpace(occ.Pnt(0, 0, cs/2), occ.Dir(0, 0, 1)) \
         .bc("postsynaptic_membrane")
     post_synapse = occ.Sphere(occ.Pnt(0, 0, 0), sr).bc("terminal_membrane") - post_synapse_cutout
-    post_synapse = post_synapse.MakeFillet(post_synapse.edges, sr / 10)
     post_synapse.faces.col = (0, 0, 1)
-    post_synapse.faces[1].bc("terminal_membrane")
+    post_synapse.faces.maxh = maxh
     post_synapse.mat("postsynapse")
 
     synapse_ecs = occ.Sphere(occ.Pnt(0, 0, 0), sr + gd).bc("synapse_boundary")
     synapse_ecs.faces.col = (0.5, 0, 0.5)
+    synapse_ecs.faces.maxh = maxh
     synapse_ecs.mat("synapse_ecs")
 
     # Create the glial cell with given coverage
@@ -114,7 +115,8 @@ def create_rusakov_geometry(
 
     glia.bc("glial_membrane")
     glia.mat("glia")
+    glia.faces.maxh = maxh
 
     geo = occ.Glue([box, pre_synapse, post_synapse, synapse_ecs, glia])
     geo = occ.OCCGeometry(geo)
-    return Mesh(geo.GenerateMesh(maxh=to_simulation_units(mesh_size, 'length')))
+    return Mesh(geo.GenerateMesh())
