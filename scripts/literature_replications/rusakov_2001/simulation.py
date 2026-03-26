@@ -14,7 +14,7 @@ import bmbcsim
 from bmbcsim.simulation import transport
 
 # Geometry parameters
-TOTAL_SIZE = 2 * u.um        # Guessed
+TOTAL_SIZE = 5 * u.um       # Guessed
 SYNAPSE_RADIUS = 0.1 * u.um  # Fig. 4
 CLEFT_SIZE = 30 * u.nm       # Sec. "Ca2 diffusion in a calyx-type synapse"
 GLIA_DISTANCE = 30 * u.nm    # Guessed
