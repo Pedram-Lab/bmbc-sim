@@ -33,12 +33,12 @@ MESH_SIZE = 0.1 * u.um
 # Presynaptic channel flux parameters
 CHANNEL_CURRENT = 0.5 * u.pA     # Sec. "Presynaptic calcium influx"
 TIME_CONSTANT = 10 / u.ms        # Sec. "Presynaptic calcium influx"
-M50 = 36                         # Fig. 4 (number of channels required for 50% depletion)
+M50 = 30                         # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
 
 # Postsynaptic channel flux parameters
 TAU_1 = 80 * u.ms           # Sec. "Postsynaptic calcium influx"
 TAU_2 = 3 * u.ms            # Sec. "Postsynaptic calcium influx"
-J50 = 29 * u.pA / u.um**2   # Fig. 4 (current density required for 50% depletion)
+J50 = 107 * u.pA / u.um**2   # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
 
 
 def run_simulation(
@@ -81,7 +81,7 @@ def run_simulation(
         end_time = end_time or 1.5 * u.ms
         record_interval = record_interval or 10 * u.us
     elif pre_or_post_synaptic == "post":
-        time_step = time_step or 0.2 * u.us
+        time_step = time_step or 1.0 * u.us
         end_time = end_time or 80 * u.ms
         record_interval = record_interval or 0.5 * u.ms
     else:

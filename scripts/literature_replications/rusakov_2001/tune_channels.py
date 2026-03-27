@@ -10,6 +10,7 @@ Uses an interval halving method:
 
 import numpy as np
 import xarray as xr
+import astropy.units as u
 
 import bmbcsim
 
@@ -34,7 +35,7 @@ def run_and_evaluate(channel_param, pre_or_post):
     if pre_or_post == "pre":
         kwargs["m50"] = channel_param
     elif pre_or_post == "post":
-        kwargs["j50"] = channel_param
+        kwargs["j50"] = channel_param * u.pA / u.um**2
 
     run_simulation(**kwargs)
 
