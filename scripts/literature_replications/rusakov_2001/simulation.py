@@ -33,12 +33,12 @@ MESH_SIZE = 0.1 * u.um
 # Presynaptic channel flux parameters
 CHANNEL_CURRENT = 0.5 * u.pA     # Sec. "Presynaptic calcium influx"
 TIME_CONSTANT = 10 / u.ms        # Sec. "Presynaptic calcium influx"
-M50 = 30                         # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
+M50 = 24                         # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
 
 # Postsynaptic channel flux parameters
 TAU_1 = 80 * u.ms           # Sec. "Postsynaptic calcium influx"
 TAU_2 = 3 * u.ms            # Sec. "Postsynaptic calcium influx"
-J50 = 107 * u.pA / u.um**2   # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
+J50 = 88 * u.pA / u.um**2   # Tuned to match 50% depletion in Fig. 4 for the "50% glial coverage" case
 
 
 def run_simulation(
@@ -119,7 +119,7 @@ def run_simulation(
     neuropil.initialize_species(ca, ca_resting)
 
     # Add diffusion in different compartments
-    synapse_ecs.add_diffusion(ca, diffusivity)
+    synapse_ecs.add_diffusion(ca, diffusivity / tortuosity**2)
     synapse.add_diffusion(ca, diffusivity)
     neuropil.add_diffusion(ca, diffusivity / tortuosity**2)
     neuropil.add_porosity(porosity)
