@@ -256,10 +256,11 @@ def run_simulation(
     # ================================================================
     # 6) Robin BC: transport from external reservoir into ECS
     # ================================================================
-    boundary_flux = transport.Passive(boundary_permeability, ca_ecs)
-
     for bnd in ["top", "bottom", "left", "right", "front", "back"]:
         boundary = geo.membranes[bnd]
+        boundary_flux = transport.Passive(
+            boundary_permeability * boundary.area, ca_ecs
+        )
         boundary.add_transport(ca, boundary_flux, None, ecs)
 
     # ================================================================
