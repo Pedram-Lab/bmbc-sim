@@ -53,7 +53,9 @@ def run_simulation(
     if pulse_times is None:
         pulse_times = [300, 310, 320, 330, 340] * u.ms
     if boundary_permeability is None:
-        boundary_permeability = (1 / tortuosity**2) * u.um**3 / u.ms
+        d_eff = diffusivity_ecs / tortuosity**2
+        l_char = max(box_size_x, box_size_y, box_size_z) / 2.0 * u.um
+        boundary_permeability = d_eff / l_char
 
     # ================================================================
     # 1) Load and post-process geometry from VTK
