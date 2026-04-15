@@ -16,6 +16,9 @@ def run_simulation(
     # Simulation identity / output
     simulation_name="tissue_kinetics",
     result_root="results",
+    # Feature switches
+    with_ecm=False,
+    with_mechanics=False,
     # Random seed for synapse distribution
     seed=42,
     # ECS / diffusion
@@ -46,9 +49,22 @@ def run_simulation(
     mesh_size=5.0,
     diffusivity_cyto=0.22 * u.um**2 / u.ms,
     depletion=0.47 * u.mmol / u.L,
+    # ECM reaction parameters (used when with_ecm or with_mechanics)
+    ecm_total=2.0 * u.mmol / u.L,
+    ecm_kf=10.0 * u.L / (u.mmol * u.s),
+    ecm_kr=0.1 / u.ms,
+    # Mechanics parameters (used when with_mechanics)
+    ecs_youngs_modulus=0.5 * u.kPa,
+    ecs_poisson_ratio=0.3,
+    cell_youngs_modulus=1.0 * u.kPa,
+    cell_poisson_ratio=0.4,
+    ecm_ca_coupling=0.1 * u.kPa / (u.mmol / u.L),
     # Performance
     n_threads=4,
 ):
+    # Mechanics implies ECM (needs ECM_Ca as driving species)
+    if with_mechanics:
+        with_ecm = True
     # Defaults for mutable / derived parameters
     if pulse_times is None:
         pulse_times = [300, 310, 320, 330, 340] * u.ms
@@ -172,6 +188,7 @@ def run_simulation(
         mesh=tissue_mesh,
         name=simulation_name,
         result_root=result_root,
+        mechanics=with_mechanics,
     )
     geo = sim.simulation_geometry
 
@@ -188,21 +205,58 @@ def run_simulation(
     print(f"Total membrane area: {total_membrane_area:.2f} um^2")
 
     # ================================================================
+    # 2b) Mechanical properties (optional)
+    # ================================================================
+    if with_mechanics:
+        ecs.add_elasticity(
+            youngs_modulus=ecs_youngs_modulus,
+            poisson_ratio=ecs_poisson_ratio,
+        )
+        for cell in cells:
+            cell.add_elasticity(
+                youngs_modulus=cell_youngs_modulus,
+                poisson_ratio=cell_poisson_ratio,
+            )
+
+    # ================================================================
     # 3) Species and initialization
     # ================================================================
     ca = sim.add_species("Ca")
     ecs.initialize_species(ca, ca_ecs)
 
+    if with_ecm:
+        ecm_k = (ecm_kf / ecm_kr).decompose()
+        ecm_ca_equilibrium = ecm_k * ca_ecs * ecm_total / (1 + ecm_k * ca_ecs)
+        ecm_concentration = ecm_total - ecm_ca_equilibrium
+
+        ecm = sim.add_species("ECM")
+        ecm_ca = sim.add_species("ECM_Ca")
+        ecs.initialize_species(ecm, ecm_concentration)
+        ecs.initialize_species(ecm_ca, ecm_ca_equilibrium)
+
+        if with_mechanics:
+            ecs.add_driving_species(
+                ecm_ca, ecm_ca_coupling, baseline=ecm_ca_equilibrium
+            )
+
     for cell in cells:
         cell.initialize_species(ca, 0.0 * u.mmol / u.L)
 
     # ================================================================
-    # 4) Diffusion
+    # 4) Diffusion and reactions
     # ================================================================
     ecs.add_diffusion(ca, diffusivity_ecs)
 
     for cell in cells:
         cell.add_diffusion(ca, diffusivity_cyto)
+
+    if with_ecm:
+        ecs.add_reaction(
+            reactants=[ca, ecm],
+            products=[ecm_ca],
+            k_f=ecm_kf,
+            k_r=ecm_kr,
+        )
 
     # ================================================================
     # 5) Ca2+ sink at distributed synapse patches
