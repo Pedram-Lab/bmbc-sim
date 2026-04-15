@@ -19,18 +19,30 @@ SPECIES_NAME = "Ca"
 FLUX_FIELD = "Ca_ProportionalFlux_flux_value"
 FLUX_THRESHOLD_FRACTION = 0.1  # fraction of max flux to detect peaks
 CLUSTER_MIN_DIST = 0.25  # µm, minimum distance between synapse centers
+# Select which sweep variant to load (mechanics implies ECM)
+WITH_ECM = False
+WITH_MECHANICS = False
 # =======================================
 
 
-def find_latest_sweep_dir(results_root):
-    """Find the latest ecs_ratio_* directory."""
-    pattern = re.compile(r"ecs_ratio_\d{4}-\d{2}-\d{2}-\d{6}$")
+def _variant_suffix(with_ecm, with_mechanics):
+    if with_mechanics:
+        return "_mechanics"
+    if with_ecm:
+        return "_ecm"
+    return ""
+
+
+def find_latest_sweep_dir(results_root, with_ecm=False, with_mechanics=False):
+    """Find the latest ecs_ratio[_variant]_<timestamp> directory."""
+    suffix = _variant_suffix(with_ecm, with_mechanics)
+    pattern = re.compile(rf"ecs_ratio{suffix}_\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}}$")
     dirs = [
         d for d in os.listdir(results_root)
         if pattern.match(d) and os.path.isdir(os.path.join(results_root, d))
     ]
     if not dirs:
-        raise RuntimeError("No ecs_ratio_* directories found")
+        raise RuntimeError(f"No ecs_ratio{suffix}_* directories found")
     return os.path.join(results_root, sorted(dirs)[-1])
 
 
@@ -121,9 +133,12 @@ def compute_local_ca(result_path, species=SPECIES_NAME):
     return times, local_ca
 
 
-def find_ratio_dirs(sweep_dir):
-    """Find all tissue_kinetics_ecs* result directories."""
-    pattern = re.compile(r"tissue_kinetics_ecs(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$")
+def find_ratio_dirs(sweep_dir, with_ecm=False, with_mechanics=False):
+    """Find all tissue_kinetics[_variant]_ecs* result directories."""
+    suffix = _variant_suffix(with_ecm, with_mechanics)
+    pattern = re.compile(
+        rf"tissue_kinetics{suffix}_ecs(\d+)_\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}}$"
+    )
     dirs = []
     for d in sorted(os.listdir(sweep_dir)):
         m = pattern.match(d)
@@ -133,8 +148,12 @@ def find_ratio_dirs(sweep_dir):
 
 
 if __name__ == "__main__":
-    sweep_dir = RESULTS_DIR or find_latest_sweep_dir(RESULTS_ROOT)
-    ratio_dirs = find_ratio_dirs(sweep_dir)
+    sweep_dir = RESULTS_DIR or find_latest_sweep_dir(
+        RESULTS_ROOT, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+    )
+    ratio_dirs = find_ratio_dirs(
+        sweep_dir, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+    )
     print(f"Found {len(ratio_dirs)} ECS ratio results in {sweep_dir}")
 
     # Load per-ratio ECS average concentration time series
