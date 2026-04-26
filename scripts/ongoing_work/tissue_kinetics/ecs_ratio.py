@@ -6,8 +6,9 @@ from pathlib import Path
 
 # Define the range of ECS ratios to simulate and the number of processes to use
 # Some values have to be slightly adapted to avoid numerical issues during meshing (e.g., 0.11 -> 0.112)
-ECS_RATIOS = [0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.112, 0.12, 0.134, 0.142, 0.15, 0.16, 0.17, 0.18, 0.19]
-N_PROCESSES = 1
+#ECS_RATIOS = [0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.112, 0.12, 0.134, 0.142, 0.15, 0.16, 0.17, 0.18, 0.19]
+ECS_RATIOS = [0.04, 0.09, 0.142, 0.19]
+N_PROCESSES = 4
 
 # Toggle ECM binding and mechanics (mechanics implies ECM)
 WITH_ECM = False
