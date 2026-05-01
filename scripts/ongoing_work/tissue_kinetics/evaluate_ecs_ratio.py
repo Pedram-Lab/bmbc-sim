@@ -1,5 +1,6 @@
 """Plot average ECS calcium concentration for different ECS volume fractions."""
 
+import argparse
 import os
 import re
 
@@ -13,7 +14,6 @@ from scipy.spatial import cKDTree
 from bmbcsim.simulation.result_io import ResultLoader
 
 # ============ Configuration ============
-RESULTS_DIR = None  # Set to a specific path, or None to auto-detect latest
 RESULTS_ROOT = "results"
 SPECIES_NAME = "Ca"
 FLUX_FIELD = "Ca_ProportionalFlux_flux_value"
@@ -147,27 +147,44 @@ def find_ratio_dirs(sweep_dir, with_ecm=False, with_mechanics=False):
     return dirs
 
 
-if __name__ == "__main__":
-    sweep_dir = RESULTS_DIR or find_latest_sweep_dir(
-        RESULTS_ROOT, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "path", nargs="?", default=None,
+        help="Path to sweep directory (default: latest auto-detected)",
     )
-    ratio_dirs = find_ratio_dirs(
-        sweep_dir, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+    parser.add_argument(
+        "--indices", type=int, nargs="*", default=None,
+        help="Indices into the sorted-by-ECS-fraction list to plot (default: all)",
     )
-    print(f"Found {len(ratio_dirs)} ECS ratio results in {sweep_dir}")
+    parser.add_argument(
+        "--plot", choices=["average", "synapses"], default="average",
+        help="Plot average ECS concentration or local concentration near synapses",
+    )
+    return parser.parse_args()
 
-    # Load per-ratio ECS average concentration time series
-    actual_fractions = []
-    all_concentrations = []
-    times = None
 
-    for input_pct, result_path in ratio_dirs:
-        loader = ResultLoader(result_path)
-        region_sizes = loader.compute_region_sizes()
+def compute_fractions(ratio_dirs):
+    """Compute actual ECS volume fractions (cheap; geometry only)."""
+    fractions = []
+    ecs_volumes = []
+    for _, result_path in ratio_dirs:
+        region_sizes = ResultLoader(result_path).compute_region_sizes()
         ecs_volume = region_sizes["ecs"]
         total_volume = sum(region_sizes.values())
-        actual_fraction = ecs_volume / total_volume
+        fractions.append(ecs_volume / total_volume)
+        ecs_volumes.append(ecs_volume)
+    return np.array(fractions), ecs_volumes
 
+
+def load_concentrations(ratio_dirs, ecs_volumes, fractions):
+    """Load average ECS concentration time series for the given dirs."""
+    all_concentrations = []
+    times = None
+    for (input_pct, result_path), ecs_volume, frac in zip(
+        ratio_dirs, ecs_volumes, fractions
+    ):
+        loader = ResultLoader(result_path)
         total_substance = xr.concat(
             [loader.load_total_substance(i) for i in range(len(loader))],
             dim="time",
@@ -178,62 +195,103 @@ if __name__ == "__main__":
         if times is None:
             times = total_substance.coords["time"].values
 
-        actual_fractions.append(actual_fraction)
         all_concentrations.append(ecs_conc.values)
-        print(f"  Loaded ecs_ratio input={input_pct}%, actual={actual_fraction*100:.1f}%")
+        print(f"  Loaded ecs_ratio input={input_pct}%, actual={frac*100:.0f}%")
 
-    # Plot with colormap based on actual ECS fraction
-    actual_fractions = np.array(actual_fractions)
-    norm = plt.Normalize(vmin=actual_fractions.min() * 100, vmax=actual_fractions.max() * 100)
-    cmap = cm.viridis
+    return all_concentrations, times
 
+
+def plot_average(times, fractions, concentrations, n_total, full_selection):
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for i, (fraction, conc) in enumerate(zip(actual_fractions, all_concentrations)):
-        color = cmap(norm(fraction * 100))
-        ax.plot(times, conc, linewidth=1.5, color=color)
-
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(sm, ax=ax)
-    cbar.set_label("Actual ECS fraction (%)")
+    if full_selection:
+        norm = plt.Normalize(vmin=fractions.min() * 100, vmax=fractions.max() * 100)
+        cmap = cm.coolwarm
+        for fraction, conc in zip(fractions, concentrations):
+            ax.plot(times, conc, linewidth=1.5, color=cmap(norm(fraction * 100)))
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        cbar = fig.colorbar(sm, ax=ax)
+        cbar.set_label("Actual ECS fraction (%)")
+    else:
+        for fraction, conc in zip(fractions, concentrations):
+            ax.plot(times, conc, linewidth=1.5, label=f"ECS {fraction*100:.0f}%")
+        ax.legend()
 
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel(f"{SPECIES_NAME} in ECS (mM)")
-    ax.set_title(f"ECS [{SPECIES_NAME}] across ECS volume fractions (N={len(ratio_dirs)})")
+    ax.set_title(f"ECS [{SPECIES_NAME}] across ECS volume fractions (N={n_total})")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
 
-    # ============ Local Ca near synapses ============
-    # Select 3 cases: lowest, midpoint, highest ECS fraction
-    idx_low = np.argmin(actual_fractions)
-    idx_high = np.argmax(actual_fractions)
-    idx_mid = np.argmin(np.abs(actual_fractions - np.median(actual_fractions)))
-    selected = [
-        (idx_low, "Low", "#1f77b4"),
-        (idx_mid, "Mid", "#2ca02c"),
-        (idx_high, "High", "#d62728"),
-    ]
 
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
+def plot_synapses(ratio_dirs, fractions, full_selection):
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    for idx, label, color in selected:
-        _, result_path = ratio_dirs[idx]
-        frac = actual_fractions[idx]
-        print(f"  Computing local Ca for {label} ECS={frac*100:.1f}% ...")
+    if full_selection:
+        norm = plt.Normalize(vmin=fractions.min() * 100, vmax=fractions.max() * 100)
+        cmap = cm.coolwarm
+        colors = [cmap(norm(f * 100)) for f in fractions]
+    else:
+        colors = [None] * len(fractions)
+
+    for i, ((_, result_path), frac) in enumerate(zip(ratio_dirs, fractions)):
+        print(f"  Computing local Ca for ECS={frac*100:.0f}% ...")
         t, local_ca = compute_local_ca(result_path)
         mean_ca = np.nanmean(local_ca, axis=1)
         std_ca = np.nanstd(local_ca, axis=1)
-        ax2.plot(t, mean_ca, color=color, linewidth=1.5,
-                 label=f"ECS {frac*100:.1f}% ({label})")
-        ax2.fill_between(t, mean_ca - std_ca, mean_ca + std_ca,
-                         alpha=0.2, color=color)
+        line, = ax.plot(t, mean_ca, color=colors[i], linewidth=1.5,
+                        label=f"ECS {frac*100:.0f}%")
+        ax.fill_between(t, mean_ca - std_ca, mean_ca + std_ca,
+                        alpha=0.2, color=line.get_color())
 
-    ax2.set_xlabel("Time (ms)")
-    ax2.set_ylabel(f"Local ECS [{SPECIES_NAME}] near synapses (mM)")
-    ax2.set_title(
+    if full_selection:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        cbar = fig.colorbar(sm, ax=ax)
+        cbar.set_label("Actual ECS fraction (%)")
+    else:
+        ax.legend()
+
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel(f"Local ECS [{SPECIES_NAME}] near synapses (mM)")
+    ax.set_title(
         f"Local [{SPECIES_NAME}] at synapse locations (mean ± std over synapses)"
     )
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    sweep_dir = args.path or find_latest_sweep_dir(
+        RESULTS_ROOT, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+    )
+    ratio_dirs = find_ratio_dirs(
+        sweep_dir, with_ecm=WITH_ECM, with_mechanics=WITH_MECHANICS
+    )
+    print(f"Found {len(ratio_dirs)} ECS ratio results in {sweep_dir}")
+
+    fractions, ecs_volumes = compute_fractions(ratio_dirs)
+
+    # Sort everything by actual ECS fraction
+    order = np.argsort(fractions)
+    fractions = fractions[order]
+    ecs_volumes = [ecs_volumes[i] for i in order]
+    ratio_dirs = [ratio_dirs[i] for i in order]
+
+    n_total = len(ratio_dirs)
+    if args.indices is None:
+        full_selection = True
+    else:
+        full_selection = False
+        fractions = fractions[args.indices]
+        ecs_volumes = [ecs_volumes[i] for i in args.indices]
+        ratio_dirs = [ratio_dirs[i] for i in args.indices]
+
+    if args.plot == "average":
+        concentrations, times = load_concentrations(ratio_dirs, ecs_volumes, fractions)
+        plot_average(times, fractions, concentrations, n_total, full_selection)
+    else:
+        plot_synapses(ratio_dirs, fractions, full_selection)
+
     plt.show()
