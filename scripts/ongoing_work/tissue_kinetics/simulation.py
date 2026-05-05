@@ -76,8 +76,9 @@ def run_simulation(
     # ================================================================
     # 1) Load and post-process geometry from VTK
     # ================================================================
+    print("Loading geometry...")
     geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
-    print("Cells after from_file:", len(geometry.cells))
+    print(f"  Cells after from_file: {len(geometry.cells)}")
 
     # --- 1a) compute the typical "diameter" of each cell ---
     cell_diameters = []
@@ -90,62 +91,33 @@ def run_simulation(
 
     cell_diameters = np.array(cell_diameters)
     median_diam = float(np.median(cell_diameters))
-    print(f"Median cell diameter (original units): {median_diam}")
+    print(f"  Median cell diameter (original units): {median_diam:.3f}")
 
-    # --- 1b) scale so that the median is ~4 um ---
+    # --- 1b) scale so that the median matches target_cell_diam ---
     scale_factor = target_cell_diam / median_diam
-    print("Scale factor to get ~4 um cells:", scale_factor)
+    print(f"  Scale factor to get ~{target_cell_diam} um cells: {scale_factor:.3f}")
 
     geometry = geometry.scale(scale_factor)
     geometry = geometry.decimate(factor=0.5)
     geometry = geometry.smooth(n_iter=10)
     geometry = geometry.decimate(factor=0.5)
 
-    # --- 1c) bounding box after scaling ---
-    minc, maxc = geometry.bounding_box()
-    size = maxc - minc
-    print("After cell-size-based scale, bbox:")
-    print("  min:", minc)
-    print("  max:", maxc)
-    print("  size:", size)
-
-    # --- 1d) translate so that the domain starts at (0,0,0) ---
+    # --- 1c) translate so that the domain starts at (0,0,0) ---
+    minc, _ = geometry.bounding_box()
     for cell in geometry.cells:
         cell.points -= minc
 
-    minc2, maxc2 = geometry.bounding_box()
-    size2 = maxc2 - minc2
-    print("After translate, bbox:")
-    print("  min:", minc2)
-    print("  max:", maxc2)
-    print("  size:", size2)
-    print("Max domain size after scaling (in um):", float(size2.max()))
-    print("Target median cell diameter (in um):", target_cell_diam)
-
-    # --- 1e) open ECS by shrinking the cells ---
+    # --- 1d) open ECS by shrinking the cells ---
     geometry = geometry.shrink_cells(1 - ecs_ratio, jitter=0.0)
-    print("Cells after shrink:", len(geometry.cells))
+    print(f"  Cells after shrink: {len(geometry.cells)}")
 
-    # --- 1f) crop a block around the center ---
+    # --- 1e) crop a block around the center ---
     minc3, maxc3 = geometry.bounding_box()
-    size3 = maxc3 - minc3
     center = 0.5 * (minc3 + maxc3)
-    print("BBox before clipping:")
-    print("  min:", minc3)
-    print("  max:", maxc3)
-    print("  size:", size3)
-    print("  center:", center)
-
     box_size = np.array([box_size_x, box_size_y, box_size_z])
     half_box = box_size / 2.0
-
     min_box = np.maximum(minc3, center - half_box)
     max_box = np.minimum(maxc3, center + half_box)
-
-    print("Desired clipping box:")
-    print("  min_box:", min_box)
-    print("  max_box:", max_box)
-    print("  box_size (approx):", max_box - min_box)
 
     geometry = geometry.keep_cells_within(
         min_coords=min_box,
@@ -154,7 +126,7 @@ def run_simulation(
     )
 
     n_cells = len(geometry.cells)
-    print("Cells after keep_cells_within:", n_cells)
+    print(f"  Cells after keep_cells_within: {n_cells}")
 
     if n_cells == 0:
         raise RuntimeError(
@@ -163,14 +135,15 @@ def run_simulation(
         )
 
     # ================================================================
-    # 1g) Cell and membrane names
+    # 1f) Cell and membrane names
     # ================================================================
     cell_names = [f"cell_{i}" for i in range(n_cells)]
     bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
     # ================================================================
-    # 1h) Generate NGSolve mesh
+    # 1g) Generate NGSolve mesh
     # ================================================================
+    print("Building mesh...")
     tissue_mesh: ngs.Mesh = geometry.to_ngs_mesh(
         mesh_size=mesh_size,
         min_coords=min_box,
@@ -179,11 +152,12 @@ def run_simulation(
         cell_names=cell_names,
         cell_bnd_names=bnd_names,
     )
-    print(f"Create mesh with {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices.")
+    print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices")
 
     # ================================================================
     # 2) Set up simulation
     # ================================================================
+    print("Setting up simulation...")
     sim = bmbcsim.Simulation(
         mesh=tissue_mesh,
         name=simulation_name,
@@ -199,10 +173,10 @@ def run_simulation(
     total_cell_volume = sum(cell.volume for cell in cells)
     total_volume = ecs.volume + total_cell_volume
     total_membrane_area = sum(membrane.area for membrane in membranes)
-    print(f"Total volume: {total_volume:.2f} um^3")
-    print(f"ECS volume: {ecs.volume:.2f} um^3")
-    print(f"ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
-    print(f"Total membrane area: {total_membrane_area:.2f} um^2")
+    print(f"  Total volume: {total_volume:.2f} um^3")
+    print(f"  ECS volume: {ecs.volume:.2f} um^3")
+    print(f"  ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
+    print(f"  Total membrane area: {total_membrane_area:.2f} um^2")
 
     # ================================================================
     # 2b) Mechanical properties (optional)
@@ -275,7 +249,7 @@ def run_simulation(
     synapses_per_cell = np.full(n_cells, base_synapses_per_cell)
     synapses_per_cell[cells_with_extra] += 1
 
-    print(f"Active synapses: {synapses_per_cell.sum()} (of {n_synapses} total)")
+    print(f"  Active synapses: {synapses_per_cell.sum()} (of {n_synapses} total)")
 
     # Biexponential NMDAR waveform with multi-pulse stimulation
     def nmdar_waveform(t):
@@ -322,13 +296,14 @@ def run_simulation(
     # ================================================================
     # 7) Run simulation
     # ================================================================
+    print("Running simulation...")
     sim.run(
         end_time=end_time,
         time_step=time_step,
         record_interval=record_interval_factor * time_step,
         n_threads=n_threads,
     )
-    print("Simulation completed.")
+    print("Simulation complete.")
 
 
 if __name__ == "__main__":
