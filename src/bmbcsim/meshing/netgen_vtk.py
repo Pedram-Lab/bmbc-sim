@@ -64,7 +64,7 @@ def pyvista_volume_to_netgen(
     # Note that pyvista surface elements appear to be flipped compared to
     # netgen surface elements. Thus, we flip them again below.
     surface = mesh.extract_surface()
-    fd = ng_mesh.Add(FaceDescriptor(surfnr=1, domin=mat, domout=0))
+    fd = ng_mesh.Add(FaceDescriptor(surfnr=1, domin=mat, domout=0, bc=1))
 
     original_vertices = surface['vtkOriginalPointIds']
     for cell in surface.regular_faces[:, ::-1]:
