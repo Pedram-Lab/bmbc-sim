@@ -268,7 +268,7 @@ def run_simulation(
             continue
 
         synapse_distribution = cf.LocalizedPeaks(
-            seed=0,
+            seed=int(rng.integers(0, 2**31)),
             num_peaks=n_syn,
             peak_value=Q_per_synapse,
             background_value=0.0 * u.mol / u.s,
