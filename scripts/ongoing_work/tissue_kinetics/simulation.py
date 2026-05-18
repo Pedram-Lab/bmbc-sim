@@ -12,6 +12,22 @@ from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
 
 
+def _on_outer_box(min_box, max_box, eps_rel=1e-6):
+    """Return a predicate flagging DOFs on any of the 6 simulation-box faces."""
+    min_box = np.asarray(min_box, dtype=float)
+    max_box = np.asarray(max_box, dtype=float)
+    eps = eps_rel * float((max_box - min_box).max())
+
+    def predicate(coords):
+        on_face = np.zeros(len(coords), dtype=bool)
+        for axis in range(3):
+            on_face |= np.isclose(coords[:, axis], min_box[axis], atol=eps)
+            on_face |= np.isclose(coords[:, axis], max_box[axis], atol=eps)
+        return on_face
+
+    return predicate
+
+
 def run_simulation(
     # Simulation identity / output
     simulation_name="tissue_kinetics",
@@ -261,6 +277,10 @@ def run_simulation(
                 total += math.exp(-dt / tau1) - math.exp(-dt / tau2)
         return total
 
+    # Skip membrane DOFs that lie on the outer simulation box: synapses there
+    # would straddle the simulation boundary rather than the cell membrane.
+    exclude_outer_box = _on_outer_box(min_box, max_box)
+
     # Distributed synapse patches using LocalizedPeaks
     for i, (membrane, cell) in enumerate(zip(membranes, cells)):
         n_syn = synapses_per_cell[i]
@@ -274,6 +294,7 @@ def run_simulation(
             background_value=0.0 * u.mol / u.s,
             peak_width=synapse_diameter / 6.0,
             total=n_syn * Q_per_synapse,
+            exclude_predicate=exclude_outer_box,
         )
         synapse_flux = transport.ProportionalFlux(
             flux=synapse_distribution,

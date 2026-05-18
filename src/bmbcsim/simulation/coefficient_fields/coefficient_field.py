@@ -5,6 +5,7 @@ used for initial conditions and simulation parameters.
 """
 
 from abc import ABC, abstractmethod
+from typing import Callable
 
 import astropy.units as u
 import numpy as np
@@ -291,8 +292,11 @@ class LocalizedPeaks(Coefficient):
     """Random field with localized Gaussian peaks.
 
     Creates a background value with a specified number of Gaussian peaks
-    centered at randomly selected mesh nodes. This is useful for modeling
-    localized concentrations or "hot spots".
+    centered at mesh DOFs. Peak locations are chosen by sampling random unit
+    directions from the seeded RNG and, for each direction, picking the DOF
+    with the largest cosine similarity to that direction relative to the
+    region's DOF centroid. This makes placements stable across meshes that
+    represent the same underlying geometry (up to mesh-resolution effects).
     """
 
     def __init__(
@@ -303,6 +307,7 @@ class LocalizedPeaks(Coefficient):
         peak_width: u.Quantity,
         seed: int = 0,
         total: u.Quantity | None = None,
+        exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
     ):
         """Initialize a localized peaks field.
 
@@ -313,6 +318,9 @@ class LocalizedPeaks(Coefficient):
         :param seed: Random seed for reproducibility (default is 0).
         :param total: Optional target integral. When provided, the field is scaled
             so its integral over the region equals this value.
+        :param exclude_predicate: Optional callable taking a ``(ndof, 3)``
+            array of DOF coordinates and returning a boolean mask of DOFs to
+            skip when selecting peak centers. ``None`` means no exclusions.
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -323,6 +331,7 @@ class LocalizedPeaks(Coefficient):
         self._peak_width = peak_width
         self._peak_node_indices: np.ndarray | None = None
         self._total = total
+        self._exclude_predicate = exclude_predicate
         self.needs_area_normalization = (total is None)
 
     def to_coefficient_function(
@@ -340,12 +349,10 @@ class LocalizedPeaks(Coefficient):
 
         # Get DOF coordinates (handles compressed boundary spaces correctly)
         dof_coords = _get_dof_coordinates(region, fes)
-
-        # Select random DOFs as peak centers (not global mesh nodes)
         n_dofs = fes.ndof
-        actual_num_peaks = min(self._num_peaks, n_dofs)
-        self._peak_node_indices = rng.choice(
-            n_dofs, size=actual_num_peaks, replace=False
+
+        self._peak_node_indices = _select_directional_peak_dofs(
+            dof_coords, self._num_peaks, rng, self._exclude_predicate
         )
         peak_centers = dof_coords[self._peak_node_indices]
 
@@ -408,3 +415,58 @@ def _get_dof_coordinates(region: ngs.Region, fes: ngs.FESpace) -> np.ndarray:
                 seen_dofs.add(dof)
 
     return dof_coords
+
+
+def _select_directional_peak_dofs(
+    dof_coords: np.ndarray,
+    num_peaks: int,
+    rng: np.random.Generator,
+    exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> np.ndarray:
+    """Choose ``num_peaks`` DOF indices via centroid-relative random directions.
+
+    For each of ``num_peaks`` random unit vectors drawn from ``rng``, pick the
+    DOF with the largest cosine similarity (smallest angular distance) to that
+    direction, computed in coordinates relative to the centroid of all DOFs.
+    DOFs flagged by ``exclude_predicate`` and DOFs coincident with the centroid
+    are skipped, and no DOF is chosen twice — collisions fall back to the
+    next-best DOF for that direction.
+
+    The result depends only on the DOF coordinates, the seed of ``rng``, and
+    the exclusion mask — so equivalent meshes of the same geometry yield the
+    same physical placements up to mesh resolution.
+    """
+    n_dofs = len(dof_coords)
+    centroid = dof_coords.mean(axis=0)
+    rel = dof_coords - centroid
+    norms = np.linalg.norm(rel, axis=1)
+
+    excluded = np.zeros(n_dofs, dtype=bool)
+    if exclude_predicate is not None:
+        excluded = np.asarray(exclude_predicate(dof_coords), dtype=bool)
+        if excluded.shape != (n_dofs,):
+            raise ValueError(
+                f"exclude_predicate returned mask of shape {excluded.shape}; "
+                f"expected ({n_dofs},)"
+            )
+    excluded = excluded | (norms == 0.0)
+
+    valid_count = int((~excluded).sum())
+    actual_num_peaks = min(num_peaks, valid_count)
+
+    rel_unit = rel / np.where(norms[:, None] > 0, norms[:, None], 1.0)
+
+    directions = rng.standard_normal((actual_num_peaks, 3))
+    dir_norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    directions /= np.where(dir_norms > 0, dir_norms, 1.0)
+
+    chosen_indices = np.empty(actual_num_peaks, dtype=np.int64)
+    available = ~excluded
+    for k, d in enumerate(directions):
+        cos_sim = rel_unit @ d
+        cos_sim_masked = np.where(available, cos_sim, -np.inf)
+        idx = int(np.argmax(cos_sim_masked))
+        chosen_indices[k] = idx
+        available[idx] = False
+
+    return chosen_indices

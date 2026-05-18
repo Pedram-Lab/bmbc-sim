@@ -341,6 +341,55 @@ def test_peaks_field_peak_value_reached(volume_region, fes):
     assert np.max(values) >= 9.0
 
 
+def test_peaks_field_cross_mesh_reproducibility():
+    """Same seed picks geometrically similar peak centers across different meshes."""
+    fine = create_sphere_geometry(radius=5 * u.um, mesh_size=0.8 * u.um)
+    coarse = create_sphere_geometry(radius=5 * u.um, mesh_size=1.5 * u.um)
+
+    def chosen_centers(mesh):
+        region = mesh.Materials("sphere")
+        space = ngs.H1(mesh, order=1)
+        field = cf.LocalizedPeaks(
+            seed=123,
+            num_peaks=5,
+            peak_value=10.0 * mM,
+            background_value=0.1 * mM,
+            peak_width=1.0 * u.um,
+        )
+        field.to_coefficient_function(region, space, 'molar concentration')
+        coords = np.array(mesh.ngmesh.Coordinates())
+        return coords[field.peak_node_indices]
+
+    fine_centers = chosen_centers(fine)
+    coarse_centers = chosen_centers(coarse)
+
+    # Each fine-mesh peak should have a coarse-mesh peak within ~1 coarse edge.
+    # The coarse mesh size is 1.5 um, so 2.5 um is a generous tolerance.
+    for c in fine_centers:
+        dists = np.linalg.norm(coarse_centers - c, axis=1)
+        assert dists.min() < 2.5
+
+
+def test_peaks_field_exclude_predicate_honored(volume_region, fes):
+    """exclude_predicate masks DOFs out of peak selection."""
+    def exclude_positive_x(coords):
+        return coords[:, 0] > 0
+
+    field = cf.LocalizedPeaks(
+        seed=42,
+        num_peaks=10,
+        peak_value=10.0 * mM,
+        background_value=0.1 * mM,
+        peak_width=1.0 * u.um,
+        exclude_predicate=exclude_positive_x,
+    )
+    field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    coords = np.array(volume_region.mesh.ngmesh.Coordinates())
+    chosen = coords[field.peak_node_indices]
+    assert np.all(chosen[:, 0] <= 0.0)
+
+
 # Integration tests
 def test_nodal_noise_in_simulation(simple_mesh, tmp_path):
     """cf.NodalNoise works in a full simulation context."""
