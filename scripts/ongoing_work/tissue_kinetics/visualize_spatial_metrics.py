@@ -10,7 +10,9 @@ Saves two PNGs next to the CSV (--out-dir to override) and prints the numbers.
 """
 
 import argparse
+import math
 import os
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,7 +22,29 @@ from scipy.stats import linregress
 
 def predictor_columns(df):
     return [c for c in df.columns
-            if c.startswith("d_") or c.startswith("v_local_")]
+            if c.startswith("d_") or c.startswith("vfrac_local_")]
+
+
+_VLOCAL_RE = re.compile(r"^v_local_r(?P<r>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)$")
+
+
+def normalize_v_local(df):
+    """Convert absolute v_local_r<r> columns into fractions of a full sphere of the same radius.
+
+    Renames each matching column from ``v_local_r<r>`` to ``vfrac_local_r<r>`` so the
+    semantic shift is visible in plots and downstream code.
+    """
+    rename = {}
+    for col in df.columns:
+        m = _VLOCAL_RE.match(col)
+        if not m:
+            continue
+        r = float(m.group("r"))
+        v_full = (4.0 / 3.0) * math.pi * r ** 3
+        df[col] = df[col] / v_full
+        rename[col] = f"vfrac_local_r{m.group('r')}"
+    df.rename(columns=rename, inplace=True)
+    return df
 
 
 def _unique_path_labels(paths):
@@ -240,6 +264,7 @@ def parse_args():
 def main():
     args = parse_args()
     df, labels = load_combined(args.csv)
+    df = normalize_v_local(df)
     n_raw = len(df)
     df = df[df["min_ca"] >= 0.2].reset_index(drop=True)
     n_dropped = n_raw - len(df)
