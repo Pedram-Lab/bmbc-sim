@@ -23,7 +23,53 @@ def predictor_columns(df):
             if c.startswith("d_") or c.startswith("v_local_")]
 
 
-def plot_scatter_grid(df, predictors, out_path):
+def _unique_path_labels(paths):
+    """Shortest trailing-path label per file that is unique within `paths`.
+
+    Builds each label from path components (parents + filename stem),
+    drops trailing components shared by all paths, then takes the shortest
+    unique suffix. Examples:
+      ecm_10.csv, ecm_25.csv (same dir)           -> "ecm_10", "ecm_25"
+      runA/spatial_metrics.csv, runB/...csv       -> "runA",   "runB"
+      a/b/c/sm.csv, x/y/c/sm.csv                  -> "b",      "y"
+    """
+    abs_paths = [os.path.abspath(p) for p in paths]
+    stems = [os.path.splitext(os.path.basename(p))[0] for p in abs_paths]
+    if len(paths) <= 1:
+        return stems
+    parent_parts = [os.path.dirname(p).split(os.sep) for p in abs_paths]
+    comps = [parts + [stem] for parts, stem in zip(parent_parts, stems)]
+
+    # Drop trailing components shared by all paths — they don't disambiguate.
+    while comps and len(comps[0]) > 1 and len({c[-1] for c in comps}) == 1:
+        comps = [c[:-1] for c in comps]
+
+    max_depth = max((len(c) for c in comps), default=1)
+    for k in range(1, max_depth + 1):
+        labels = [os.sep.join(c[-k:]) for c in comps]
+        if len(set(labels)) == len(labels):
+            return labels
+    return [os.sep.join(c) for c in comps]
+
+
+def load_combined(paths):
+    """Read all CSVs, tag each with a unique `_source` label, concat."""
+    labels = _unique_path_labels(paths)
+    frames = []
+    for path, label in zip(paths, labels):
+        df = pd.read_csv(path)
+        df["_source"] = label
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True), labels
+
+
+def _source_colors(df):
+    sources = list(dict.fromkeys(df["_source"].tolist()))
+    cmap = plt.get_cmap("tab10")
+    return sources, {s: cmap(i % 10) for i, s in enumerate(sources)}
+
+
+def plot_scatter_grid(df, predictors, out_path, color_sources=False):
     n = len(predictors)
     ncols = 3
     nrows = (n + ncols - 1) // ncols
@@ -31,9 +77,16 @@ def plot_scatter_grid(df, predictors, out_path):
                              squeeze=False)
     axes = axes.flatten()
     y = df["min_ca"].values
+    if color_sources:
+        sources, color_map = _source_colors(df)
     for ax, col in zip(axes, predictors):
         x = df[col].values
-        ax.scatter(x, y, alpha=0.35, s=14)
+        if color_sources:
+            for s in sources:
+                m = (df["_source"] == s).values
+                ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
+        else:
+            ax.scatter(x, y, alpha=0.35, s=14)
         res = linregress(x, y)
         xx = np.linspace(x.min(), x.max(), 64)
         ax.plot(xx, res.intercept + res.slope * xx, "r-", lw=2,
@@ -45,6 +98,12 @@ def plot_scatter_grid(df, predictors, out_path):
         ax.grid(True, alpha=0.3)
     for ax in axes[n:]:
         ax.set_visible(False)
+    if color_sources:
+        handles = [plt.Line2D([0], [0], marker="o", linestyle="",
+                              color=color_map[s], label=s) for s in sources]
+        fig.legend(handles=handles, loc="lower center",
+                   ncol=min(len(sources), 4),
+                   bbox_to_anchor=(0.5, -0.02), title="source")
     fig.suptitle(f"Univariate regressions  (N = {len(df)})", y=1.02, fontsize=13)
     plt.tight_layout()
     plt.savefig(out_path, dpi=120, bbox_inches="tight")
@@ -92,7 +151,7 @@ def pca_analysis(df, predictors):
     }
 
 
-def plot_pca(pca, df, out_path):
+def plot_pca(pca, df, out_path, color_sources=False):
     n_pred = len(pca["predictors"])
     pc_labels = [f"PC{k + 1}" for k in range(n_pred)]
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
@@ -126,7 +185,13 @@ def plot_pca(pca, df, out_path):
     ax = axes[1, 0]
     x = pca["pcs"][:, 0]
     y = df["min_ca"].to_numpy()
-    ax.scatter(x, y, alpha=0.35, s=14)
+    if color_sources:
+        sources, color_map = _source_colors(df)
+        for s in sources:
+            m = (df["_source"] == s).values
+            ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
+    else:
+        ax.scatter(x, y, alpha=0.35, s=14)
     res = linregress(x, y)
     xx = np.linspace(x.min(), x.max(), 64)
     ax.plot(xx, res.intercept + res.slope * xx, "r-", lw=2,
@@ -147,6 +212,12 @@ def plot_pca(pca, df, out_path):
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
+    if color_sources:
+        handles = [plt.Line2D([0], [0], marker="o", linestyle="",
+                              color=color_map[s], label=s) for s in sources]
+        fig.legend(handles=handles, loc="lower center",
+                   ncol=min(len(sources), 4),
+                   bbox_to_anchor=(0.5, -0.02), title="source")
     fig.suptitle(f"PCA on predictors (N = {len(df)})", y=1.02, fontsize=13)
     plt.tight_layout()
     plt.savefig(out_path, dpi=120, bbox_inches="tight")
@@ -155,9 +226,12 @@ def plot_pca(pca, df, out_path):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("csv", help="Path to spatial_metrics.csv")
+    p.add_argument("csv", nargs="+",
+                   help="Path(s) to spatial_metrics.csv file(s); data from all is combined")
     p.add_argument("--out-dir", default=None,
-                   help="Output directory for plots (default: same dir as csv)")
+                   help="Output directory for plots (default: same dir as first csv)")
+    p.add_argument("--color-sources", action="store_true",
+                   help="Color points by source CSV; otherwise all points are one color")
     p.add_argument("--show", action="store_true",
                    help="Show plots interactively after saving")
     return p.parse_args()
@@ -165,24 +239,29 @@ def parse_args():
 
 def main():
     args = parse_args()
-    df = pd.read_csv(args.csv)
+    df, labels = load_combined(args.csv)
     n_raw = len(df)
     df = df[df["min_ca"] >= 0.2].reset_index(drop=True)
     n_dropped = n_raw - len(df)
     predictors = predictor_columns(df)
-    print(f"Loaded {n_raw} rows from {args.csv}; "
-          f"dropped {n_dropped} with min_ca < 0, kept {len(df)}")
+    src_str = ", ".join(args.csv) if len(args.csv) <= 3 else f"{len(args.csv)} CSVs"
+    print(f"Loaded {n_raw} rows from {src_str}; "
+          f"dropped {n_dropped} with min_ca < 0.2, kept {len(df)}")
+    print(f"Sources ({len(labels)}): {labels}")
     print(f"Predictors ({len(predictors)}): {predictors}")
     print(f"min_ca:  min={df['min_ca'].min():.4f}  max={df['min_ca'].max():.4f}  "
           f"mean={df['min_ca'].mean():.4f}  std={df['min_ca'].std():.4f}")
     print()
 
-    out_dir = args.out_dir or os.path.dirname(args.csv) or "."
+    out_dir = (args.out_dir
+               or os.path.dirname(os.path.abspath(args.csv[0]))
+               or ".")
     os.makedirs(out_dir, exist_ok=True)
     scatter_path = os.path.join(out_dir, "scatter_min_ca.png")
     pca_path = os.path.join(out_dir, "pca_min_ca.png")
 
-    plot_scatter_grid(df, predictors, scatter_path)
+    plot_scatter_grid(df, predictors, scatter_path,
+                      color_sources=args.color_sources)
     print(f"Wrote {scatter_path}")
 
     print()
@@ -206,7 +285,7 @@ def main():
     for k in range(len(predictors)):
         print(f"  PC{k + 1:>2d}  {pca['per_pc_r2'][k]:16.4f}  {pca['cumulative_r2'][k]:16.4f}")
 
-    plot_pca(pca, df, pca_path)
+    plot_pca(pca, df, pca_path, color_sources=args.color_sources)
     print(f"\nWrote {pca_path}")
 
     if args.show:
