@@ -2,7 +2,7 @@
 
 Loads a spatial_metrics.csv (from evaluate_synapse_distribution_spatial.py) and:
   1. Plots min_ca vs each predictor (d_boundary, d_neighbor, v_local_*) with a
-     linear-regression line and the R^2.
+     saturating-exponential fit y = a*(1 - exp(-b*(x-c))) and the pseudo R^2.
   2. Runs a PCA on the standardized predictor matrix and reports component
      loadings + per-PC and cumulative R^2 of min_ca regressed on the PCs.
 
@@ -17,7 +17,33 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.optimize import curve_fit
 from scipy.stats import linregress
+
+
+def _sat_model(x, a, b, c):
+    return a * (1.0 - np.exp(-b * (x - c)))
+
+
+def fit_saturating(x, y):
+    """Fit y = a*(1 - exp(-b*(x-c))). Returns dict(popt, r2) or None on failure."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    span_x = float(x.max() - x.min())
+    if span_x <= 0 or len(x) < 4:
+        return None
+    a0 = float(y.max())
+    b0 = 3.0 / span_x
+    c0 = float(x.min()) - 0.5 / b0
+    try:
+        popt, _ = curve_fit(_sat_model, x, y, p0=(a0, b0, c0), maxfev=10000)
+    except (RuntimeError, ValueError):
+        return None
+    y_pred = _sat_model(x, *popt)
+    ss_res = float(((y - y_pred) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return {"popt": tuple(float(p) for p in popt), "r2": r2}
 
 
 def predictor_columns(df):
@@ -111,10 +137,11 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
                 ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
         else:
             ax.scatter(x, y, alpha=0.35, s=14)
-        res = linregress(x, y)
-        xx = np.linspace(x.min(), x.max(), 64)
-        ax.plot(xx, res.intercept + res.slope * xx, "r-", lw=2,
-                label=fr"$R^2 = {res.rvalue ** 2:.3f}$  (p={res.pvalue:.1e})")
+        fit = fit_saturating(x, y)
+        if fit is not None:
+            xx = np.linspace(x.min(), x.max(), 128)
+            ax.plot(xx, _sat_model(xx, *fit["popt"]), "r-", lw=2,
+                    label=fr"$R^2 = {fit['r2']:.3f}$")
         ax.set_xlabel(col)
         ax.set_ylabel("min_ca")
         ax.set_title(f"min_ca vs {col}")
@@ -216,10 +243,11 @@ def plot_pca(pca, df, out_path, color_sources=False):
             ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
     else:
         ax.scatter(x, y, alpha=0.35, s=14)
-    res = linregress(x, y)
-    xx = np.linspace(x.min(), x.max(), 64)
-    ax.plot(xx, res.intercept + res.slope * xx, "r-", lw=2,
-            label=fr"$R^2 = {res.rvalue ** 2:.3f}$")
+    fit = fit_saturating(x, y)
+    if fit is not None:
+        xx = np.linspace(x.min(), x.max(), 128)
+        ax.plot(xx, _sat_model(xx, *fit["popt"]), "r-", lw=2,
+                label=fr"$R^2 = {fit['r2']:.3f}$")
     ax.set_xlabel(f"PC1 ({pca['explained'][0] * 100:.1f}% of predictor variance)")
     ax.set_ylabel("min_ca")
     ax.set_title("min_ca vs PC1")
@@ -290,11 +318,15 @@ def main():
     print(f"Wrote {scatter_path}")
 
     print()
-    print("Univariate regressions (min_ca ~ predictor):")
-    print(f"  {'predictor':>16s}  {'R^2':>7s}  {'slope':>10s}  {'p-value':>10s}")
+    print("Saturating-exponential fits  min_ca ~ a*(1 - exp(-b*(predictor - c))):")
+    print(f"  {'predictor':>16s}  {'R^2':>7s}  {'a':>10s}  {'b':>10s}  {'c':>10s}")
     for col in predictors:
-        res = linregress(df[col].to_numpy(), df["min_ca"].to_numpy())
-        print(f"  {col:>16s}  {res.rvalue ** 2:7.4f}  {res.slope:10.4g}  {res.pvalue:10.2e}")
+        fit = fit_saturating(df[col].to_numpy(), df["min_ca"].to_numpy())
+        if fit is None:
+            print(f"  {col:>16s}    (fit failed)")
+            continue
+        a, b, c = fit["popt"]
+        print(f"  {col:>16s}  {fit['r2']:7.4f}  {a:10.4g}  {b:10.4g}  {c:10.4g}")
 
     pca = pca_analysis(df, predictors)
     print()
