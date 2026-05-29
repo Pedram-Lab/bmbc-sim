@@ -25,6 +25,8 @@ dependencies = [
   "threadpoolctl==3.6.0",
   'xarray',
   "zarr",
+  "dask[distributed]>=2024.5",
+  "dask-jobqueue>=0.8",
   'ngsolve==6.2.2406',
   'webgui_jupyter_widgets',
   'intel-openmp>=2025.1.1; sys_platform == "linux"',
