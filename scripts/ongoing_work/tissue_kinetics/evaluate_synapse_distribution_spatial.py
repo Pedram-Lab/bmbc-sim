@@ -19,25 +19,27 @@ import argparse
 import csv
 import os
 import re
+import sys
 import time
+from pathlib import Path
 
 import h5py
 import numpy as np
 import pyvista as pv
 import ngsolve as ngs
+from dask.distributed import Client, as_completed
 from scipy.spatial import cKDTree
 
 from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
+from bmbcsim.utils import create_cluster
 from evaluate_ecs_ratio import compute_local_ca, find_synapse_centers
 
 RESULTS_ROOT = "results"
-DEFAULT_RADII = (0.5, 1.0, 2.0, 4.0)  # um
-# Heat time step t = DEFAULT_HEAT_M * h_bar^2.
-# m=1 (Crane et al. baseline) is fine on 2D triangle meshes but underflows on the
-# 20 um, 3D ECS domain here. m~30 propagates the heat globally while still
-# resolving cell obstacles; tuned empirically on the synapse_distribution_ecs_25
-# sweep (median heat-method residual ~0.14 um, max ~0.33 um).
-DEFAULT_HEAT_M = 30.0
+DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
+# Note: Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat
+# globally while still resolving cell obstacles; tuned empirically on the
+# synapse_distribution_ecs_25 sweep (median heat-method residual ~0.14 um, max
+# ~0.33 um).
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +341,13 @@ def process_seed(result_path, radii, heat_m, eps_rel=1e-6):
 # CLI
 # ---------------------------------------------------------------------------
 
+def _process_seed_remote(result_path, radii, heat_m):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from evaluate_synapse_distribution_spatial import process_seed
+
+    return process_seed(result_path, radii, heat_m)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
@@ -350,14 +359,18 @@ def parse_args():
         help="Number of seeds to process (default: all available)",
     )
     p.add_argument(
+        "--n-workers", type=int, default=4,
+        help=f"Number of Dask workers (default: 4)",
+    )
+    p.add_argument(
         "--radii", default=",".join(f"{r}" for r in DEFAULT_RADII),
         help="Comma-separated radii (um) for v_local columns "
              f"(default: {','.join(str(r) for r in DEFAULT_RADII)})",
     )
     p.add_argument(
-        "--heat-m", type=float, default=DEFAULT_HEAT_M,
+        "--heat-m", type=float, default=30,
         help="Multiplier on mean-edge-length^2 for the heat time step "
-             f"(default: {DEFAULT_HEAT_M})",
+             f"(default: 30)",
     )
     p.add_argument(
         "--out", default=None,
@@ -389,13 +402,22 @@ def main():
     header += [f"v_local_r{r:g}" for r in radii]
 
     t_total = time.time()
-    with open(out_path, "w", newline="") as f:
+    n_workers = min(args.n_workers, len(seed_dirs))
+    with create_cluster("local", n_workers=n_workers) as cluster, \
+         Client(cluster) as client, \
+         open(out_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for seed_idx, result_path in seed_dirs:
+
+        futures = {
+            client.submit(_process_seed_remote, result_path, radii, args.heat_m): seed_idx
+            for seed_idx, result_path in seed_dirs
+        }
+        for future in as_completed(futures):
+            seed_idx = futures[future]
             t0 = time.time()
             try:
-                rows = process_seed(result_path, radii, args.heat_m)
+                rows = future.result()
             except Exception as e:
                 print(f"  seed {seed_idx}: skipped ({type(e).__name__}: {e})")
                 continue
