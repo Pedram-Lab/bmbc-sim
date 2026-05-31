@@ -5,18 +5,12 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from dask.distributed import Client, LocalCluster, as_completed
+from dask.distributed import Client, as_completed
+
+from bmbcsim.utils import create_cluster
 
 N_SEEDS = 100
-N_PROCESSES = 10
-
-
-def create_cluster(n_workers):
-    return LocalCluster(
-        n_workers=n_workers,
-        threads_per_worker=1,
-        processes=True,
-    )
+N_WORKERS = 10
 
 
 def run_seed(seed, result_root, ecs_ratio):
@@ -46,10 +40,10 @@ if __name__ == "__main__":
     result_root = (Path("results") / f"synapse_distribution_ecs_{suffix}_{timestamp}").resolve()
     result_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"Running {N_SEEDS} seeds with {N_PROCESSES} processes (ecs_ratio={ecs_ratio})")
+    print(f"Running {N_SEEDS} seeds with {N_WORKERS} workers (ecs_ratio={ecs_ratio})")
     print(f"Results will be stored in: {result_root}")
 
-    with create_cluster(N_PROCESSES) as cluster, Client(cluster) as client:
+    with create_cluster("local", n_workers=N_WORKERS) as cluster, Client(cluster) as client:
         futures = client.map(
             run_seed,
             list(range(N_SEEDS)),
