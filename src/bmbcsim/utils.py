@@ -57,9 +57,9 @@ def create_cluster(
 
     :param backend: ``"local"`` for an in-process ``LocalCluster``;
         ``"janelia"`` for an ``LSFCluster`` configured for Janelia's LSF scheduler.
-    :param n_workers: For ``"local"``, the fixed number of worker processes.
-        For ``"janelia"``, the *maximum* number of LSF jobs; the cluster scales
-        adaptively between 1 and this many jobs based on workload.
+    :param n_workers: Number of workers to launch. For ``"local"`` this is the
+        number of worker processes; for ``"janelia"`` this is the number of LSF
+        jobs requested.
     :param n_threads_per_worker: Threads per worker (``LocalCluster``) or cores
         per LSF job (``LSFCluster``). Defaults to 4.
     :param cluster_kwargs: Extra keyword arguments forwarded to the underlying
@@ -89,7 +89,7 @@ def create_cluster(
             }
             defaults.update(cluster_kwargs)
             cluster = LSFCluster(**defaults)
-            cluster.adapt(minimum_jobs=1, maximum_jobs=n_workers)
+            cluster.scale(jobs=n_workers)
             return cluster
         case _:
             raise ValueError(
