@@ -4,6 +4,7 @@ results/
 notebooks/
 scratch/
 plots/
+dask-worker-logs/
 *.ipynb
 *.vol
 *.csv
