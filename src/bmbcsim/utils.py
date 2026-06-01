@@ -69,22 +69,38 @@ def create_cluster(
     """
     match backend:
         case "local":
+            # One task slot per worker process (``threads_per_worker=1``): each
+            # NGSolve simulation runs alone in its own process, with its own
+            # memory and its own copy of Netgen's process-global state. Do NOT
+            # set this to ``n_threads_per_worker`` -- Dask would then run that
+            # many simulations concurrently *inside one process*, multiplying
+            # peak memory and sharing global solver state. Internal NGSolve
+            # threading is controlled separately via the simulation's own
+            # ``n_threads`` argument.
             return LocalCluster(
                 n_workers=n_workers,
-                threads_per_worker=n_threads_per_worker,
+                threads_per_worker=1,
                 processes=True,
                 **cluster_kwargs,
             )
         case "janelia":
             from dask_jobqueue import LSFCluster
 
-            # Janelia allocates memory by slot (15G / slot)
+            # Janelia allocates memory by slot (15G / slot).
+            #
+            # ``cores`` is what Dask turns into ``--nthreads`` (= task slots per
+            # worker), so it must be 1: one simulation per LSF job. The cores
+            # and memory the simulation actually needs are reserved separately
+            # via ``ncpus`` (LSF ``-n``) and ``memory`` (LSF ``-M``); NGSolve's
+            # internal threads then run on those reserved cores. Setting
+            # ``cores=n_threads_per_worker`` instead would pack that many
+            # simulations into a single worker process and exhaust the job's
+            # memory reservation.
             defaults: dict[str, Any] = {
                 "queue": "local",
-                "cores": n_threads_per_worker,
-                # One worker per LSF job, so cores == threads on that worker;
-                # otherwise dask-jobqueue splits each job into multiple workers.
+                "cores": 1,
                 "processes": 1,
+                "ncpus": n_threads_per_worker,
                 "memory": f"{15 * n_threads_per_worker}GB",
             }
             defaults.update(cluster_kwargs)
