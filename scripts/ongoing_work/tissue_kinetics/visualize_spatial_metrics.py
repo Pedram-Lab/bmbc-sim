@@ -282,6 +282,8 @@ def parse_args():
                    help="Path(s) to spatial_metrics.csv file(s); data from all is combined")
     p.add_argument("--out-dir", default=None,
                    help="Output directory for plots (default: same dir as first csv)")
+    p.add_argument("--threshold", type=float, default=0.0,
+                   help="Threshold for min_ca; rows with min_ca below this value are dropped")
     p.add_argument("--color-sources", action="store_true",
                    help="Color points by source CSV; otherwise all points are one color")
     p.add_argument("--show", action="store_true",
@@ -294,12 +296,12 @@ def main():
     df, labels = load_combined(args.csv)
     df = normalize_v_local(df)
     n_raw = len(df)
-    df = df[df["min_ca"] >= 0.2].reset_index(drop=True)
+    df = df[df["min_ca"] >= args.threshold].reset_index(drop=True)
     n_dropped = n_raw - len(df)
     predictors = predictor_columns(df)
     src_str = ", ".join(args.csv) if len(args.csv) <= 3 else f"{len(args.csv)} CSVs"
     print(f"Loaded {n_raw} rows from {src_str}; "
-          f"dropped {n_dropped} with min_ca < 0.2, kept {len(df)}")
+          f"dropped {n_dropped} with min_ca < {args.threshold}, kept {len(df)}")
     print(f"Sources ({len(labels)}): {labels}")
     print(f"Predictors ({len(predictors)}): {predictors}")
     print(f"min_ca:  min={df['min_ca'].min():.4f}  max={df['min_ca'].max():.4f}  "
