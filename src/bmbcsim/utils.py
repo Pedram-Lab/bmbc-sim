@@ -102,6 +102,10 @@ def create_cluster(
                 "processes": 1,
                 "ncpus": n_threads_per_worker,
                 "memory": f"{15 * n_threads_per_worker}GB",
+                # dask-jobqueue's LSFCluster default is 30 min, which is too
+                # short for our NGSolve sweeps and silently produces partial
+                # snapshot.h5 files (no data/time) when LSF kills the worker.
+                "walltime": "01:00",
                 # Write per-worker stdout/stderr to files (adds "#BSUB -o/-e").
                 # Without this, LSF emails each worker's output on completion --
                 # one email per job. The directory is created automatically.
