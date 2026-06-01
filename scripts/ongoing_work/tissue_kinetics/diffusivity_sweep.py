@@ -8,7 +8,7 @@ from dask.distributed import Client, as_completed
 from bmbcsim.utils import create_cluster
 
 ECS_RATIOS = [0.04, 0.19]
-DIFFUSIVITIES = [0.1, 0.4, 0.7, 1.0, 1.3]  # um^2 / ms
+DIFFUSIVITIES = [0.1, 0.3, 0.7, 1.5, 3.0]  # um^2 / ms
 N_SEEDS_PER_COMBO = 10
 N_WORKERS = None
 
