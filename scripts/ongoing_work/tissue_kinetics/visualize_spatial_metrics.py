@@ -118,11 +118,40 @@ def _unique_path_labels(paths):
 
 
 def load_combined(paths):
-    """Read all CSVs, tag each with a unique `_source` label, concat."""
+    """Read all CSVs, tag each with a unique `_source` label, concat.
+
+    Every CSV must contain ``min_ca`` and expose the same set of columns.
+    Pooling files with mismatched columns (e.g. one written before and one
+    after the ``v_sphere_box_r*`` change) makes ``pd.concat`` fill NaNs, which
+    later surface only as opaque curve-fit / "SVD did not converge" errors. We
+    catch the mismatch here and raise a clear, actionable message instead.
+    """
     labels = _unique_path_labels(paths)
     frames = []
+    ref_cols = None
+    ref_label = None
     for path, label in zip(paths, labels):
         df = pd.read_csv(path)
+        if "min_ca" not in df.columns:
+            raise SystemExit(f"Error: '{path}' has no 'min_ca' column; "
+                             "is it a spatial_metrics CSV?")
+        cols = set(df.columns)
+        if ref_cols is None:
+            ref_cols, ref_label = cols, label
+        elif cols != ref_cols:
+            missing = sorted(ref_cols - cols)
+            extra = sorted(cols - ref_cols)
+            detail = []
+            if missing:
+                detail.append(f"missing {missing}")
+            if extra:
+                detail.append(f"has unexpected {extra}")
+            raise SystemExit(
+                f"Error: column mismatch — '{label}' {' and '.join(detail)} "
+                f"relative to '{ref_label}'.\n"
+                "All input CSVs must come from the same evaluator version; "
+                "re-run evaluate_synapse_distribution_spatial.py to regenerate "
+                "the stale file(s).")
         df["_source"] = label
         frames.append(df)
     return pd.concat(frames, ignore_index=True), labels
@@ -160,6 +189,8 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
         ax.set_xlabel(col)
         ax.set_ylabel("min_ca")
         ax.set_title(f"min_ca vs {col}")
+        if col.startswith("vfrac_local_"):
+            ax.set_xlim(0.0, 1.0)
         ax.legend(loc="best", fontsize=9)
         ax.grid(True, alpha=0.3)
     for ax in axes[n:]:
@@ -179,13 +210,20 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
 def pca_analysis(df, predictors):
     """Return PCA loadings, explained variance, projections, and R^2 of min_ca."""
     X = df[predictors].to_numpy()
+    finite_col = np.isfinite(X).all(axis=0)
+    if not finite_col.all():
+        bad = [p for p, ok in zip(predictors, finite_col) if not ok]
+        raise SystemExit(
+            f"Error: non-finite (NaN/inf) values in predictor column(s) {bad}; "
+            "cannot run PCA. Check the input CSVs for missing entries or "
+            "zero sphere-box volumes.")
     mu = X.mean(axis=0)
     sd = X.std(axis=0, ddof=1)
     sd[sd == 0] = 1.0
     Xs = (X - mu) / sd
 
     # SVD-based PCA. Vt rows are component vectors; pcs = Xs @ Vt.T.
-    U, S, Vt = np.linalg.svd(Xs, full_matrices=False)
+    _, S, Vt = np.linalg.svd(Xs, full_matrices=False)
     variance = (S ** 2) / (len(Xs) - 1)
     explained = variance / variance.sum()
     pcs = Xs @ Vt.T
@@ -314,6 +352,10 @@ def main():
     df = df[df["min_ca"] >= args.threshold].reset_index(drop=True)
     n_dropped = n_raw - len(df)
     predictors = predictor_columns(df)
+    if not predictors:
+        raise SystemExit(
+            "Error: no predictor columns (expected d_* and/or v_local_r* "
+            f"columns); got columns {list(df.columns)}.")
     src_str = ", ".join(args.csv) if len(args.csv) <= 3 else f"{len(args.csv)} CSVs"
     print(f"Loaded {n_raw} rows from {src_str}; "
           f"dropped {n_dropped} with min_ca < {args.threshold}, kept {len(df)}")
