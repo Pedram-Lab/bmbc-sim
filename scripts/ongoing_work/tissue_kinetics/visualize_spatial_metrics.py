@@ -55,21 +55,36 @@ _VLOCAL_RE = re.compile(r"^v_local_r(?P<r>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)$")
 
 
 def normalize_v_local(df):
-    """Convert absolute v_local_r<r> columns into fractions of a full sphere of the same radius.
+    """Convert absolute v_local_r<r> columns into accessible-volume fractions.
 
-    Renames each matching column from ``v_local_r<r>`` to ``vfrac_local_r<r>`` so the
-    semantic shift is visible in plots and downstream code.
+    The denominator is the box-clipped sphere volume vol(ball(r) intersect domain),
+    stored per radius as ``v_sphere_box_r<r>`` by the evaluator. This makes the
+    ratio plateau at the local porosity for large r instead of decaying as the
+    sphere overruns the simulation box. If no matching ``v_sphere_box_r<r>`` column
+    is present (older CSVs), fall back to a full continuous sphere (4/3)*pi*r^3.
+
+    Renames each ``v_local_r<r>`` to ``vfrac_local_r<r>`` so the semantic shift is
+    visible in plots, and drops the consumed ``v_sphere_box_r<r>`` columns.
     """
     rename = {}
+    drop = []
     for col in df.columns:
         m = _VLOCAL_RE.match(col)
         if not m:
             continue
-        r = float(m.group("r"))
-        v_full = (4.0 / 3.0) * math.pi * r ** 3
-        df[col] = df[col] / v_full
-        rename[col] = f"vfrac_local_r{m.group('r')}"
+        r_str = m.group("r")
+        box_col = f"v_sphere_box_r{r_str}"
+        if box_col in df.columns:
+            denom = df[box_col].replace(0.0, np.nan)
+            drop.append(box_col)
+        else:
+            r = float(r_str)
+            denom = (4.0 / 3.0) * math.pi * r ** 3
+        df[col] = df[col] / denom
+        rename[col] = f"vfrac_local_r{r_str}"
     df.rename(columns=rename, inplace=True)
+    if drop:
+        df.drop(columns=drop, inplace=True)
     return df
 
 

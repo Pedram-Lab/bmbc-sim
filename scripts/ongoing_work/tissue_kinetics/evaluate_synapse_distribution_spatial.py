@@ -17,6 +17,7 @@ Output: a single pooled CSV at <sweep_dir>/spatial_metrics.csv.
 
 import argparse
 import csv
+import math
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ import numpy as np
 import pyvista as pv
 import ngsolve as ngs
 from dask.distributed import Client, as_completed
+from scipy.integrate import quad
 from scipy.spatial import cKDTree
 
 from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
@@ -272,6 +274,86 @@ def below_volume(ecs_tets_local, ecs_points, phi, r):
 
 
 # ---------------------------------------------------------------------------
+# Sphere ∩ box volume (analytic reference volume for normalizing v_local)
+# ---------------------------------------------------------------------------
+# The local ECS volume is normalized by the volume of a Euclidean ball clipped
+# to the simulation box, vol(ball(r) ∩ box), rather than a full sphere: the box
+# is a thin slab, so every ball pokes out of the z-faces and the full-sphere
+# volume is the wrong reference. This is a closed-form primitive (a 1D integral
+# over the slab axis of the circle–rectangle cross-section), so it does not
+# touch the mesh.
+
+def _disk_cap(rho, d):
+    """Area of the disk of radius rho lying beyond the line {coord > d}."""
+    if d >= rho:
+        return 0.0
+    if d <= -rho:
+        return math.pi * rho * rho
+    return rho * rho * math.acos(d / rho) - d * math.sqrt(max(rho * rho - d * d, 0.0))
+
+
+def _disk_corner(rho, a, b):
+    """Area of {x > a, y > b} ∩ disk(rho), for a, b >= 0 (origin inside rect)."""
+    if a * a + b * b >= rho * rho:
+        return 0.0
+
+    def prim(x):  # antiderivative of sqrt(rho^2 - x^2) - b
+        return 0.5 * (x * math.sqrt(max(rho * rho - x * x, 0.0))
+                      + rho * rho * math.asin(min(max(x / rho, -1.0), 1.0))) - b * x
+
+    return prim(math.sqrt(rho * rho - b * b)) - prim(a)
+
+
+def _disk_rect_area(rho, xl, xh, yl, yh):
+    """Area of disk(rho) centered at origin intersected with [xl,xh]x[yl,yh].
+
+    Assumes the origin is inside the rectangle (xl < 0 < xh, yl < 0 < yh), which
+    holds because each ball is centered on an in-domain synapse. Inclusion-
+    exclusion over the four sides; opposite sides never co-occur so only the four
+    adjacent-side corners contribute.
+    """
+    if rho <= 0:
+        return 0.0
+    area = math.pi * rho * rho
+    area -= _disk_cap(rho, xh) + _disk_cap(rho, -xl)
+    area -= _disk_cap(rho, yh) + _disk_cap(rho, -yl)
+    area += (_disk_corner(rho, xh, yh) + _disk_corner(rho, xh, -yl)
+             + _disk_corner(rho, -xl, yh) + _disk_corner(rho, -xl, -yl))
+    return area
+
+
+def sphere_box_volume(center, box_min, box_max, r):
+    """Volume of the ball of radius r at `center` intersected with the box.
+
+    Integrates the circle–rectangle cross-section along z. Breakpoints (where the
+    shrinking cross-section touches a box edge/corner) are handed to the
+    quadrature so it stays accurate and warning-free at the slab kinks.
+    """
+    xl, yl, zl = np.asarray(box_min) - center
+    xh, yh, zh = np.asarray(box_max) - center
+    z_lo = max(zl, -r)
+    z_hi = min(zh, r)
+    if z_lo >= z_hi:
+        return 0.0
+
+    dists = [abs(xl), abs(xh), abs(yl), abs(yh),
+             math.hypot(xl, yl), math.hypot(xl, yh),
+             math.hypot(xh, yl), math.hypot(xh, yh)]
+    breaks = sorted({
+        z for d in dists if d < r
+        for z in (math.sqrt(r * r - d * d), -math.sqrt(r * r - d * d))
+        if z_lo < z < z_hi
+    })
+
+    def cross_section(z):
+        rho = math.sqrt(max(r * r - z * z, 0.0))
+        return _disk_rect_area(rho, xl, xh, yl, yh)
+
+    val, _ = quad(cross_section, z_lo, z_hi, points=breaks or None, limit=200)
+    return float(val)
+
+
+# ---------------------------------------------------------------------------
 # Per-seed processing
 # ---------------------------------------------------------------------------
 
@@ -330,9 +412,17 @@ def process_seed(result_path, radii, heat_m, eps_rel=1e-6):
 
         v_local = [below_volume(ecs_tets_local, ecs_points, phi_np, r) for r in radii]
 
+        # Box-clipped reference volume: vol(Euclidean ball(r) intersect box),
+        # the normalization denominator for v_local. Closed-form primitive.
+        v_sphere_box = [
+            sphere_box_volume(synapse_centers[i], box_min, box_max, r)
+            for r in radii
+        ]
+
         x, y, z = synapse_centers[i]
         rows.append([i, float(x), float(y), float(z),
-                     d_boundary, d_neighbor, float(min_ca[i]), *v_local])
+                     d_boundary, d_neighbor, float(min_ca[i]), *v_local,
+                     *v_sphere_box])
 
     return rows
 
@@ -400,6 +490,7 @@ def main():
     header = ["seed", "synapse_idx", "x", "y", "z",
               "d_boundary", "d_neighbor", "min_ca"]
     header += [f"v_local_r{r:g}" for r in radii]
+    header += [f"v_sphere_box_r{r:g}" for r in radii]
 
     t_total = time.time()
     n_workers = min(args.n_workers, len(seed_dirs))
