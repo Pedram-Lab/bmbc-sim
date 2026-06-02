@@ -13,20 +13,20 @@ from dask.distributed import Client, as_completed
 from bmbcsim.utils import create_cluster
 
 # (label, value in mmol/L)
-CONCENTRATIONS = [
+ECM_TOTAL_VALUES = [("2e0mM", 2.0)]
+KD_VALUES = [
     ("2e-3uM", 2.0e-3),
     ("2e-2uM", 2.0e-2),
     ("2e-1uM", 2.0e-1),
     ("2e0mM", 2.0),
     ("2e1mM", 2e1),
 ]
-ECM_TOTAL_VALUES = CONCENTRATIONS
-KD_VALUES = CONCENTRATIONS
+ECS_RATIOS = [0.04, 0.19]
 N_SEEDS_PER_COMBO = 10
 N_WORKERS = None
 
 
-def run_seed(seed, result_root, ecm_total_mM, kd_mM):
+def run_seed(seed, result_root, ecm_total_mM, kd_mM, ecs_ratio):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from astropy import units as u
     from simulation import run_simulation
@@ -38,6 +38,7 @@ def run_seed(seed, result_root, ecm_total_mM, kd_mM):
         seed=seed,
         simulation_name=f"tissue_kinetics_seed{seed}",
         result_root=result_root,
+        ecs_ratio=ecs_ratio,
         ecm_total=ecm_total_mM * u.mmol / u.L,
         ecm_kf=ecm_kf,
         ecm_kr=ecm_kr,
@@ -52,19 +53,27 @@ if __name__ == "__main__":
 
     seeds = list(range(N_SEEDS_PER_COMBO))
     jobs = [
-        (seed, ecm_total, kd)
-        for ecm_total, kd, seed in product(ECM_TOTAL_VALUES, KD_VALUES, seeds)
+        (seed, ecm_total, kd, ecs)
+        for ecm_total, kd, ecs, seed in product(
+            ECM_TOTAL_VALUES, KD_VALUES, ECS_RATIOS, seeds
+        )
     ]
     print(
         f"Running {len(jobs)} simulations "
         f"({len(ECM_TOTAL_VALUES)} ecm_total x {len(KD_VALUES)} kd "
-        f"x {N_SEEDS_PER_COMBO} seeds)"
+        f"x {len(ECS_RATIOS)} ECS ratios x {N_SEEDS_PER_COMBO} seeds)"
     )
     print(f"Results will be stored in: {result_root.resolve()}")
 
     job_roots = [
-        str((result_root / f"ecm_total_{ecm_label}_kd_{kd_label}").resolve())
-        for _, (ecm_label, _), (kd_label, _) in jobs
+        str(
+            (
+                result_root
+                / f"ecm_total_{ecm_label}_kd_{kd_label}"
+                / f"ecs_{ecs}"
+            ).resolve()
+        )
+        for _, (ecm_label, _), (kd_label, _), ecs in jobs
     ]
     for root in set(job_roots):
         Path(root).mkdir(parents=True, exist_ok=True)
@@ -73,12 +82,12 @@ if __name__ == "__main__":
 
     with create_cluster("local", n_workers=n_workers) as cluster, Client(cluster) as client:
         futures = {}
-        for (seed, (ecm_label, ecm_val), (kd_label, kd_val)), root in zip(jobs, job_roots):
-            future = client.submit(run_seed, seed, root, ecm_val, kd_val)
-            futures[future] = (seed, ecm_label, kd_label)
+        for (seed, (ecm_label, ecm_val), (kd_label, kd_val), ecs), root in zip(jobs, job_roots):
+            future = client.submit(run_seed, seed, root, ecm_val, kd_val, ecs)
+            futures[future] = (seed, ecm_label, kd_label, ecs)
         for future in as_completed(futures):
-            seed, ecm_label, kd_label = futures[future]
+            seed, ecm_label, kd_label, ecs = futures[future]
             future.result()
-            print(f"Finished seed={seed} ecm_total={ecm_label} kd={kd_label}")
+            print(f"Finished seed={seed} ecm_total={ecm_label} kd={kd_label} ecs={ecs}")
 
     print(f"All simulations complete. Results in: {result_root.resolve()}")
