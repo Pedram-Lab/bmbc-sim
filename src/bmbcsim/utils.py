@@ -1,7 +1,29 @@
+import logging
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 from dask.distributed import LocalCluster, SpecCluster
+
+
+def _silence_heartbeat_shutdown(record: logging.LogRecord) -> bool:
+    """Drop the benign "Failed to communicate with scheduler during heartbeat"
+    traceback that dask workers log when the scheduler shuts down a moment
+    before their next periodic heartbeat fires. Real worker errors come through
+    a different log message ("Unexpected exception during heartbeat") and are
+    unaffected.
+    """
+    return "Failed to communicate with scheduler during heartbeat" not in record.getMessage()
+
+
+_heartbeat_filter_installed = False
+
+
+def _install_heartbeat_shutdown_filter() -> None:
+    global _heartbeat_filter_installed
+    if _heartbeat_filter_installed:
+        return
+    logging.getLogger("distributed.worker").addFilter(_silence_heartbeat_shutdown)
+    _heartbeat_filter_installed = True
 
 
 def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:
@@ -67,6 +89,7 @@ def create_cluster(
     :returns: A Dask cluster instance.
     :raises ValueError: If backend is not ``"local"`` or ``"janelia"``.
     """
+    _install_heartbeat_shutdown_filter()
     match backend:
         case "local":
             # One task slot per worker process (``threads_per_worker=1``): each

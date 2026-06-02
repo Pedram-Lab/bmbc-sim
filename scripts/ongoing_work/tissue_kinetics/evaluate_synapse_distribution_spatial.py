@@ -506,7 +506,6 @@ def main():
         }
         for future in as_completed(futures):
             seed_idx = futures[future]
-            t0 = time.time()
             try:
                 rows = future.result()
             except Exception as e:
@@ -515,7 +514,7 @@ def main():
             for r in rows:
                 writer.writerow([seed_idx, *r])
             f.flush()
-            print(f"  seed {seed_idx}: {len(rows)} synapses ({time.time()-t0:.1f}s)")
+            print(f"  seed {seed_idx}: {len(rows)} synapses")
 
     print(f"Wrote {out_path} in {time.time()-t_total:.1f}s")
 
