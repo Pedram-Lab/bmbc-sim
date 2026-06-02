@@ -12,12 +12,13 @@ from dask.distributed import Client, as_completed
 
 from bmbcsim.utils import create_cluster
 
-# (label, value in mmol/L) - 1nM, 1uM, 1mM, 1M
+# (label, value in mmol/L)
 CONCENTRATIONS = [
-    ("1nM", 1e-6),
-    ("1uM", 1e-3),
-    ("1mM", 1.0),
-    ("1M", 1e3),
+    ("2e-3uM", 2.0e-3),
+    ("2e-2uM", 2.0e-2),
+    ("2e-1uM", 2.0e-1),
+    ("2e0mM", 2.0),
+    ("2e1mM", 2e1),
 ]
 ECM_TOTAL_VALUES = CONCENTRATIONS
 KD_VALUES = CONCENTRATIONS
