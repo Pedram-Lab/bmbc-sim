@@ -232,6 +232,16 @@ def pca_analysis(df, predictors):
     y_c = y - y.mean()
     ss_tot = (y_c ** 2).sum()
 
+    # SVD pins each component only up to an overall sign. Orient every PC so it
+    # correlates non-negatively with min_ca (sign of cov(PC_k, min_ca); PCs are
+    # already zero-mean from standardization). In particular this makes PC1 run
+    # in the direction of increasing min_ca, so the asymmetric saturating fit in
+    # plot_pca lands the right way round instead of occasionally flipping — with
+    # the sign reversed the model can't follow the data and its R^2 collapses.
+    signs = np.where(y_c @ pcs < 0, -1.0, 1.0)
+    pcs *= signs
+    Vt = Vt * signs[:, None]
+
     per_pc_r2 = np.empty(len(predictors))
     for k in range(len(predictors)):
         res = linregress(pcs[:, k], y)
