@@ -214,9 +214,10 @@ def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses):
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=5, prune="both"))
 
     axes[-1].set_xticks(positions)
-    rot = 90 if n > 6 else 0
+    rot = 90 if n > 6 else 45
+    ha = "center" if rot == 90 else "right"
     axes[-1].set_xticklabels(
-        param_labels, rotation=rot, ha="center" if rot == 90 else "center",
+        param_labels, rotation=rot, ha=ha, rotation_mode="anchor",
         fontsize=8 if n > 12 else 9,
     )
     axes[0].set_title(
@@ -226,7 +227,8 @@ def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses):
     )
 
     fig.align_ylabels(axes)
-    fig.subplots_adjust(hspace=0.0, left=0.13, right=0.98, top=0.94, bottom=0.18 if rot else 0.08)
+    fig.subplots_adjust(hspace=0.0, left=0.13, right=0.98, top=0.94,
+                        bottom=0.2 if rot == 90 else 0.14)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 

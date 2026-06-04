@@ -15,9 +15,9 @@ from bmbcsim.utils import create_cluster
 # (label, value in mmol/L)
 ECM_TOTAL_VALUES = [("2e0mM", 2.0)]
 KD_VALUES = [
-    ("2e-3uM", 2.0e-3),
-    ("2e-2uM", 2.0e-2),
-    ("2e-1uM", 2.0e-1),
+    ("2e-3mM", 2.0e-3),
+    ("2e-2mM", 2.0e-2),
+    ("2e-1mM", 2.0e-1),
     ("2e0mM", 2.0),
     ("2e1mM", 2e1),
 ]
