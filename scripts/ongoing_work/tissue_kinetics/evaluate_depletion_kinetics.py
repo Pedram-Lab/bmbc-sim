@@ -2,22 +2,22 @@
 
 For every parameter value in a sweep directory we pool the local-ECS Ca traces
 of all synapses (aggregating over any ECS-ratio sub-levels and over all seeds)
-and reduce each trace to three metrics:
+and reduce each trace to three metrics. Each trace starts at the baseline C0 and
+dips to a minimum C_min after the stimulus at T0:
 
-  * t_depletion       - time (ms) at maximum depletion (the trace minimum)
-  * depletion         - the Ca value (mM) at that minimum
-  * replenishment_rate- 1/tau (s^-1) of a single-exponential fit to the
-                        *recovery phase* (t >= t_min):
-                            C(t) = C0 - D * exp(-(t - t_min) / tau)
+  * t_95_depletion     - time (ms, relative to the stimulus T0) to reach 95% of
+                         the depletion depth on the way down, i.e. the first
+                         crossing of C0 - 0.95*(C0 - C_min).
+  * depletion          - the Ca value (mM) at the minimum (the depletion depth).
+  * t_95_replenishment - time (ms, relative to the minimum) to recover 95% of the
+                         way back to C0 on the way up, i.e. the first crossing of
+                         C_min + 0.95*(C0 - C_min).
 
-Why not the double exponential ``C0 - a*(exp(-(t-t0)/tau1) - exp(-(t-t0)/tau2))``?
-On this data it is degenerate: the best fit always collapses to tau1 == tau2
-(an alpha-function pulse with a single timescale), because the depletion onset
-bottoms out within ~2-3 samples at dt = 10 ms and is not separately identifiable
-from the recovery. The three metrics above keep the same reported quantities
-(when, how deep, how fast it refills) but are each well-conditioned and
-independent; the recovery rate cleanly tracks the swept parameter (e.g. it rises
-monotonically with diffusivity).
+The two time metrics are read off directly as level crossings (linearly
+interpolated between the dt = 10 ms samples) rather than from a parametric fit:
+the depletion onset bottoms out within ~2-3 samples, which makes exponential
+time constants poorly identifiable, whereas the 95% crossing times are
+well-conditioned and track the swept parameter monotonically.
 
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
 of the sweep root (excluding processed-data/ and plots/), and every
@@ -39,7 +39,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import curve_fit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evaluate_ecs_ratio import compute_local_ca
@@ -54,9 +53,9 @@ _RESERVED_DIRS = {"processed-data", "plots"}
 
 METRICS = [
     # (csv/key name, axis label)
-    ("t_depletion", "Time to max\ndepletion after\nstimulus (ms)"),
+    ("t_95_depletion", "Time to 95%\ndepletion after\nstimulus (ms)"),
     ("depletion", "Depletion\n[Ca] (mM)"),
-    ("recovery_tau", "Recovery time\nconstant $\\tau$ (ms)"),
+    ("t_95_replenishment", "Time to 95%\nreplenishment (ms)"),
 ]
 
 
@@ -135,38 +134,56 @@ def _parabola_min(t, c, i):
     return float(xv), float(yv)
 
 
-def _recovery_model(t, D, tau, t_min):
-    return C0 - D * np.exp(-(t - t_min) / tau)
+def _crossing_time(t, c, i_start, level, descending):
+    """First (interpolated) time at/after index `i_start` where `c` hits `level`.
+
+    `descending=True` looks for `c` falling to/below `level`; `False` for `c`
+    rising to/above it. Linearly interpolates between the bracketing samples for
+    sub-sample resolution. Returns NaN if `level` is never reached within the
+    window.
+    """
+    for k in range(i_start, len(t)):
+        hit = c[k] <= level if descending else c[k] >= level
+        if not hit:
+            continue
+        if k == i_start:
+            return float(t[k])
+        c0, c1 = c[k - 1], c[k]
+        if c1 == c0:
+            return float(t[k])
+        frac = (level - c0) / (c1 - c0)
+        return float(t[k - 1] + frac * (t[k] - t[k - 1]))
+    return np.nan
 
 
 def trace_metrics(times, ca):
-    """Reduce one synapse trace to (t_depletion, depletion, recovery_tau).
+    """Reduce one synapse trace to (t_95_depletion, depletion, t_95_replenishment).
 
-    `t_depletion` is the latency (ms) of the trace minimum after the stimulus at
-    T0; `recovery_tau` is the time constant (ms) of the single-exponential
-    recovery fit. Returns NaNs for any metric that cannot be estimated (e.g. too
-    few recovery samples or a failed recovery fit).
+    `t_95_depletion` is the time (ms, relative to the stimulus T0) of the first
+    crossing of 95% of the depletion depth on the way down; `depletion` is the Ca
+    value (mM) at the minimum; `t_95_replenishment` is the time (ms, relative to
+    the minimum) of the first crossing of 95% recovery toward C0 on the way up.
+    Returns NaN for a time metric whose level is never reached within the window.
     """
     mask = times >= T0
     tt, cc = times[mask], ca[mask]
     i = int(np.argmin(cc))
-    t_dep, depletion = _parabola_min(tt, cc, i)
-    t_dep_after_stim = t_dep - T0
+    t_min, c_min = _parabola_min(tt, cc, i)
+    drop = C0 - c_min
+    if drop <= 0:
+        return np.nan, c_min, np.nan
 
-    # Recovery phase: from the discrete minimum onward.
-    tr, cr = tt[i:], cc[i:]
-    tau = np.nan
-    if len(tr) >= 4:
-        D0 = max(C0 - depletion, 1e-3)
-        try:
-            (_, tau), _ = curve_fit(
-                lambda t, D, tau: _recovery_model(t, D, tau, tr[0]),
-                tr, cr, p0=[D0, 80.0],
-                bounds=([0.0, 1.0], [2.0, 5000.0]), maxfev=20000,
-            )
-        except Exception:
-            tau = np.nan
-    return t_dep_after_stim, depletion, tau
+    # Depletion: first downward crossing of the 95%-of-depth level (from T0).
+    level_dep = C0 - 0.95 * drop
+    t_dep = _crossing_time(tt, cc, 0, level_dep, descending=True)
+    t_95_depletion = t_dep - T0 if np.isfinite(t_dep) else np.nan
+
+    # Replenishment: first upward crossing of the 95%-recovered level (from min).
+    level_rep = c_min + 0.95 * drop
+    t_rep = _crossing_time(tt, cc, i, level_rep, descending=False)
+    t_95_replenishment = t_rep - t_min if np.isfinite(t_rep) else np.nan
+
+    return t_95_depletion, c_min, t_95_replenishment
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +195,8 @@ def process_seed(result_path):
     times, local_ca = compute_local_ca(result_path)
     rows = []
     for s in range(local_ca.shape[1]):
-        t_dep, depletion, tau = trace_metrics(times, local_ca[:, s])
-        rows.append((s, t_dep, depletion, tau))
+        t_dep, depletion, t_rep = trace_metrics(times, local_ca[:, s])
+        rows.append((s, t_dep, depletion, t_rep))
     return rows
 
 
@@ -262,11 +279,11 @@ def run_sweep(sweep_dir):
             except Exception as e:
                 print(f"    {label}/{os.path.basename(sd)}: skipped ({type(e).__name__}: {e})")
                 continue
-            for syn, t_dep, depletion, tau in rows:
-                csv_rows.append((label, os.path.basename(sd), syn, t_dep, depletion, tau))
-                collected[label]["t_depletion"].append(t_dep)
+            for syn, t_dep, depletion, t_rep in rows:
+                csv_rows.append((label, os.path.basename(sd), syn, t_dep, depletion, t_rep))
+                collected[label]["t_95_depletion"].append(t_dep)
                 collected[label]["depletion"].append(depletion)
-                collected[label]["recovery_tau"].append(tau)
+                collected[label]["t_95_replenishment"].append(t_rep)
 
     data = {
         label: {key: np.asarray(vals, dtype=float) for key, vals in metrics.items()}
@@ -283,7 +300,8 @@ def run_sweep(sweep_dir):
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["parameter", "seed_dir", "synapse_idx",
-                    "t_depletion_after_stim_ms", "depletion_mM", "recovery_tau_ms"])
+                    "t_95_depletion_after_stim_ms", "depletion_mM",
+                    "t_95_replenishment_ms"])
         w.writerows(csv_rows)
 
     plot_path = os.path.join(plots_dir, "depletion_kinetics.png")
