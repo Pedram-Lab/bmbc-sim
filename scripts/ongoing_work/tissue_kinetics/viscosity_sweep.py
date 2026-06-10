@@ -15,11 +15,12 @@ from bmbcsim.utils import create_cluster
 # (label, value in mmol/L)
 ECM_TOTAL_VALUES = [("2e0mM", 2.0)]
 KD_VALUES = [
-    ("2e-3mM", 2.0e-3),
-    ("2e-2mM", 2.0e-2),
-    ("2e-1mM", 2.0e-1),
-    ("2e0mM", 2.0),
-    ("2e1mM", 2e1),
+    ("1e-1mM", 1e-1),
+    ("3e-1mM", 3e-1),
+    ("7e-1mM", 7e-1),
+    ("1.3e0mM", 1.3),
+    ("3e0mM", 3e0),
+    ("1e1mM", 1e1),
 ]
 ECS_RATIOS = [0.04, 0.19]
 N_SEEDS_PER_COMBO = 10
