@@ -21,9 +21,7 @@ monotonically with diffusivity).
 
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
 of the sweep root (excluding processed-data/ and plots/), and every
-``tissue_kinetics_seed*`` directory found anywhere beneath it is pooled. This
-handles both ``<param>/<ecs>/seeds/`` (diffusivity-sweep) and ``<param>/seeds/``
-(viscosity-sweep).
+``tissue_kinetics_seed*`` directory found anywhere beneath it is pooled.
 
 Output, per sweep: a stacked 3-panel box plot at
 ``<sweep>/plots/depletion_kinetics.png`` and a tidy per-synapse CSV at
