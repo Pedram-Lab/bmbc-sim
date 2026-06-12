@@ -126,7 +126,7 @@ def _parabola_min(t, c, i):
     if a <= 0:  # not a minimum
         return float(t[i]), float(c[i])
     xv = -b / (2 * a)
-    if not (x0 <= xv <= x2):
+    if not x0 <= xv <= x2:
         return float(t[i]), float(c[i])
     yv = (y0 * (xv - x1) * (xv - x2) / ((x0 - x1) * (x0 - x2))
           + y1 * (xv - x0) * (xv - x2) / ((x1 - x0) * (x1 - x2))
@@ -297,7 +297,7 @@ def run_sweep(sweep_dir):
     os.makedirs(plots_dir, exist_ok=True)
 
     csv_path = os.path.join(processed_dir, "depletion_kinetics.csv")
-    with open(csv_path, "w", newline="") as f:
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["parameter", "seed_dir", "synapse_idx",
                     "t_95_depletion_after_stim_ms", "depletion_mM",

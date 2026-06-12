@@ -450,7 +450,7 @@ def parse_args():
     )
     p.add_argument(
         "--n-workers", type=int, default=4,
-        help=f"Number of Dask workers (default: 4)",
+        help="Number of Dask workers (default: 4)",
     )
     p.add_argument(
         "--radii", default=",".join(f"{r}" for r in DEFAULT_RADII),
@@ -460,7 +460,7 @@ def parse_args():
     p.add_argument(
         "--heat-m", type=float, default=30,
         help="Multiplier on mean-edge-length^2 for the heat time step "
-             f"(default: 30)",
+             "(default: 30)",
     )
     p.add_argument(
         "--out", default=None,
@@ -496,7 +496,7 @@ def main():
     n_workers = min(args.n_workers, len(seed_dirs))
     with create_cluster("local", n_workers=n_workers) as cluster, \
          Client(cluster) as client, \
-         open(out_path, "w", newline="") as f:
+         open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
 
