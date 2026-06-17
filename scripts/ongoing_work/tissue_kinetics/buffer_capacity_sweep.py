@@ -49,7 +49,7 @@ def run_seed(seed, result_root, ecm_total_mM, kd_mM, ecs_ratio):
 
 
 if __name__ == "__main__":
-    result_root = Path("results") / "buffer-sweep"
+    result_root = Path("results") / "buffer-capacity-sweep"
     result_root.mkdir(parents=True, exist_ok=True)
 
     seeds = list(range(N_SEEDS_PER_COMBO))
