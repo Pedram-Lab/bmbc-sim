@@ -59,6 +59,9 @@ def run_simulation(
     # Geometry processing
     target_cell_diam=4.0,
     ecs_ratio=0.1,
+    # ECS ratio at which the cell set is cropped/numbered (step 1d); set to the
+    # largest ecs_ratio in a comparison sweep. See step 1d.
+    reference_ecs_ratio=0.19,
     box_size_x=20.0,
     box_size_y=20.0,
     box_size_z=1.0,
@@ -123,11 +126,15 @@ def run_simulation(
     for cell in geometry.cells:
         cell.points -= minc
 
-    # --- 1d) open ECS by shrinking the cells ---
-    geometry = geometry.shrink_cells(1 - ecs_ratio, jitter=0.0)
-    print(f"  Cells after shrink: {len(geometry.cells)}")
+    # --- 1d) crop at a fixed reference shrink so the cell set is ecs_ratio-independent ---
+    # Cropping at reference_ecs_ratio (not the run's ecs_ratio) keeps the kept set,
+    # its numbering (step 1f) and synapse seeding (step 5) identical across ratios,
+    # so (seed, synapse_idx) is the same synapse everywhere; step 1e then scales to
+    # the run's ecs_ratio. shrink_cells/LocalizedPeaks are both centroid-radial, so
+    # only cell size (hence ECS volume) changes. Cropping shrunk (vs full-size)
+    # cells also avoids over-packing the box and pinching the ECS apart.
+    geometry = geometry.shrink_cells(1 - reference_ecs_ratio, jitter=0.0)
 
-    # --- 1e) crop a block around the center ---
     minc3, maxc3 = geometry.bounding_box()
     center = 0.5 * (minc3 + maxc3)
     box_size = np.array([box_size_x, box_size_y, box_size_z])
@@ -140,9 +147,15 @@ def run_simulation(
         max_coords=max_box,
         inside_threshold=0.1
     )
-
     n_cells = len(geometry.cells)
-    print(f"  Cells after keep_cells_within: {n_cells}")
+    print(f"  Cells after keep_cells_within (reference ecs={reference_ecs_ratio}): "
+          f"{n_cells}")
+
+    # --- 1e) scale the fixed cell set to this run's ECS ratio (grows it for smaller ratios) ---
+    geometry = geometry.shrink_cells(
+        (1 - ecs_ratio) / (1 - reference_ecs_ratio), jitter=0.0
+    )
+    print(f"  Cells scaled to ecs_ratio={ecs_ratio}: {n_cells} cells")
 
     if n_cells == 0:
         raise RuntimeError(
@@ -169,6 +182,18 @@ def run_simulation(
         cell_bnd_names=bnd_names,
     )
     print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices")
+
+    # ECS must be a single connected region (to_ngs_mesh names a disconnected one
+    # "ecs:region_0", "ecs:region_1", ...). Fail fast: it's unphysical, and the
+    # seed-independent geometry would break every seed identically.
+    ecs_regions = [m for m in set(tissue_mesh.GetMaterials())
+                   if m == "ecs" or m.startswith("ecs:")]
+    if len(ecs_regions) != 1:
+        raise RuntimeError(
+            f"ECS split into {len(ecs_regions)} disconnected regions "
+            f"{sorted(ecs_regions)} at ecs_ratio={ecs_ratio}; raise "
+            f"reference_ecs_ratio (now {reference_ecs_ratio}) toward it."
+        )
 
     # ================================================================
     # 2) Set up simulation
