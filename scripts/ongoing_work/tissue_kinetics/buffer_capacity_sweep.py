@@ -33,8 +33,8 @@ def run_seed(seed, result_root, ecm_total_mM, kd_mM, ecs_ratio):
     from simulation import run_simulation
 
     # Match the default ecm_kf in simulation.run_simulation; vary ecm_kr to set Kd.
-    ecm_kf = 10.0 * u.L / (u.mmol * u.s)
-    ecm_kr = kd_mM * (u.mmol / u.L) * ecm_kf
+    ecm_kr = 1e3 / u.s
+    ecm_kf = ecm_kr / (kd_mM * u.mmol / u.L)
     run_simulation(
         seed=seed,
         simulation_name=f"tissue_kinetics_seed{seed}",
