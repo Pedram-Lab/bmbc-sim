@@ -90,9 +90,21 @@ if __name__ == "__main__":
         for (seed, (coupling_label, coupling_val), ecs), root in zip(jobs, job_roots):
             future = client.submit(run_seed, seed, root, coupling_val, ecs)
             futures[future] = (seed, coupling_label, ecs)
+        failures = []
         for future in as_completed(futures):
             seed, coupling_label, ecs = futures[future]
-            future.result()
-            print(f"Finished seed={seed} coupling={coupling_label} ecs={ecs}")
+            # Isolate failures: one crashing run (e.g. a singular matrix in the
+            # mechanics-driven diffusion solve on a fragile low-ECS mesh) must not
+            # abort the whole sweep. Log it and let the other runs finish.
+            try:
+                future.result()
+                print(f"Finished seed={seed} coupling={coupling_label} ecs={ecs}")
+            except Exception as exc:
+                failures.append((seed, coupling_label, ecs, exc))
+                print(f"FAILED seed={seed} coupling={coupling_label} ecs={ecs}: {exc!r}")
 
+    if failures:
+        print(f"\n{len(failures)} of {len(jobs)} runs failed:")
+        for seed, coupling_label, ecs, exc in failures:
+            print(f"  seed={seed} coupling={coupling_label} ecs={ecs}: {exc!r}")
     print(f"All simulations complete. Results in: {result_root.resolve()}")
