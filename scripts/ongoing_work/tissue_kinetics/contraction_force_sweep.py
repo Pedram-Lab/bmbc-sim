@@ -28,10 +28,9 @@ KD_mM = 1.3
 # 1e-1 is the run_simulation default.
 COUPLING_VALUES = [
     ("0e0", 0.0),
+    ("1e-2", 0.0),
     ("3e-2", 3e-2),
     ("1e-1", 1e-1),
-    ("3e-1", 3e-1),
-    ("1e0", 1e0),
 ]
 ECS_RATIOS = [0.04, 0.19]
 N_SEEDS_PER_COMBO = 10
