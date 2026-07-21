@@ -12,7 +12,15 @@ For each seed result in a sweep directory, the script:
        * v_local[r]  - volume of {phi < r} via exact marching tetrahedra on the
                        piecewise-linear interpolant, one column per radius r
 
-Output: a single pooled CSV at <sweep_dir>/spatial_metrics.csv.
+The sweep layout is auto-detected: every ``tissue_kinetics_seed*`` directory
+found anywhere beneath the given path is processed, so the path may be a whole
+sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) or a single leaf
+directory that directly contains the seed dirs.
+
+Output: a single pooled CSV (default ``<path>/spatial_metrics.csv``) with one row
+per synapse. A leading ``group`` column records each seed's location relative to
+the given path (e.g. ``coupling_1e-1kPa_mM/ecs_0.04``, or ``.`` for a leaf run) so
+that pooled rows from different parameter / ECS-ratio sublevels stay distinct.
 """
 
 import argparse
@@ -36,42 +44,46 @@ from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
 from bmbcsim.utils import create_cluster
 from evaluate_ecs_ratio import compute_local_ca, find_synapse_centers
 
-RESULTS_ROOT = "results"
 DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
-# Note: Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat
-# globally while still resolving cell obstacles; tuned empirically on the
+# Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat globally
+# while still resolving cell obstacles; tuned empirically on the
 # synapse_distribution_ecs_25 sweep (median heat-method residual ~0.14 um, max
 # ~0.33 um).
+DEFAULT_HEAT_M = 30
 
 
 # ---------------------------------------------------------------------------
 # Sweep / seed discovery
 # ---------------------------------------------------------------------------
 
-_SWEEP_PATTERN = re.compile(
-    r"synapse_distribution(?:_ecs_\d+)?_\d{4}-\d{2}-\d{2}-\d{6}$"
+_SEED_PATTERN = re.compile(
+    r"tissue_kinetics(?:_\w+?)?_seed(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$"
 )
-_SEED_PATTERN = re.compile(r"tissue_kinetics_seed(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$")
+_RESERVED_DIRS = {"processed-data", "plots"}
 
 
-def find_latest_sweep_dir(results_root):
-    dirs = [
-        d for d in os.listdir(results_root)
-        if _SWEEP_PATTERN.match(d)
-        and os.path.isdir(os.path.join(results_root, d))
-    ]
-    if not dirs:
-        raise RuntimeError("No synapse_distribution* directories found")
-    return os.path.join(results_root, sorted(dirs)[-1])
+def find_seed_dirs(root):
+    """All (seed_idx, path) for tissue_kinetics_seed* dirs anywhere beneath `root`.
 
+    The sweep layout is auto-detected by walking the tree: pointing this at a
+    whole sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) pools every
+    seed across all parameter / ECS-ratio sublevels, while pointing it at a
+    single leaf directory returns just the seeds directly inside it. Our own
+    ``processed-data``/``plots`` output dirs are pruned from the walk.
 
-def find_seed_dirs(sweep_dir):
+    Seed indices are NOT unique across sublevels (seed 0 recurs under every
+    combination); callers that pool must also record each seed's location (see
+    the ``group`` column in ``main``).
+    """
+    root = os.path.abspath(root)
     out = []
-    for d in sorted(os.listdir(sweep_dir)):
-        m = _SEED_PATTERN.match(d)
-        if m and os.path.isdir(os.path.join(sweep_dir, d)):
-            out.append((int(m.group(1)), os.path.join(sweep_dir, d)))
-    return out
+    for dirpath, dirnames, _ in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _RESERVED_DIRS]
+        m = _SEED_PATTERN.match(os.path.basename(dirpath))
+        if m:
+            out.append((int(m.group(1)), dirpath))
+            dirnames[:] = []  # a seed dir has no seed dirs beneath it
+    return sorted(out, key=lambda t: (os.path.dirname(t[1]), t[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +453,9 @@ def _process_seed_remote(result_path, radii, heat_m):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "path", nargs="?", default=None,
-        help="Path to sweep directory (default: latest auto-detected)",
+        "path",
+        help="Sweep directory (or any subtree); every tissue_kinetics_seed* "
+             "directory found beneath it is processed and pooled",
     )
     p.add_argument(
         "--n", type=int, default=None,
@@ -458,13 +471,13 @@ def parse_args():
              f"(default: {','.join(str(r) for r in DEFAULT_RADII)})",
     )
     p.add_argument(
-        "--heat-m", type=float, default=30,
+        "--heat-m", type=float, default=DEFAULT_HEAT_M,
         help="Multiplier on mean-edge-length^2 for the heat time step "
-             "(default: 30)",
+             f"(default: {DEFAULT_HEAT_M})",
     )
     p.add_argument(
         "--out", default=None,
-        help="Output CSV path (default: <sweep_dir>/spatial_metrics.csv)",
+        help="Output CSV path (default: <path>/spatial_metrics.csv)",
     )
     return p.parse_args()
 
@@ -475,9 +488,13 @@ def main():
     if not radii:
         raise ValueError("--radii must contain at least one value")
 
-    sweep_dir = args.path or find_latest_sweep_dir(RESULTS_ROOT)
+    sweep_dir = os.path.abspath(args.path)
     seed_dirs = find_seed_dirs(sweep_dir)
     print(f"Found {len(seed_dirs)} seed results in {sweep_dir}")
+    if not seed_dirs:
+        raise SystemExit(
+            f"No tissue_kinetics_seed* directories found beneath {sweep_dir}"
+        )
 
     if args.n is not None:
         if not 0 < args.n <= len(seed_dirs):
@@ -487,7 +504,7 @@ def main():
         seed_dirs = seed_dirs[: args.n]
 
     out_path = args.out or os.path.join(sweep_dir, "spatial_metrics.csv")
-    header = ["seed", "synapse_idx", "x", "y", "z",
+    header = ["group", "seed", "synapse_idx", "x", "y", "z",
               "d_boundary", "d_neighbor", "min_ca"]
     header += [f"v_local_r{r:g}" for r in radii]
     header += [f"v_sphere_box_r{r:g}" for r in radii]
@@ -500,21 +517,25 @@ def main():
         writer = csv.writer(f)
         writer.writerow(header)
 
+        # `group` is each seed's location relative to `sweep_dir` (e.g.
+        # "coupling_1e-1kPa_mM/ecs_0.04", or "." for a leaf run); it keeps pooled
+        # rows from different parameter / ECS-ratio sublevels distinct.
         futures = {
-            client.submit(_process_seed_remote, result_path, radii, args.heat_m): seed_idx
+            client.submit(_process_seed_remote, result_path, radii, args.heat_m):
+                (os.path.relpath(os.path.dirname(result_path), sweep_dir), seed_idx)
             for seed_idx, result_path in seed_dirs
         }
         for future in as_completed(futures):
-            seed_idx = futures[future]
+            group, seed_idx = futures[future]
             try:
                 rows = future.result()
             except Exception as e:
-                print(f"  seed {seed_idx}: skipped ({type(e).__name__}: {e})")
+                print(f"  {group} seed {seed_idx}: skipped ({type(e).__name__}: {e})")
                 continue
             for r in rows:
-                writer.writerow([seed_idx, *r])
+                writer.writerow([group, seed_idx, *r])
             f.flush()
-            print(f"  seed {seed_idx}: {len(rows)} synapses")
+            print(f"  {group} seed {seed_idx}: {len(rows)} synapses")
 
     print(f"Wrote {out_path} in {time.time()-t_total:.1f}s")
 
