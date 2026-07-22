@@ -495,6 +495,13 @@ class PnpSolver:
         return self.potential.components[k]
 
 
+# Globalization parameters for the mechanics Newton solve.
+_ARMIJO_C1 = 1e-4           # sufficient-decrease constant for the line search
+_MAX_BACKTRACK = 30         # max line-search halvings before declaring no progress
+_MIN_LOAD_INCREMENT = 1e-3  # smallest load fraction before load stepping gives up
+_LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
+
+
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
@@ -545,13 +552,17 @@ class MechanicSolver:
             neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx
         )
 
-        # Add chemical pressure term restricted to compartments with driving species
+        # Add chemical pressure term restricted to compartments with driving species.
+        # The load factor (a runtime-adjustable Parameter) scales the chemical
+        # pressure so `step()` can apply it incrementally for robustness; it is
+        # kept at 1 for a normal full-load solve.
+        self._load_factor = ngs.Parameter(1.0)
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
                 species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
-                chemical_pressure = strength * (concentration - baseline)
+                chemical_pressure = self._load_factor * strength * (concentration - baseline)
                 # Restrict chemical pressure to this compartment's regions
                 region_names = compartment.get_region_names(full_names=True)
                 dx_compartment = ngs.dx(definedon=mesh.Materials('|'.join(region_names)))
@@ -580,6 +591,8 @@ class MechanicSolver:
         self.deformation.vec[:] = 0
 
         self._residual = self.deformation.vec.CreateVector()
+        self._direction = self.deformation.vec.CreateVector()
+        self._trial = self.deformation.vec.CreateVector()
 
         # Set up volume tracking for concentration adjustment
         self._patch_mass = ngs.LinearForm(concentration_fes)
@@ -589,16 +602,128 @@ class MechanicSolver:
 
         self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
 
-    def step(self, n_iter=5):
-        """Perform a nonlinear solve via simple Newton iterations."""
-        for _ in range(n_iter):
-            self._stiffness.Apply(self.deformation.vec, self._residual)
-            self._stiffness.AssembleLinearization(self.deformation.vec)
-            inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
-            self.deformation.vec.data -= inv * self._residual
+    def step(self, max_newton=50, atol=1e-12, rtol=1e-8):
+        """Solve the nonlinear elastic equilibrium under the current chemical load.
 
-        # Apply deformation to mesh
+        Uses a line-searched Newton solve (:meth:`_newton_solve`). If the full
+        chemical-pressure load cannot be applied in a single solve -- the classic
+        failure being a Newton overshoot that inverts an element and makes the
+        tangent singular -- the load is instead applied incrementally with
+        adaptive step sizing, re-solving to equilibrium at each increment. The
+        increment is driven by ``self._load_factor``, which scales the
+        chemical-pressure term in the energy.
+        """
+        # Solve on the reference configuration. The mesh still carries the
+        # previous step's deformation (set below so diffusion/reaction run on the
+        # deformed geometry); the elastic energy is total-Lagrangian in
+        # `self.deformation`, so integrating over an already-deformed mesh would
+        # compound the deformation and leave a nonzero residual floor.
+        self._mesh.UnsetDeformation()
+
+        # Fast path: full load in one solve, warm-started from the previous step.
+        self._load_factor.Set(1.0)
+        if not self._newton_solve(self.deformation.vec, max_newton, atol, rtol):
+            # Fallback: ramp the load 0 -> 1 with adaptive increments. Restart
+            # from the undeformed state so each increment begins at a valid
+            # (finite-energy) configuration.
+            self.deformation.vec[:] = 0.0
+            self._solve_by_load_stepping(max_newton, atol, rtol)
+            self._load_factor.Set(1.0)
+
+        # Apply the converged deformation to the mesh.
         self._mesh.SetDeformation(self.deformation)
+
+    def _newton_solve(self, u, max_newton, atol, rtol):
+        """Line-searched Newton solve for elastic equilibrium at the current load.
+
+        Minimises the (nonlinear) elastic + spring + chemical-pressure energy by
+        damped Newton with an Armijo backtracking line search on the energy. The
+        line search rejects any trial step whose energy is non-finite -- i.e. an
+        inverted element (det F <= 0) -- so the tangent is only ever factorised at
+        a valid configuration and never goes singular. A non-descent Newton
+        direction (indefinite tangent, past a limit point) is treated as a stall.
+
+        :param u: deformation vector; updated in place, must start finite-energy.
+        :returns: True if the force residual is driven below tolerance, False if
+            the solve stalls (which tells the caller to cut the load increment).
+        """
+        energy = self._stiffness.Energy(u)
+        if not np.isfinite(energy):
+            return False
+
+        self._stiffness.Apply(u, self._residual)
+        tol = atol + rtol * np.linalg.norm(self._residual.FV().NumPy())
+
+        for _ in range(max_newton):
+            if np.linalg.norm(self._residual.FV().NumPy()) <= tol:
+                return True
+
+            # Newton direction d = K(u)^{-1} r; the update is u <- u - alpha*d.
+            self._stiffness.AssembleLinearization(u)
+            try:
+                inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
+            except Exception:
+                return False
+            self._direction.data = inv * self._residual
+
+            # r . K^{-1} r > 0 for an SPD tangent; <= 0 means no descent (a limit
+            # point / indefinite Hessian) -> let the caller cut the load.
+            slope = self._residual.InnerProduct(self._direction)
+            if slope <= 0:
+                return False
+
+            # Armijo backtracking on the energy, guarding against inverted elements.
+            alpha = 1.0
+            accepted = False
+            for _ in range(_MAX_BACKTRACK):
+                self._trial.data = u - alpha * self._direction
+                trial_energy = self._stiffness.Energy(self._trial)
+                if np.isfinite(trial_energy) and \
+                        trial_energy <= energy - _ARMIJO_C1 * alpha * slope:
+                    accepted = True
+                    break
+                alpha *= 0.5
+            if not accepted:
+                return False
+
+            u.data = self._trial
+            energy = trial_energy
+            self._stiffness.Apply(u, self._residual)
+
+        # Exhausted Newton iterations; converged only if the residual is small.
+        return np.linalg.norm(self._residual.FV().NumPy()) <= tol
+
+    def _solve_by_load_stepping(self, max_newton, atol, rtol):
+        """Apply the chemical load incrementally with adaptive step sizing.
+
+        Each increment advances ``self._load_factor`` toward 1 and re-solves to
+        equilibrium, warm-started from the previous converged increment. A failed
+        increment is rejected (deformation restored) and the increment halved,
+        until the load reaches 1 or the increment underflows -- the latter being a
+        genuine loss of a stable equilibrium (past the mechanochemical
+        bifurcation), reported as a clear error rather than a singular matrix.
+        """
+        u_safe = self.deformation.vec.CreateVector()
+        u_safe.data = self.deformation.vec  # last converged state (at `load`)
+        load = 0.0
+        increment = 0.5
+        while load < 1.0 - _LOAD_EPS:
+            trial_load = min(load + increment, 1.0)
+            self._load_factor.Set(trial_load)
+            if self._newton_solve(self.deformation.vec, max_newton, atol, rtol):
+                load = trial_load
+                u_safe.data = self.deformation.vec
+                increment = min(increment * 1.5, 1.0 - load)
+            else:
+                self.deformation.vec.data = u_safe  # reject and restore
+                increment *= 0.5
+                if increment < _MIN_LOAD_INCREMENT:
+                    raise RuntimeError(
+                        "Mechanics solver failed to converge even with load "
+                        f"stepping (stalled at load factor {load:.4g}). This "
+                        "usually means no stable equilibrium exists at the "
+                        "requested coupling strength."
+                    )
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
         """Adjust concentrations based on the volume change due to mesh deformation.
