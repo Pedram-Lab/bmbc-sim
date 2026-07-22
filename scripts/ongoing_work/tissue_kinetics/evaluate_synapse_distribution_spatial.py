@@ -12,62 +12,78 @@ For each seed result in a sweep directory, the script:
        * v_local[r]  - volume of {phi < r} via exact marching tetrahedra on the
                        piecewise-linear interpolant, one column per radius r
 
-Output: a single pooled CSV at <sweep_dir>/spatial_metrics.csv.
+The sweep layout is auto-detected: every ``tissue_kinetics_seed*`` directory
+found anywhere beneath the given path is processed, so the path may be a whole
+sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) or a single leaf
+directory that directly contains the seed dirs.
+
+Output: a single pooled CSV (default ``<path>/spatial_metrics.csv``) with one row
+per synapse. A leading ``group`` column records each seed's location relative to
+the given path (e.g. ``coupling_1e-1kPa_mM/ecs_0.04``, or ``.`` for a leaf run) so
+that pooled rows from different parameter / ECS-ratio sublevels stay distinct.
 """
 
 import argparse
 import csv
+import math
 import os
 import re
+import sys
 import time
+from pathlib import Path
 
 import h5py
 import numpy as np
 import pyvista as pv
 import ngsolve as ngs
+from dask.distributed import Client, as_completed
+from scipy.integrate import quad
 from scipy.spatial import cKDTree
 
 from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
+from bmbcsim.utils import create_cluster
 from evaluate_ecs_ratio import compute_local_ca, find_synapse_centers
 
-RESULTS_ROOT = "results"
-DEFAULT_RADII = (0.5, 1.0, 2.0, 4.0)  # um
-# Heat time step t = DEFAULT_HEAT_M * h_bar^2.
-# m=1 (Crane et al. baseline) is fine on 2D triangle meshes but underflows on the
-# 20 um, 3D ECS domain here. m~30 propagates the heat globally while still
-# resolving cell obstacles; tuned empirically on the synapse_distribution_ecs_25
-# sweep (median heat-method residual ~0.14 um, max ~0.33 um).
-DEFAULT_HEAT_M = 30.0
+DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
+# Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat globally
+# while still resolving cell obstacles; tuned empirically on the
+# synapse_distribution_ecs_25 sweep (median heat-method residual ~0.14 um, max
+# ~0.33 um).
+DEFAULT_HEAT_M = 30
 
 
 # ---------------------------------------------------------------------------
 # Sweep / seed discovery
 # ---------------------------------------------------------------------------
 
-_SWEEP_PATTERN = re.compile(
-    r"synapse_distribution(?:_ecs_\d+)?_\d{4}-\d{2}-\d{2}-\d{6}$"
+_SEED_PATTERN = re.compile(
+    r"tissue_kinetics(?:_\w+?)?_seed(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$"
 )
-_SEED_PATTERN = re.compile(r"tissue_kinetics_seed(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$")
+_RESERVED_DIRS = {"processed-data", "plots"}
 
 
-def find_latest_sweep_dir(results_root):
-    dirs = [
-        d for d in os.listdir(results_root)
-        if _SWEEP_PATTERN.match(d)
-        and os.path.isdir(os.path.join(results_root, d))
-    ]
-    if not dirs:
-        raise RuntimeError("No synapse_distribution* directories found")
-    return os.path.join(results_root, sorted(dirs)[-1])
+def find_seed_dirs(root):
+    """All (seed_idx, path) for tissue_kinetics_seed* dirs anywhere beneath `root`.
 
+    The sweep layout is auto-detected by walking the tree: pointing this at a
+    whole sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) pools every
+    seed across all parameter / ECS-ratio sublevels, while pointing it at a
+    single leaf directory returns just the seeds directly inside it. Our own
+    ``processed-data``/``plots`` output dirs are pruned from the walk.
 
-def find_seed_dirs(sweep_dir):
+    Seed indices are NOT unique across sublevels (seed 0 recurs under every
+    combination); callers that pool must also record each seed's location (see
+    the ``group`` column in ``main``).
+    """
+    root = os.path.abspath(root)
     out = []
-    for d in sorted(os.listdir(sweep_dir)):
-        m = _SEED_PATTERN.match(d)
-        if m and os.path.isdir(os.path.join(sweep_dir, d)):
-            out.append((int(m.group(1)), os.path.join(sweep_dir, d)))
-    return out
+    for dirpath, dirnames, _ in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _RESERVED_DIRS]
+        m = _SEED_PATTERN.match(os.path.basename(dirpath))
+        if m:
+            out.append((int(m.group(1)), dirpath))
+            dirnames[:] = []  # a seed dir has no seed dirs beneath it
+    return sorted(out, key=lambda t: (os.path.dirname(t[1]), t[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +286,86 @@ def below_volume(ecs_tets_local, ecs_points, phi, r):
 
 
 # ---------------------------------------------------------------------------
+# Sphere ∩ box volume (analytic reference volume for normalizing v_local)
+# ---------------------------------------------------------------------------
+# The local ECS volume is normalized by the volume of a Euclidean ball clipped
+# to the simulation box, vol(ball(r) ∩ box), rather than a full sphere: the box
+# is a thin slab, so every ball pokes out of the z-faces and the full-sphere
+# volume is the wrong reference. This is a closed-form primitive (a 1D integral
+# over the slab axis of the circle–rectangle cross-section), so it does not
+# touch the mesh.
+
+def _disk_cap(rho, d):
+    """Area of the disk of radius rho lying beyond the line {coord > d}."""
+    if d >= rho:
+        return 0.0
+    if d <= -rho:
+        return math.pi * rho * rho
+    return rho * rho * math.acos(d / rho) - d * math.sqrt(max(rho * rho - d * d, 0.0))
+
+
+def _disk_corner(rho, a, b):
+    """Area of {x > a, y > b} ∩ disk(rho), for a, b >= 0 (origin inside rect)."""
+    if a * a + b * b >= rho * rho:
+        return 0.0
+
+    def prim(x):  # antiderivative of sqrt(rho^2 - x^2) - b
+        return 0.5 * (x * math.sqrt(max(rho * rho - x * x, 0.0))
+                      + rho * rho * math.asin(min(max(x / rho, -1.0), 1.0))) - b * x
+
+    return prim(math.sqrt(rho * rho - b * b)) - prim(a)
+
+
+def _disk_rect_area(rho, xl, xh, yl, yh):
+    """Area of disk(rho) centered at origin intersected with [xl,xh]x[yl,yh].
+
+    Assumes the origin is inside the rectangle (xl < 0 < xh, yl < 0 < yh), which
+    holds because each ball is centered on an in-domain synapse. Inclusion-
+    exclusion over the four sides; opposite sides never co-occur so only the four
+    adjacent-side corners contribute.
+    """
+    if rho <= 0:
+        return 0.0
+    area = math.pi * rho * rho
+    area -= _disk_cap(rho, xh) + _disk_cap(rho, -xl)
+    area -= _disk_cap(rho, yh) + _disk_cap(rho, -yl)
+    area += (_disk_corner(rho, xh, yh) + _disk_corner(rho, xh, -yl)
+             + _disk_corner(rho, -xl, yh) + _disk_corner(rho, -xl, -yl))
+    return area
+
+
+def sphere_box_volume(center, box_min, box_max, r):
+    """Volume of the ball of radius r at `center` intersected with the box.
+
+    Integrates the circle–rectangle cross-section along z. Breakpoints (where the
+    shrinking cross-section touches a box edge/corner) are handed to the
+    quadrature so it stays accurate and warning-free at the slab kinks.
+    """
+    xl, yl, zl = np.asarray(box_min) - center
+    xh, yh, zh = np.asarray(box_max) - center
+    z_lo = max(zl, -r)
+    z_hi = min(zh, r)
+    if z_lo >= z_hi:
+        return 0.0
+
+    dists = [abs(xl), abs(xh), abs(yl), abs(yh),
+             math.hypot(xl, yl), math.hypot(xl, yh),
+             math.hypot(xh, yl), math.hypot(xh, yh)]
+    breaks = sorted({
+        z for d in dists if d < r
+        for z in (math.sqrt(r * r - d * d), -math.sqrt(r * r - d * d))
+        if z_lo < z < z_hi
+    })
+
+    def cross_section(z):
+        rho = math.sqrt(max(r * r - z * z, 0.0))
+        return _disk_rect_area(rho, xl, xh, yl, yh)
+
+    val, _ = quad(cross_section, z_lo, z_hi, points=breaks or None, limit=200)
+    return float(val)
+
+
+# ---------------------------------------------------------------------------
 # Per-seed processing
 # ---------------------------------------------------------------------------
 
@@ -328,9 +424,17 @@ def process_seed(result_path, radii, heat_m, eps_rel=1e-6):
 
         v_local = [below_volume(ecs_tets_local, ecs_points, phi_np, r) for r in radii]
 
+        # Box-clipped reference volume: vol(Euclidean ball(r) intersect box),
+        # the normalization denominator for v_local. Closed-form primitive.
+        v_sphere_box = [
+            sphere_box_volume(synapse_centers[i], box_min, box_max, r)
+            for r in radii
+        ]
+
         x, y, z = synapse_centers[i]
         rows.append([i, float(x), float(y), float(z),
-                     d_boundary, d_neighbor, float(min_ca[i]), *v_local])
+                     d_boundary, d_neighbor, float(min_ca[i]), *v_local,
+                     *v_sphere_box])
 
     return rows
 
@@ -339,15 +443,27 @@ def process_seed(result_path, radii, heat_m, eps_rel=1e-6):
 # CLI
 # ---------------------------------------------------------------------------
 
+def _process_seed_remote(result_path, radii, heat_m):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from evaluate_synapse_distribution_spatial import process_seed
+
+    return process_seed(result_path, radii, heat_m)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "path", nargs="?", default=None,
-        help="Path to sweep directory (default: latest auto-detected)",
+        "path",
+        help="Sweep directory (or any subtree); every tissue_kinetics_seed* "
+             "directory found beneath it is processed and pooled",
     )
     p.add_argument(
         "--n", type=int, default=None,
         help="Number of seeds to process (default: all available)",
+    )
+    p.add_argument(
+        "--n-workers", type=int, default=4,
+        help="Number of Dask workers (default: 4)",
     )
     p.add_argument(
         "--radii", default=",".join(f"{r}" for r in DEFAULT_RADII),
@@ -361,7 +477,7 @@ def parse_args():
     )
     p.add_argument(
         "--out", default=None,
-        help="Output CSV path (default: <sweep_dir>/spatial_metrics.csv)",
+        help="Output CSV path (default: <path>/spatial_metrics.csv)",
     )
     return p.parse_args()
 
@@ -372,9 +488,13 @@ def main():
     if not radii:
         raise ValueError("--radii must contain at least one value")
 
-    sweep_dir = args.path or find_latest_sweep_dir(RESULTS_ROOT)
+    sweep_dir = os.path.abspath(args.path)
     seed_dirs = find_seed_dirs(sweep_dir)
     print(f"Found {len(seed_dirs)} seed results in {sweep_dir}")
+    if not seed_dirs:
+        raise SystemExit(
+            f"No tissue_kinetics_seed* directories found beneath {sweep_dir}"
+        )
 
     if args.n is not None:
         if not 0 < args.n <= len(seed_dirs):
@@ -384,25 +504,38 @@ def main():
         seed_dirs = seed_dirs[: args.n]
 
     out_path = args.out or os.path.join(sweep_dir, "spatial_metrics.csv")
-    header = ["seed", "synapse_idx", "x", "y", "z",
+    header = ["group", "seed", "synapse_idx", "x", "y", "z",
               "d_boundary", "d_neighbor", "min_ca"]
     header += [f"v_local_r{r:g}" for r in radii]
+    header += [f"v_sphere_box_r{r:g}" for r in radii]
 
     t_total = time.time()
-    with open(out_path, "w", newline="") as f:
+    n_workers = min(args.n_workers, len(seed_dirs))
+    with create_cluster("local", n_workers=n_workers) as cluster, \
+         Client(cluster) as client, \
+         open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for seed_idx, result_path in seed_dirs:
-            t0 = time.time()
+
+        # `group` is each seed's location relative to `sweep_dir` (e.g.
+        # "coupling_1e-1kPa_mM/ecs_0.04", or "." for a leaf run); it keeps pooled
+        # rows from different parameter / ECS-ratio sublevels distinct.
+        futures = {
+            client.submit(_process_seed_remote, result_path, radii, args.heat_m):
+                (os.path.relpath(os.path.dirname(result_path), sweep_dir), seed_idx)
+            for seed_idx, result_path in seed_dirs
+        }
+        for future in as_completed(futures):
+            group, seed_idx = futures[future]
             try:
-                rows = process_seed(result_path, radii, args.heat_m)
+                rows = future.result()
             except Exception as e:
-                print(f"  seed {seed_idx}: skipped ({type(e).__name__}: {e})")
+                print(f"  {group} seed {seed_idx}: skipped ({type(e).__name__}: {e})")
                 continue
             for r in rows:
-                writer.writerow([seed_idx, *r])
+                writer.writerow([group, seed_idx, *r])
             f.flush()
-            print(f"  seed {seed_idx}: {len(rows)} synapses ({time.time()-t0:.1f}s)")
+            print(f"  {group} seed {seed_idx}: {len(rows)} synapses")
 
     print(f"Wrote {out_path} in {time.time()-t_total:.1f}s")
 

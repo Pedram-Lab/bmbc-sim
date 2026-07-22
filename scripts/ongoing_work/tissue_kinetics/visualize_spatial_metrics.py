@@ -55,21 +55,36 @@ _VLOCAL_RE = re.compile(r"^v_local_r(?P<r>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)$")
 
 
 def normalize_v_local(df):
-    """Convert absolute v_local_r<r> columns into fractions of a full sphere of the same radius.
+    """Convert absolute v_local_r<r> columns into accessible-volume fractions.
 
-    Renames each matching column from ``v_local_r<r>`` to ``vfrac_local_r<r>`` so the
-    semantic shift is visible in plots and downstream code.
+    The denominator is the box-clipped sphere volume vol(ball(r) intersect domain),
+    stored per radius as ``v_sphere_box_r<r>`` by the evaluator. This makes the
+    ratio plateau at the local porosity for large r instead of decaying as the
+    sphere overruns the simulation box. If no matching ``v_sphere_box_r<r>`` column
+    is present (older CSVs), fall back to a full continuous sphere (4/3)*pi*r^3.
+
+    Renames each ``v_local_r<r>`` to ``vfrac_local_r<r>`` so the semantic shift is
+    visible in plots, and drops the consumed ``v_sphere_box_r<r>`` columns.
     """
     rename = {}
+    drop = []
     for col in df.columns:
         m = _VLOCAL_RE.match(col)
         if not m:
             continue
-        r = float(m.group("r"))
-        v_full = (4.0 / 3.0) * math.pi * r ** 3
-        df[col] = df[col] / v_full
-        rename[col] = f"vfrac_local_r{m.group('r')}"
+        r_str = m.group("r")
+        box_col = f"v_sphere_box_r{r_str}"
+        if box_col in df.columns:
+            denom = df[box_col].replace(0.0, np.nan)
+            drop.append(box_col)
+        else:
+            r = float(r_str)
+            denom = (4.0 / 3.0) * math.pi * r ** 3
+        df[col] = df[col] / denom
+        rename[col] = f"vfrac_local_r{r_str}"
     df.rename(columns=rename, inplace=True)
+    if drop:
+        df.drop(columns=drop, inplace=True)
     return df
 
 
@@ -103,11 +118,40 @@ def _unique_path_labels(paths):
 
 
 def load_combined(paths):
-    """Read all CSVs, tag each with a unique `_source` label, concat."""
+    """Read all CSVs, tag each with a unique `_source` label, concat.
+
+    Every CSV must contain ``min_ca`` and expose the same set of columns.
+    Pooling files with mismatched columns (e.g. one written before and one
+    after the ``v_sphere_box_r*`` change) makes ``pd.concat`` fill NaNs, which
+    later surface only as opaque curve-fit / "SVD did not converge" errors. We
+    catch the mismatch here and raise a clear, actionable message instead.
+    """
     labels = _unique_path_labels(paths)
     frames = []
+    ref_cols = None
+    ref_label = None
     for path, label in zip(paths, labels):
         df = pd.read_csv(path)
+        if "min_ca" not in df.columns:
+            raise SystemExit(f"Error: '{path}' has no 'min_ca' column; "
+                             "is it a spatial_metrics CSV?")
+        cols = set(df.columns)
+        if ref_cols is None:
+            ref_cols, ref_label = cols, label
+        elif cols != ref_cols:
+            missing = sorted(ref_cols - cols)
+            extra = sorted(cols - ref_cols)
+            detail = []
+            if missing:
+                detail.append(f"missing {missing}")
+            if extra:
+                detail.append(f"has unexpected {extra}")
+            raise SystemExit(
+                f"Error: column mismatch — '{label}' {' and '.join(detail)} "
+                f"relative to '{ref_label}'.\n"
+                "All input CSVs must come from the same evaluator version; "
+                "re-run evaluate_synapse_distribution_spatial.py to regenerate "
+                "the stale file(s).")
         df["_source"] = label
         frames.append(df)
     return pd.concat(frames, ignore_index=True), labels
@@ -145,6 +189,8 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
         ax.set_xlabel(col)
         ax.set_ylabel("min_ca")
         ax.set_title(f"min_ca vs {col}")
+        if col.startswith("vfrac_local_"):
+            ax.set_xlim(0.0, 1.0)
         ax.legend(loc="best", fontsize=9)
         ax.grid(True, alpha=0.3)
     for ax in axes[n:]:
@@ -164,13 +210,20 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
 def pca_analysis(df, predictors):
     """Return PCA loadings, explained variance, projections, and R^2 of min_ca."""
     X = df[predictors].to_numpy()
+    finite_col = np.isfinite(X).all(axis=0)
+    if not finite_col.all():
+        bad = [p for p, ok in zip(predictors, finite_col) if not ok]
+        raise SystemExit(
+            f"Error: non-finite (NaN/inf) values in predictor column(s) {bad}; "
+            "cannot run PCA. Check the input CSVs for missing entries or "
+            "zero sphere-box volumes.")
     mu = X.mean(axis=0)
     sd = X.std(axis=0, ddof=1)
     sd[sd == 0] = 1.0
     Xs = (X - mu) / sd
 
     # SVD-based PCA. Vt rows are component vectors; pcs = Xs @ Vt.T.
-    U, S, Vt = np.linalg.svd(Xs, full_matrices=False)
+    _, S, Vt = np.linalg.svd(Xs, full_matrices=False)
     variance = (S ** 2) / (len(Xs) - 1)
     explained = variance / variance.sum()
     pcs = Xs @ Vt.T
@@ -178,6 +231,16 @@ def pca_analysis(df, predictors):
     y = df["min_ca"].to_numpy()
     y_c = y - y.mean()
     ss_tot = (y_c ** 2).sum()
+
+    # SVD pins each component only up to an overall sign. Orient every PC so it
+    # correlates non-negatively with min_ca (sign of cov(PC_k, min_ca); PCs are
+    # already zero-mean from standardization). In particular this makes PC1 run
+    # in the direction of increasing min_ca, so the asymmetric saturating fit in
+    # plot_pca lands the right way round instead of occasionally flipping — with
+    # the sign reversed the model can't follow the data and its R^2 collapses.
+    signs = np.where(y_c @ pcs < 0, -1.0, 1.0)
+    pcs *= signs
+    Vt = Vt * signs[:, None]
 
     per_pc_r2 = np.empty(len(predictors))
     for k in range(len(predictors)):
@@ -282,6 +345,8 @@ def parse_args():
                    help="Path(s) to spatial_metrics.csv file(s); data from all is combined")
     p.add_argument("--out-dir", default=None,
                    help="Output directory for plots (default: same dir as first csv)")
+    p.add_argument("--threshold", type=float, default=0.0,
+                   help="Threshold for min_ca; rows with min_ca below this value are dropped")
     p.add_argument("--color-sources", action="store_true",
                    help="Color points by source CSV; otherwise all points are one color")
     p.add_argument("--show", action="store_true",
@@ -294,12 +359,16 @@ def main():
     df, labels = load_combined(args.csv)
     df = normalize_v_local(df)
     n_raw = len(df)
-    df = df[df["min_ca"] >= 0.2].reset_index(drop=True)
+    df = df[df["min_ca"] >= args.threshold].reset_index(drop=True)
     n_dropped = n_raw - len(df)
     predictors = predictor_columns(df)
+    if not predictors:
+        raise SystemExit(
+            "Error: no predictor columns (expected d_* and/or v_local_r* "
+            f"columns); got columns {list(df.columns)}.")
     src_str = ", ".join(args.csv) if len(args.csv) <= 3 else f"{len(args.csv)} CSVs"
     print(f"Loaded {n_raw} rows from {src_str}; "
-          f"dropped {n_dropped} with min_ca < 0.2, kept {len(df)}")
+          f"dropped {n_dropped} with min_ca < {args.threshold}, kept {len(df)}")
     print(f"Sources ({len(labels)}): {labels}")
     print(f"Predictors ({len(predictors)}): {predictors}")
     print(f"min_ca:  min={df['min_ca'].min():.4f}  max={df['min_ca'].max():.4f}  "

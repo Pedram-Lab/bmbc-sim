@@ -1,26 +1,29 @@
 """Run tissue kinetics simulation over multiple synapse distribution seeds."""
-
+import sys
+from pathlib import Path
 import argparse
 from datetime import datetime
-from multiprocessing import Pool, set_start_method
 from pathlib import Path
 
+from dask.distributed import Client, as_completed
+
+from bmbcsim.utils import create_cluster
+
 N_SEEDS = 100
-N_PROCESSES = 10
+N_WORKERS = 10
 
 
-def run_seed(args):
-    seed, result_root, ecs_ratio = args
+def run_seed(seed, result_root, ecs_ratio):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from simulation import run_simulation
 
-    print(f"Starting simulation with seed={seed}")
     run_simulation(
         seed=seed,
         simulation_name=f"tissue_kinetics_seed{seed}",
-        result_root=str(result_root),
+        result_root=result_root,
         ecs_ratio=ecs_ratio,
     )
-    print(f"Finished simulation with seed={seed}")
+    return seed
 
 
 if __name__ == "__main__":
@@ -32,18 +35,22 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
     ecs_ratio = cli_args.ecs
 
-    set_start_method("spawn")
-
     suffix = int(100 * (ecs_ratio + 0.06))  # 0.06 is the baseline ECS ratio in the geometry
     timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    result_root = Path("results") / f"synapse_distribution_ecs_{suffix}_{timestamp}"
+    result_root = (Path("results") / f"synapse_distribution_ecs_{suffix}_{timestamp}").resolve()
     result_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"Running {N_SEEDS} seeds with {N_PROCESSES} processes (ecs_ratio={ecs_ratio})")
+    print(f"Running {N_SEEDS} seeds with {N_WORKERS} workers (ecs_ratio={ecs_ratio})")
     print(f"Results will be stored in: {result_root}")
 
-    args = [(seed, result_root, ecs_ratio) for seed in range(N_SEEDS)]
-    with Pool(processes=N_PROCESSES) as pool:
-        pool.map(run_seed, args)
+    with create_cluster("local", n_workers=N_WORKERS) as cluster, Client(cluster) as client:
+        futures = client.map(
+            run_seed,
+            list(range(N_SEEDS)),
+            result_root=str(result_root),
+            ecs_ratio=ecs_ratio,
+        )
+        for future in as_completed(futures):
+            print(f"Finished simulation with seed={future.result()}")
 
     print(f"All simulations complete. Results in: {result_root}")
