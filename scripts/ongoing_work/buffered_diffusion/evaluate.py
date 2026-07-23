@@ -132,19 +132,23 @@ def fit_effective_diffusivity(times, y_half):
     return slope / FRONT_COEFF, mask
 
 
+def analyze_run(simulation_name):
+    """Load a run and front-track it. Returns a dict with times, y, ca, cs,
+    y_half, d_eff, mask -- everything main()'s report/CSV/plot code needs,
+    and what other scripts need to pull the fitted diffusivity back out."""
+    times, y, ca = load_kymograph(simulation_name)
+    cs, y_half = track_front(times, y, ca)
+    d_eff, mask = fit_effective_diffusivity(times, y_half)
+    return dict(times=times, y=y, ca=ca, cs=cs, y_half=y_half, d_eff=d_eff, mask=mask)
+
+
 def main():
     os.makedirs(PLOT_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
 
     results = {}
     for label, name in CONDITIONS.items():
-        times, y_from_source, ca = load_kymograph(name)
-        cs, y_half = track_front(times, y_from_source, ca)
-        d_eff, mask = fit_effective_diffusivity(times, y_half)
-        results[label] = dict(
-            times=times, y=y_from_source, ca=ca,
-            cs=cs, y_half=y_half, d_eff=d_eff, mask=mask,
-        )
+        results[label] = analyze_run(name)
 
     # --- Report -----------------------------------------------------
     print(f"\n(front at eta_half={ETA_HALF:.4f}, y_half^2 = {FRONT_COEFF:.4f} * D * t)")
