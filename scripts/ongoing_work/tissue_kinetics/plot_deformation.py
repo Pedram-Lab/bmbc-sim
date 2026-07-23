@@ -1,74 +1,97 @@
 """Plot deformation magnitude over time for mechanics simulations."""
 
+import argparse
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from bmbcsim.simulation.result_io import ResultLoader
 
-# ============ Configuration ============
-SIMULATION_NAME = "tissue_kinetics_with_mechanics"
-RESULTS_ROOT = "results"
 MAX_TRAJECTORIES = 1000  # Limit number of individual trajectories to plot
-# =======================================
 
-# Load simulation results
-loader = ResultLoader.find(simulation_name=SIMULATION_NAME, results_root=RESULTS_ROOT)
-n_snapshots = len(loader)
-print(f"Loading {n_snapshots} snapshots...")
 
-# Get mesh info from first snapshot
-mesh = loader.load_snapshot(0)
-n_points = mesh.points.shape[0]
-print(f"Mesh has {n_points} points")
+def find_result_dirs(path):
+    """Return leaf result dirs under `path` (or [path] if it holds a result directly)."""
+    if (path / "snapshot.pvd").exists() or (path / "snapshot.h5").exists():
+        return [path]
+    dirs = sorted(
+        d for d in path.rglob("*")
+        if d.is_dir() and ((d / "snapshot.pvd").exists() or (d / "snapshot.h5").exists())
+    )
+    if not dirs:
+        raise FileNotFoundError(f"No simulation results found under {path}")
+    return dirs
 
-# Collect deformation magnitudes over time
-times = []
-deformation_magnitudes = []
 
-for step in range(n_snapshots):
-    mesh = loader.load_snapshot(step)
-    ts = loader.load_total_substance(step)
+def load_deformation(result_dir):
+    """Return (times, deformation_magnitude[n_snapshots, n_points]) for one run."""
+    loader = ResultLoader(str(result_dir))
+    times, magnitudes = [], []
+    for step in range(len(loader)):
+        mesh = loader.load_snapshot(step)
+        ts = loader.load_total_substance(step)
+        times.append(float(ts.coords['time'].values[0]))
+        magnitudes.append(np.linalg.norm(mesh.point_data['deformation'], axis=1))
+    return np.array(times), np.array(magnitudes)
 
-    time = float(ts.coords['time'].values[0])
-    deformation = mesh.point_data['deformation']
-    magnitude = np.linalg.norm(deformation, axis=1)
 
-    times.append(time)
-    deformation_magnitudes.append(magnitude)
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "path", type=Path,
+        help="Simulation result directory, or a folder containing multiple seed result directories",
+    )
+    args = parser.parse_args()
+    if not args.path.exists():
+        parser.error(f"No such path: {args.path}")
 
-times = np.array(times)
-deformation_magnitudes = np.array(deformation_magnitudes)  # Shape: (n_snapshots, n_points)
+    result_dirs = find_result_dirs(args.path)
+    print(f"Found {len(result_dirs)} result director{'y' if len(result_dirs) == 1 else 'ies'}")
 
-print(f"Deformation data shape: {deformation_magnitudes.shape}")
+    times = None
+    all_magnitudes = []
+    for result_dir in result_dirs:
+        print(f"Loading {result_dir} ...")
+        t, magnitudes = load_deformation(result_dir)
+        if times is None:
+            times = t
+        elif len(t) != len(times):
+            raise ValueError(f"{result_dir} has {len(t)} snapshots, expected {len(times)}")
+        all_magnitudes.append(magnitudes)
 
-# Subsample points for plotting individual trajectories
-if n_points > MAX_TRAJECTORIES:
-    rng = np.random.default_rng(seed=42)
-    sample_indices = rng.choice(n_points, size=MAX_TRAJECTORIES, replace=False)
-else:
-    sample_indices = np.arange(n_points)
+    # Combine seeds by stacking their points together (all share the same times)
+    deformation_magnitudes = np.concatenate(all_magnitudes, axis=1)
+    print(f"Deformation data shape: {deformation_magnitudes.shape}")
 
-# Create plot
-fig, ax = plt.subplots(figsize=(10, 6))
+    n_points = deformation_magnitudes.shape[1]
+    if n_points > MAX_TRAJECTORIES:
+        rng = np.random.default_rng(seed=42)
+        sample_indices = rng.choice(n_points, size=MAX_TRAJECTORIES, replace=False)
+    else:
+        sample_indices = np.arange(n_points)
 
-# Plot individual trajectories in gray with low alpha
-for idx in sample_indices:
-    ax.plot(times, deformation_magnitudes[:, idx], color='gray', alpha=0.05, linewidth=0.5)
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-# Plot mean trajectory
-mean_deformation = np.mean(deformation_magnitudes, axis=1)
-ax.plot(times, mean_deformation, color='blue', linewidth=2, label='Mean')
+    for idx in sample_indices:
+        ax.plot(times, deformation_magnitudes[:, idx], color='gray', alpha=0.05, linewidth=0.5)
 
-# Plot percentiles
-p5 = np.percentile(deformation_magnitudes, 5, axis=1)
-p95 = np.percentile(deformation_magnitudes, 95, axis=1)
-ax.fill_between(times, p5, p95, color='blue', alpha=0.2, label='5-95% range')
+    mean_deformation = np.mean(deformation_magnitudes, axis=1)
+    ax.plot(times, mean_deformation, color='blue', linewidth=2, label='Mean')
 
-ax.set_xlabel("Time (ms)")
-ax.set_ylabel("Deformation magnitude (µm)")
-ax.set_title(f"Mesh deformation over time - {SIMULATION_NAME}")
-ax.legend()
-ax.grid(True, alpha=0.3)
+    p5 = np.percentile(deformation_magnitudes, 5, axis=1)
+    p95 = np.percentile(deformation_magnitudes, 95, axis=1)
+    ax.fill_between(times, p5, p95, color='blue', alpha=0.2, label='5-95% range')
 
-plt.tight_layout()
-plt.show()
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Deformation magnitude (µm)")
+    ax.set_title(f"Mesh deformation over time - {args.path.name}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
