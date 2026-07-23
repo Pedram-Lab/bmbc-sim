@@ -47,10 +47,13 @@ SHOW = True
 def collect_differences(low_sweep, high_sweep):
     """Pool d[Ca] = ca_high - ca_low over every shared (seed, synapse_idx).
 
-    Returns (times, diffs) with diffs shape (n_timesteps, n_pairs). Seeds present
-    in only one sweep, or with mismatched synapse count / timestep count, are
-    skipped with a warning. Synapse pairs where either the LOW or HIGH trace dips
-    negative anywhere (solver undershoot) are dropped before differencing.
+    Returns (times, diffs, pair_seeds, pair_synapse_idx). diffs has shape
+    (n_timesteps, n_pairs); pair_seeds/pair_synapse_idx (length n_pairs) give the
+    originating seed and synapse index of each column, so a specific extreme value
+    in diffs can be traced back to a (seed, synapse_idx) to investigate further.
+    Seeds present in only one sweep, or with mismatched synapse count / timestep
+    count, are skipped with a warning. Synapse pairs where either the LOW or HIGH
+    trace dips negative anywhere (solver undershoot) are dropped before differencing.
     """
     low_paths = dict(find_seed_dirs(low_sweep))
     high_paths = dict(find_seed_dirs(high_sweep))
@@ -59,6 +62,8 @@ def collect_differences(low_sweep, high_sweep):
 
     times_ref = None
     columns = []
+    pair_seeds = []
+    pair_synapse_idx = []
     n_skipped = 0
     n_dropped = 0
     for seed in common:
@@ -82,6 +87,9 @@ def collect_differences(low_sweep, high_sweep):
         keep = (ca_lo.min(axis=0) >= 0.0) & (ca_hi.min(axis=0) >= 0.0)
         n_dropped += int((~keep).sum())
         columns.append((ca_hi - ca_lo)[:, keep])
+        synapse_idx = np.where(keep)[0]
+        pair_seeds.extend([seed] * len(synapse_idx))
+        pair_synapse_idx.extend(synapse_idx.tolist())
 
     if not columns:
         raise SystemExit("No matched synapses found across the two sweeps.")
@@ -90,7 +98,7 @@ def collect_differences(low_sweep, high_sweep):
         raise SystemExit("All synapse pairs dropped for negative values; nothing to plot.")
     print(f"Pooled {diffs.shape[1]} synapse pairs from {len(common) - n_skipped} "
           f"seeds ({n_skipped} seeds skipped; {n_dropped} pairs dropped for negatives)")
-    return times_ref, diffs
+    return times_ref, diffs, np.array(pair_seeds), np.array(pair_synapse_idx)
 
 
 def plot_differences(times, diffs, low_label, high_label, ax):
@@ -133,11 +141,16 @@ def plot_differences(times, diffs, low_label, high_label, ax):
 def main(out_path, show):
     low_sweep, low_label = LOW
     high_sweep, high_label = HIGH
-    times, diffs = collect_differences(low_sweep, high_sweep)
+    times, diffs, pair_seeds, pair_synapse_idx = collect_differences(low_sweep, high_sweep)
 
     peak = times[np.nanargmax(np.abs(np.nanmean(diffs, axis=1)))]
     print(f"Largest mean |d[Ca]| at t={peak:.1f} ms: "
           f"{np.nanmean(diffs, axis=1)[np.nanargmax(np.abs(np.nanmean(diffs, axis=1)))]:.3f} mM")
+
+    for extreme, argfunc in [("Lowest", np.nanargmin), ("Highest", np.nanargmax)]:
+        t_idx, pair_idx = np.unravel_index(argfunc(diffs), diffs.shape)
+        print(f"{extreme} d[Ca]={diffs[t_idx, pair_idx]:.3f} mM at t={times[t_idx]:.1f} ms: "
+              f"seed={pair_seeds[pair_idx]}, synapse_idx={pair_synapse_idx[pair_idx]}")
 
     fig, ax = plt.subplots(figsize=(10, 6))
     plot_differences(times, diffs, low_label, high_label, ax)
