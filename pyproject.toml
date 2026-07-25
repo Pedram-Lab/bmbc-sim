@@ -43,3 +43,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pyright]
+# Config field types use bmbcsim.config.Quantity("mmol / L") as an annotation.
+# A call in a type position isn't a valid *static* type form (same as pydantic's
+# conint/constr), but pydantic resolves it at runtime. Mute the false positive.
+reportInvalidTypeForm = false

@@ -3,19 +3,19 @@ import astropy.units as u
 import pytest
 from pydantic import ValidationError
 
-from bmbcsim.config import Quantity, SimConfig, SimGroup, expand_sweep, quantity
+from bmbcsim.config import BareQuantity, Quantity, SimConfig, SimGroup, expand_sweep
 
 
 class _Cfg(SimConfig):
     simulation_name: str = "demo"
     seed: int = 0
-    ca: quantity("mmol / L") = "1.3 mmol / L"
-    rate: Quantity = "0.1 / ms"
+    ca: Quantity("mmol / L") = "1.3 mmol / L"
+    rate: BareQuantity = "0.1 / ms"  # bare: no dimension check
     factor: float = 2.0
 
 
 class _Group(SimGroup):
-    coupling: Quantity = "0.1 kPa L / mmol"
+    coupling: BareQuantity = "0.1 kPa L / mmol"
     ecs_ratio: float = 0.1
 
 

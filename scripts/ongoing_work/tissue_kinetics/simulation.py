@@ -17,7 +17,7 @@ import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
-from bmbcsim.config import SimConfig, SimGroup, Quantity, quantity
+from bmbcsim.config import SimConfig, SimGroup, Quantity
 
 
 # ======================================================================
@@ -41,12 +41,12 @@ class Geometry(SimGroup):
 class Diffusion(SimGroup):
     """ECS/cytosol Ca2+ diffusion and the reservoir boundary condition."""
 
-    ca_ecs: quantity("mmol / L") = "1.3 mmol / L"
-    diffusivity_ecs: quantity("um2 / ms") = "0.7 um2 / ms"
-    diffusivity_cyto: quantity("um2 / ms") = "0.22 um2 / ms"
+    ca_ecs: Quantity("mmol / L") = "1.3 mmol / L"
+    diffusivity_ecs: Quantity("um2 / ms") = "0.7 um2 / ms"
+    diffusivity_cyto: Quantity("um2 / ms") = "0.22 um2 / ms"
     tortuosity: float = 1.6
-    boundary_permeability: Optional[Quantity] = None  # derived from tortuosity if None
-    depletion: quantity("mmol / L") = "0.47 mmol / L"
+    boundary_permeability: Optional[Quantity("um / ms")] = None  # derived from tortuosity if None
+    depletion: Quantity("mmol / L") = "0.47 mmol / L"
 
 
 class Synapse(SimGroup):
@@ -54,32 +54,32 @@ class Synapse(SimGroup):
 
     n_synapses: int = 400
     n_channels_per_synapse: int = 35
-    synapse_diameter: quantity("um") = "0.25 um"
+    synapse_diameter: Quantity("um") = "0.25 um"
     f_active: float = 0.15
-    i_channel: quantity("pA") = "0.5 pA"
-    tau1: quantity("ms") = "10 ms"
-    tau2: quantity("ms") = "3 ms"
-    pulse_times: list[Quantity] = ["300 ms", "310 ms", "320 ms", "330 ms", "340 ms"]
+    i_channel: Quantity("pA") = "0.5 pA"
+    tau1: Quantity("ms") = "10 ms"
+    tau2: Quantity("ms") = "3 ms"
+    pulse_times: list[Quantity("ms")] = ["300 ms", "310 ms", "320 ms", "330 ms", "340 ms"]
 
 
 class ECM(SimGroup):
     """Extracellular-matrix Ca2+ buffer (Ca + ECM <-> ECM_Ca)."""
 
     enabled: bool = False
-    ecm_total: quantity("mmol / L") = "2.0 mmol / L"
-    ecm_kf: Quantity = "10.0 L / (mmol s)"
-    ecm_kr: Quantity = "0.1 / ms"
+    ecm_total: Quantity("mmol / L") = "2.0 mmol / L"
+    ecm_kf: Quantity("L / (mmol s)") = "10.0 L / (mmol s)"
+    ecm_kr: Quantity("1 / ms") = "0.1 / ms"
 
 
 class Mechanics(SimGroup):
     """ECS/cell elasticity and ECM_Ca-driven contraction (implies ECM)."""
 
     enabled: bool = False
-    ecs_youngs_modulus: quantity("kPa") = "0.5 kPa"
+    ecs_youngs_modulus: Quantity("kPa") = "0.5 kPa"
     ecs_poisson_ratio: float = 0.3
-    cell_youngs_modulus: quantity("kPa") = "1.0 kPa"
+    cell_youngs_modulus: Quantity("kPa") = "1.0 kPa"
     cell_poisson_ratio: float = 0.4
-    ecm_ca_coupling: Quantity = "0.1 kPa L / mmol"  # = 0.1 kPa / (mmol/L)
+    ecm_ca_coupling: Quantity("kPa L / mmol") = "0.1 kPa L / mmol"  # = 0.1 kPa / (mmol/L)
 
 
 class Config(SimConfig):
@@ -89,8 +89,8 @@ class Config(SimConfig):
     # Random seed for synapse distribution (also the sweep replicate index)
     seed: int = 42
     # Timing
-    end_time: quantity("s") = "1.0 s"
-    time_step: quantity("s") = "1.0 ms"
+    end_time: Quantity("s") = "1.0 s"
+    time_step: Quantity("s") = "1.0 ms"
     record_interval_factor: int = 10
     # Subsystems
     geometry: Geometry = Geometry()

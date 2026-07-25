@@ -2,7 +2,7 @@
 
 The two things every config-driven experiment needs:
 
-* :data:`Quantity` / :func:`quantity` -- pydantic field types that turn config
+* :func:`Quantity` / :data:`BareQuantity` -- pydantic field types that turn config
   strings like ``"1.3 mmol / L"`` into :class:`astropy.units.Quantity`. Group an
   experiment's parameters into :class:`SimGroup` subclasses under one
   :class:`SimConfig`; each name/default/unit is declared exactly once. Hydra
@@ -39,21 +39,28 @@ def _to_quantity(v: Any) -> u.Quantity:
     return v if isinstance(v, u.Quantity) else u.Quantity(v)
 
 
-# A physical quantity parsed from a config string ("1.3 mmol / L") with no
-# dimensionality constraint. Serializes back to a string for provenance dumps.
-Quantity = Annotated[
+# A physical quantity parsed from a config string ("1.3 mmol / L") with NO
+# dimensionality check -- the escape hatch for a field whose dimension legitimately
+# varies. Prefer Quantity(unit) below, which also checks the dimension. Serializes
+# back to a string for provenance dumps.
+BareQuantity = Annotated[
     u.Quantity,
     PlainValidator(_to_quantity),
     PlainSerializer(str, return_type=str),
 ]
 
 
-def quantity(unit: str | u.UnitBase):
-    """Like :data:`Quantity` but rejects values not convertible to ``unit``.
+def Quantity(unit: str | u.UnitBase):
+    """A Quantity field type that rejects values not convertible to ``unit``.
 
-    Use for fields where a wrong dimension would silently corrupt results
-    (concentrations, diffusivities, times). ``quantity("mmol / L")`` accepts
-    ``"5 uM"`` but rejects ``"5 ms"``.
+    Preferred over :data:`BareQuantity`: a wrong dimension is a silent corruption,
+    so check it. ``Quantity("mmol / L")`` accepts ``"5 uM"`` but rejects ``"5 ms"``.
+    Use as a field type: ``ca: Quantity("mmol / L") = "1.3 mmol / L"``.
+
+    A call in an annotation position is not a valid *static* type form, so Pylance
+    flags this with ``reportInvalidTypeForm`` (same as pydantic's ``conint`` /
+    ``constr``). It works because pydantic resolves annotations at runtime; the
+    rule is muted in ``[tool.pyright]`` (see pyproject.toml).
     """
     ref = u.Unit(unit)
 
