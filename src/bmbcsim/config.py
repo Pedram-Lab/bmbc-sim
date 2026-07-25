@@ -1,30 +1,41 @@
 """Config-driven simulation support: unit-aware pydantic types + a Dask sweep runner.
 
-The two things every config-driven experiment needs:
+The things every config-driven experiment needs:
 
 * :func:`Quantity` / :data:`BareQuantity` -- pydantic field types that turn config
   strings like ``"1.3 mM"`` into :class:`astropy.units.Quantity`. Group an
-  experiment's parameters into :class:`SimGroup` subclasses under one
-  :class:`SimConfig`; each name/default/unit is declared exactly once. Hydra
-  composes the YAML and the one-line bridge
-  ``Config(**OmegaConf.to_container(dcfg, resolve=True))`` parses + validates it.
+  experiment's parameters into :class:`ConfigGroup` subclasses under one
+  :class:`SimulationConfig`; each name/default/unit is declared exactly once.
+* :func:`run_from_cli` / :func:`sweep_from_cli` -- the command-line entry points.
+  They own all of the Hydra wiring (schema registration, config path, validation,
+  output settings), so an experiment script ends at::
+
+      if __name__ == "__main__":
+          run_from_cli(Config, run, __file__)
+
 * :func:`run_sweep` -- expand a parameter grid over an existing simulation and
   fan it out via :func:`bmbcsim.utils.create_cluster` (local processes or LSF
   jobs), isolating per-run failures. This is the ``contraction_force_sweep.py``
   driver generalized.
 
 An experiment's ``simulation.py`` only has to expose a ``Config`` (subclass of
-:class:`SimConfig`) and a ``run(cfg)`` function; :func:`run_sweep` re-imports and
-re-validates on each worker, so nothing experiment-specific lives here.
+:class:`SimulationConfig`) and a ``run(cfg)`` function; :func:`run_sweep` re-imports
+and re-validates on each worker, so nothing experiment-specific lives here.
 """
 import copy
+import inspect
 import re
+import sys
+from collections.abc import Callable
 from itertools import product
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import astropy.units as u
+import hydra
 import yaml
+from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, PlainSerializer, PlainValidator
 
 # Teach astropy's string parser the domain-standard molar units (M, mM, uM, nM,
@@ -77,8 +88,8 @@ class ConfigGroup(BaseModel):
     """Base for a config *group* (a nested subsystem block: geometry, diffusion, ...).
 
     Parses unit strings, validates defaults, rejects unknown keys. Group the
-    parameters of one experiment into ``SimGroup`` subclasses, then reference them
-    from a :class:`SimConfig` -- each parameter (name, default, unit) is declared
+    parameters of one experiment into ``ConfigGroup`` subclasses, then reference them
+    from a :class:`SimulationConfig` -- each parameter (name, default, unit) is declared
     exactly once, in one place.
     """
 
@@ -107,6 +118,111 @@ class ClusterConfig(BaseModel):
     n_workers: int | None = None  # None -> one worker per job
     n_threads_per_worker: int = 4
     extra: dict[str, Any] = {}  # forwarded to the cluster constructor
+
+
+# Hydra's own settings, injected as CLI overrides by the entry points below so that
+# no experiment config has to carry them. Each run records itself in its own result
+# directory (see :func:`dump_resolved`, :func:`bmbcsim.timestamped_directory`), so
+# Hydra's default outputs/<date>/<time>/ tree is just duplication scattered wherever
+# the script happened to be launched from. "run.dir=." creates nothing (the working
+# directory already exists) and "output_subdir=null" drops the .hydra/ config copies.
+#
+# job_logging=none (no handlers) is deliberate -- NOT "disabled", which sets
+# disable_existing_loggers=true and switches off bmbcsim's logger, since that is
+# created at import time, before Hydra configures logging. The symptom is an empty
+# simulation.log in every result directory.
+_HYDRA_OUTPUT_OVERRIDES = (
+    "hydra.run.dir=.",
+    "hydra.output_subdir=null",
+    "hydra/job_logging=none",
+)
+
+# Keys a sweep YAML may set; anything else is a typo. Every one has a fallback, so
+# without this check "seed: 10" would silently sweep 1 seed instead of 10, and a
+# misspelled "base:" would silently sweep an all-default config.
+_SWEEP_KEYS = frozenset({"base", "sweep", "seeds", "cluster", "result_root"})
+
+
+def _hydra_cli(config_name: str, script: str | Path, job: Callable[[Any], None]) -> None:
+    """Compose ``config_name`` from ``<script>/configs`` and hand the result to ``job``.
+
+    Injects :data:`_HYDRA_OUTPUT_OVERRIDES` ahead of the user's own arguments, and
+    skips any of them the user overrode explicitly (Hydra rejects duplicates).
+    """
+    given = {arg.split("=")[0] for arg in sys.argv[1:]}
+    injected = [o for o in _HYDRA_OUTPUT_OVERRIDES if o.split("=")[0] not in given]
+    sys.argv = [sys.argv[0], *injected, *sys.argv[1:]]
+    config_path = str(Path(script).resolve().parent / "configs")
+    hydra.main(version_base=None, config_path=config_path, config_name=config_name)(job)()
+
+
+def run_from_cli(
+    config_cls: type[SimulationConfig],
+    run: Callable[[Any], None],
+    script: str | Path,
+    *,
+    config_name: str | None = None,
+) -> None:
+    """Command-line entry point for one config-driven simulation.
+
+    Registers ``config_cls`` as Hydra's schema so CLI overrides of any nested field
+    work without a ``+``, composes the YAML in ``<script>/configs``, validates it
+    into a ``config_cls`` and calls ``run`` with it. An experiment's whole entry
+    point is therefore::
+
+        if __name__ == "__main__":
+            run_from_cli(Config, run, __file__)
+
+    :param config_cls: The experiment's :class:`SimulationConfig` subclass.
+    :param run: Called with the validated config.
+    :param script: The experiment script, normally ``__file__``; its sibling
+        ``configs/`` directory is Hydra's config path.
+    :param config_name: Default primary config, and the name YAML variants inherit
+        with ``defaults: - <config_name>``. Defaults to ``simulation_name``.
+    """
+    default_config = config_cls()
+    config_name = config_name or default_config.simulation_name
+    ConfigStore.instance().store(name=config_name, node=default_config.model_dump())
+    _hydra_cli(
+        config_name, script,
+        lambda dcfg: run(config_cls(**OmegaConf.to_container(dcfg, resolve=True))),
+    )
+
+
+def sweep_from_cli(
+    config_cls: type[SimulationConfig], script: str | Path, *, config_name: str
+) -> None:
+    """Command-line entry point for a :func:`run_sweep` parameter sweep.
+
+    Composes the sweep YAML in ``<script>/configs`` (keys: ``base``, ``sweep``,
+    ``seeds``, ``cluster``, ``result_root``) and fans the grid out over the
+    simulation that defines ``config_cls``. A sweep driver is therefore::
+
+        if __name__ == "__main__":
+            sweep_from_cli(Config, __file__, config_name="contraction_sweep")
+
+    :param config_cls: The simulated experiment's config class. The module that
+        defines it is the ``sim_file`` workers re-import, so it must expose ``run``.
+    :param script: The sweep driver, normally ``__file__``.
+    :param config_name: Default sweep config in ``<script>/configs``.
+    """
+    def job(dcfg) -> None:
+        cfg = OmegaConf.to_container(dcfg, resolve=True)
+        if unknown := set(cfg) - _SWEEP_KEYS:
+            raise SystemExit(
+                f"unknown key(s) in sweep config: {sorted(unknown)}; "
+                f"expected a subset of {sorted(_SWEEP_KEYS)}"
+            )
+        run_sweep(
+            sim_file=inspect.getfile(config_cls),
+            base_config=config_cls(**cfg.get("base", {})),
+            sweep=cfg["sweep"],
+            seeds=cfg.get("seeds", 1),
+            cluster=ClusterConfig(**cfg.get("cluster", {})),
+            result_root=cfg.get("result_root"),
+        )
+
+    _hydra_cli(config_name, script, job)
 
 
 def dump_resolved(cfg: BaseModel, directory: str | Path, filename: str = "config.yaml") -> Path:

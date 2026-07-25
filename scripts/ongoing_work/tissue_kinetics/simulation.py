@@ -8,7 +8,6 @@ over a parameter grid.
     uv run scripts/ongoing_work/tissue_kinetics/simulation.py mechanics.enabled=true
 """
 import math
-from pathlib import Path
 
 import numpy as np
 
@@ -17,15 +16,17 @@ from astropy import constants as const
 
 import ngsolve as ngs
 
-import hydra
-from hydra.core.config_store import ConfigStore
-from omegaconf import OmegaConf
-
 import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
-from bmbcsim.config import SimulationConfig, ConfigGroup, Quantity, dump_resolved
+from bmbcsim.config import (
+    SimulationConfig,
+    ConfigGroup,
+    Quantity,
+    dump_resolved,
+    run_from_cli,
+)
 
 
 class Geometry(ConfigGroup):
@@ -346,28 +347,5 @@ def run(cfg: Config) -> None:
     print("Simulation complete.")
 
 
-# Register the default config as Hydra's schema so CLI overrides of any (nested)
-# field work without a "+". Generated from Config itself, so defaults are declared
-# exactly once, in the Config class above (units serialize to strings).
-_NODE = Config().model_dump()
-# Everything a run produces belongs in its result directory, so switch off Hydra's
-# outputs/<date>/<time>/ tree: its .hydra/ config copies are superseded by the
-# dump_resolved call in run(), and its job log is always empty (this script prints,
-# and bmbcsim logs into result_directory itself). Hydra consumes and strips both
-# keys below, so Config(**job_config) never sees them.
-_NODE["defaults"] = ["_self_", {"override hydra/job_logging": "disabled"}]
-_NODE["hydra"] = {"run": {"dir": "."}, "output_subdir": None}
-ConfigStore.instance().store(name="tissue_kinetics", node=_NODE)
-
-
-@hydra.main(
-    version_base=None,
-    config_path=str(Path(__file__).resolve().parent / "configs"),
-    config_name="tissue_kinetics",
-)
-def main(dcfg) -> None:
-    run(Config(**OmegaConf.to_container(dcfg, resolve=True)))
-
-
 if __name__ == "__main__":
-    main()
+    run_from_cli(Config, run, __file__)

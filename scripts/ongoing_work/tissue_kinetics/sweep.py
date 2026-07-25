@@ -8,41 +8,8 @@ failures isolated).
     uv run scripts/ongoing_work/tissue_kinetics/sweep.py                 # contraction_sweep
     uv run scripts/ongoing_work/tissue_kinetics/sweep.py cluster=janelia  # ... on LSF
 """
-from pathlib import Path
-
-import hydra
-from omegaconf import OmegaConf
-
-from bmbcsim.config import ClusterConfig, run_sweep
+from bmbcsim.config import sweep_from_cli
 from simulation import Config  # same directory (added to sys.path when run directly)
 
-_HERE = Path(__file__).resolve().parent
-_KNOWN_KEYS = {"base", "sweep", "seeds", "cluster", "result_root"}
-
-
-@hydra.main(
-    version_base=None,
-    config_path=str(_HERE / "configs"),
-    config_name="contraction_sweep",
-)
-def main(dcfg) -> None:
-    cfg = OmegaConf.to_container(dcfg, resolve=True)
-    # Every key below has a fallback, so a typo would silently sweep the wrong
-    # grid ("seed: 10" -> 1 seed, "bases:" -> an all-default base config).
-    if unknown := set(cfg) - _KNOWN_KEYS:
-        raise SystemExit(
-            f"unknown key(s) in sweep config: {sorted(unknown)}; "
-            f"expected a subset of {sorted(_KNOWN_KEYS)}"
-        )
-    run_sweep(
-        sim_file=_HERE / "simulation.py",
-        base_config=Config(**cfg.get("base", {})),
-        sweep=cfg["sweep"],
-        seeds=cfg.get("seeds", 1),
-        cluster=ClusterConfig(**cfg.get("cluster", {})),
-        result_root=cfg.get("result_root"),
-    )
-
-
 if __name__ == "__main__":
-    main()
+    sweep_from_cli(Config, __file__, config_name="contraction_sweep")
