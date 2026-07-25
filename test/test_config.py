@@ -3,10 +3,10 @@ import astropy.units as u
 import pytest
 from pydantic import ValidationError
 
-from bmbcsim.config import BareQuantity, Quantity, SimConfig, SimGroup, expand_sweep
+from bmbcsim.config import BareQuantity, Quantity, SimulationConfig, ConfigGroup, expand_sweep
 
 
-class _Cfg(SimConfig):
+class _Cfg(SimulationConfig):
     simulation_name: str = "demo"
     seed: int = 0
     ca: Quantity("mmol / L") = "1.3 mmol / L"
@@ -14,12 +14,12 @@ class _Cfg(SimConfig):
     factor: float = 2.0
 
 
-class _Group(SimGroup):
+class _Group(ConfigGroup):
     coupling: BareQuantity = "0.1 kPa L / mmol"
     ecs_ratio: float = 0.1
 
 
-class _Nested(SimConfig):
+class _Nested(SimulationConfig):
     simulation_name: str = "demo"
     seed: int = 0
     mech: _Group = _Group()

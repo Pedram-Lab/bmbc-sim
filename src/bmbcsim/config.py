@@ -73,7 +73,7 @@ def Quantity(unit: str | u.UnitBase):
     return Annotated[u.Quantity, PlainValidator(_validate), PlainSerializer(str, return_type=str)]
 
 
-class SimGroup(BaseModel):
+class ConfigGroup(BaseModel):
     """Base for a config *group* (a nested subsystem block: geometry, diffusion, ...).
 
     Parses unit strings, validates defaults, rejects unknown keys. Group the
@@ -90,7 +90,7 @@ class SimGroup(BaseModel):
     )
 
 
-class SimConfig(SimGroup):
+class SimulationConfig(ConfigGroup):
     """Top level of an experiment config: cross-cutting fields + nested groups."""
 
     simulation_name: str
@@ -145,11 +145,11 @@ def _run_sim(sim_file: str, config_dict: dict[str, Any]) -> None:
 
 
 def expand_sweep(
-    base_config: SimConfig,
+    base_config: SimulationConfig,
     sweep: dict[str, list[Any]],
     seeds: int | list[int] = 1,
     result_root: str | Path | None = None,
-) -> list[tuple[dict[str, Any], SimConfig, Path]]:
+) -> list[tuple[dict[str, Any], SimulationConfig, Path]]:
     """Expand the sweep grid into validated per-run configs (no I/O, no cluster).
 
     :returns: List of ``(labels, config, subdir)`` -- one per grid point x seed.
@@ -169,7 +169,7 @@ def expand_sweep(
     if not has_seed and len(seed_list) > 1:
         raise ValueError(f"{cls.__name__} has no 'seed' field but {len(seed_list)} seeds requested")
 
-    jobs: list[tuple[dict[str, Any], SimConfig, Path]] = []
+    jobs: list[tuple[dict[str, Any], SimulationConfig, Path]] = []
     for combo in product(*[sweep[k] for k in keys]):
         combo_labels = dict(zip(keys, combo))
         subdir = root / Path(*[f"{k.split('.')[-1]}={_slug(v)}" for k, v in combo_labels.items()])
@@ -190,7 +190,7 @@ def expand_sweep(
 def run_sweep(
     *,
     sim_file: str | Path,
-    base_config: SimConfig,
+    base_config: SimulationConfig,
     sweep: dict[str, list[Any]],
     seeds: int | list[int] = 1,
     cluster: ClusterConfig | None = None,

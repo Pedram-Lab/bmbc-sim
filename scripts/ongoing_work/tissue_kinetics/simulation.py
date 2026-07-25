@@ -25,10 +25,10 @@ import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
-from bmbcsim.config import SimConfig, SimGroup, Quantity
+from bmbcsim.config import SimulationConfig, ConfigGroup, Quantity
 
 
-class Geometry(SimGroup):
+class Geometry(ConfigGroup):
     """Mesh / cell-packing geometry."""
 
     target_cell_diam: float = 4.0
@@ -42,7 +42,7 @@ class Geometry(SimGroup):
     mesh_size: float = 5.0
 
 
-class Diffusion(SimGroup):
+class Diffusion(ConfigGroup):
     """ECS/cytosol Ca2+ diffusion and the reservoir boundary condition."""
 
     ca_ecs: Quantity("mM") = "1.3 mM"
@@ -53,7 +53,7 @@ class Diffusion(SimGroup):
     depletion: Quantity("mM") = "0.47 mM"
 
 
-class Synapse(SimGroup):
+class Synapse(ConfigGroup):
     """Distributed NMDAR synapse patches (Ca2+ sink)."""
 
     n_synapses: int = 400
@@ -66,7 +66,7 @@ class Synapse(SimGroup):
     pulse_times: list[Quantity("ms")] = ["300 ms", "310 ms", "320 ms", "330 ms", "340 ms"]
 
 
-class ECM(SimGroup):
+class ECM(ConfigGroup):
     """Extracellular-matrix Ca2+ buffer (Ca + ECM <-> ECM_Ca)."""
 
     enabled: bool = False
@@ -75,7 +75,7 @@ class ECM(SimGroup):
     ecm_kr: Quantity("1 / ms") = "0.1 / ms"
 
 
-class Mechanics(SimGroup):
+class Mechanics(ConfigGroup):
     """ECS/cell elasticity and ECM_Ca-driven contraction (implies ECM)."""
 
     enabled: bool = False
@@ -86,7 +86,7 @@ class Mechanics(SimGroup):
     ecm_ca_coupling: Quantity("kPa / mM") = "0.1 kPa / mM"
 
 
-class Config(SimConfig):
+class Config(SimulationConfig):
     """Full config for the tissue-kinetics simulation."""
 
     simulation_name: str = "tissue_kinetics"
