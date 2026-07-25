@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
@@ -24,6 +26,24 @@ def _install_heartbeat_shutdown_filter() -> None:
         return
     logging.getLogger("distributed.worker").addFilter(_silence_heartbeat_shutdown)
     _heartbeat_filter_installed = True
+
+
+def timestamped_directory(root: str | Path, name: str) -> Path:
+    """Create and return ``<root>/<name>_<timestamp>/`` to hold one run's output.
+
+    :class:`bmbcsim.Simulation` takes a finished directory rather than inventing
+    one, so a script can name its output directory up front and write everything
+    that describes the run -- a resolved config, the inputs -- there *before*
+    building the simulation. That way a crash during setup (meshing, geometry)
+    still leaves a directory saying what was being attempted.
+
+    :param root: Directory under which the run directory is created.
+    :param name: Name of the run; the timestamp keeps repeat runs distinct.
+    :return: The created directory.
+    """
+    directory = Path(root) / f"{name}_{datetime.now():%Y-%m-%d-%H%M%S}"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:

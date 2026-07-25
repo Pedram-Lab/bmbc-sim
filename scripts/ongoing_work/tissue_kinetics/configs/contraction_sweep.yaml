@@ -4,7 +4,15 @@
 # Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name contraction_sweep
 defaults:
   - cluster: local    # override on the CLI with cluster=janelia
+  - override hydra/job_logging: disabled    # always empty; run_sweep prints
   - _self_
+
+# No outputs/<date>/<time>/ tree next to the script: run_sweep records each run's
+# resolved config in its own result subdir, which is the copy that matters.
+hydra:
+  run:
+    dir: .
+  output_subdir: null
 
 result_root: results/contraction-force-sweep
 

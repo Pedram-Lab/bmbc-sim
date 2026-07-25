@@ -1,6 +1,5 @@
 import logging
 import os
-from datetime import datetime
 
 import astropy.units as u
 import ngsolve as ngs
@@ -28,19 +27,19 @@ class Simulation:
     """
     def __init__(
             self,
-            name: str,
             mesh: ngs.Mesh,
             *,
-            result_root: str,
+            result_directory: str | os.PathLike,
             electrostatics: bool = False,
             mechanics: bool = False,
     ):
         """Initialize a new simulation.
 
-        :param name: The name of the simulation (used for naming the result directory).
         :param mesh: The mesh representing the geometry of the simulation.
-        :param result_root: The directory under which simulation results will be
-            stored.
+        :param result_directory: The directory this run writes its results and log
+            to. The caller owns it (see :func:`bmbcsim.timestamped_directory`), so
+            whatever describes the run can be recorded there before the mesh is
+            even built; it is created here if it does not exist yet.
         :param electrostatics: Whether to include electrostatics in the simulation. If
             yes, compartments must have a permittivity.
         :param mechanics: Whether to include mechanics in the simulation. If yes,
@@ -53,10 +52,8 @@ class Simulation:
         self.mechanics = mechanics
 
         # Set up result directory and logging
-        time_stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-        self.result_directory = os.path.join(result_root, f"{name}_{time_stamp}")
-        if not os.path.exists(self.result_directory):
-            os.makedirs(self.result_directory)
+        self.result_directory = os.fspath(result_directory)
+        os.makedirs(self.result_directory, exist_ok=True)
 
         file_handler = logging.FileHandler(os.path.join(self.result_directory, "simulation.log"))
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")

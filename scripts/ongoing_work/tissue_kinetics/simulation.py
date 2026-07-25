@@ -25,7 +25,7 @@ import bmbcsim
 from bmbcsim.simulation import transport
 from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
-from bmbcsim.config import SimulationConfig, ConfigGroup, Quantity
+from bmbcsim.config import SimulationConfig, ConfigGroup, Quantity, dump_resolved
 
 
 class Geometry(ConfigGroup):
@@ -130,6 +130,13 @@ def run(cfg: Config) -> None:
         l_char = max(geom.box_size_x, geom.box_size_y, geom.box_size_z) / 2.0 * u.um
         boundary_permeability = diff.diffusivity_ecs / diff.tortuosity**2 / l_char
 
+    # Claim the result directory and record the config that produced it before the
+    # geometry work starts: meshing is where runs fail (see the ECS-connectivity
+    # check below), and a failed run is only debuggable if its config is on disk.
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    dump_resolved(cfg, result_dir)
+    print(f"Results and config -> {result_dir}")
+
     # --- Load and post-process geometry from VTK ---
     print("Loading geometry...")
     geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
@@ -218,8 +225,7 @@ def run(cfg: Config) -> None:
     print("Setting up simulation...")
     sim = bmbcsim.Simulation(
         mesh=tissue_mesh,
-        name=cfg.simulation_name,
-        result_root=cfg.result_root,
+        result_directory=result_dir,
         mechanics=with_mechanics,
     )
     geo = sim.simulation_geometry
@@ -343,7 +349,15 @@ def run(cfg: Config) -> None:
 # Register the default config as Hydra's schema so CLI overrides of any (nested)
 # field work without a "+". Generated from Config itself, so defaults are declared
 # exactly once, in the Config class above (units serialize to strings).
-ConfigStore.instance().store(name="tissue_kinetics", node=Config().model_dump())
+_NODE = Config().model_dump()
+# Everything a run produces belongs in its result directory, so switch off Hydra's
+# outputs/<date>/<time>/ tree: its .hydra/ config copies are superseded by the
+# dump_resolved call in run(), and its job log is always empty (this script prints,
+# and bmbcsim logs into result_directory itself). Hydra consumes and strips both
+# keys below, so Config(**job_config) never sees them.
+_NODE["defaults"] = ["_self_", {"override hydra/job_logging": "disabled"}]
+_NODE["hydra"] = {"run": {"dir": "."}, "output_subdir": None}
+ConfigStore.instance().store(name="tissue_kinetics", node=_NODE)
 
 
 @hydra.main(
