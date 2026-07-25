@@ -1,6 +1,14 @@
+"""Tissue-kinetics simulation: Ca2+ in the ECS of a packed-cell tissue block.
+
+The ``Config`` below is the single source of truth for parameters, defaults and
+units -- ``run`` reads straight off it, nothing is declared twice. Hydra composes
+the YAML (``configs/``); ``sweep.py`` fans the same ``Config``/``run`` pair out
+over a parameter grid.
+
+    uv run scripts/ongoing_work/tissue_kinetics/simulation.py mechanics.enabled=true
+"""
 import math
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -20,17 +28,13 @@ from bmbcsim.simulation import coefficient_fields as cf
 from bmbcsim.config import SimConfig, SimGroup, Quantity
 
 
-# ======================================================================
-# Config: the single source of truth for parameters, defaults and units.
-# ``run_simulation`` reads straight off this; nothing is declared twice.
-# ======================================================================
 class Geometry(SimGroup):
     """Mesh / cell-packing geometry."""
 
     target_cell_diam: float = 4.0
     ecs_ratio: float = 0.1
-    # ECS ratio at which the cell set is cropped/numbered (step 1d); set to the
-    # largest ecs_ratio in a comparison sweep. See step 1d.
+    # ECS ratio at which the cell set is cropped/numbered; set to the largest
+    # ecs_ratio in a comparison sweep. See step 1d.
     reference_ecs_ratio: float = 0.19
     box_size_x: float = 20.0
     box_size_y: float = 20.0
@@ -45,7 +49,7 @@ class Diffusion(SimGroup):
     diffusivity_ecs: Quantity("um2 / ms") = "0.7 um2 / ms"
     diffusivity_cyto: Quantity("um2 / ms") = "0.22 um2 / ms"
     tortuosity: float = 1.6
-    boundary_permeability: Optional[Quantity("um / ms")] = None  # derived from tortuosity if None
+    boundary_permeability: Quantity("um / ms") | None = None  # from tortuosity if None
     depletion: Quantity("mM") = "0.47 mM"
 
 
@@ -102,21 +106,18 @@ class Config(SimConfig):
 
 def _on_outer_box(min_box, max_box, eps_rel=1e-6):
     """Return a predicate flagging DOFs on any of the 6 simulation-box faces."""
-    min_box = np.asarray(min_box, dtype=float)
-    max_box = np.asarray(max_box, dtype=float)
-    eps = eps_rel * float((max_box - min_box).max())
+    eps = eps_rel * float(np.max(np.subtract(max_box, min_box)))
 
     def predicate(coords):
-        on_face = np.zeros(len(coords), dtype=bool)
-        for axis in range(3):
-            on_face |= np.isclose(coords[:, axis], min_box[axis], atol=eps)
-            on_face |= np.isclose(coords[:, axis], max_box[axis], atol=eps)
-        return on_face
+        on_min = np.isclose(coords, min_box, atol=eps)
+        on_max = np.isclose(coords, max_box, atol=eps)
+        return (on_min | on_max).any(axis=1)
 
     return predicate
 
 
-def run_simulation(cfg: Config) -> None:
+def run(cfg: Config) -> None:
+    """Run the simulation from a validated config."""
     geom, diff, syn, ecm_cfg, mech = (
         cfg.geometry, cfg.diffusion, cfg.synapse, cfg.ecm, cfg.mechanics
     )
@@ -126,32 +127,20 @@ def run_simulation(cfg: Config) -> None:
     # Derived parameter: boundary permeability from tortuosity if not set
     boundary_permeability = diff.boundary_permeability
     if boundary_permeability is None:
-        d_eff = diff.diffusivity_ecs / diff.tortuosity**2
         l_char = max(geom.box_size_x, geom.box_size_y, geom.box_size_z) / 2.0 * u.um
-        boundary_permeability = d_eff / l_char
+        boundary_permeability = diff.diffusivity_ecs / diff.tortuosity**2 / l_char
 
-    # ================================================================
-    # 1) Load and post-process geometry from VTK
-    # ================================================================
+    # --- Load and post-process geometry from VTK ---
     print("Loading geometry...")
     geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
     print(f"  Cells after from_file: {len(geometry.cells)}")
 
-    # --- 1a) compute the typical "diameter" of each cell ---
-    cell_diameters = []
-    for i, cell in enumerate(geometry.cells):
-        bmin = np.array(cell.bounds[::2])
-        bmax = np.array(cell.bounds[1::2])
-        size = bmax - bmin
-        diam = float(size.max())
-        cell_diameters.append(diam)
-
-    cell_diameters = np.array(cell_diameters)
-    median_diam = float(np.median(cell_diameters))
-    print(f"  Median cell diameter (original units): {median_diam:.3f}")
-
-    # --- 1b) scale so that the median matches target_cell_diam ---
+    # Scale so the median cell "diameter" matches target_cell_diam
+    median_diam = float(np.median(
+        [np.subtract(cell.bounds[1::2], cell.bounds[::2]).max() for cell in geometry.cells]
+    ))
     scale_factor = geom.target_cell_diam / median_diam
+    print(f"  Median cell diameter (original units): {median_diam:.3f}")
     print(f"  Scale factor to get ~{geom.target_cell_diam} um cells: {scale_factor:.3f}")
 
     geometry = geometry.scale(scale_factor)
@@ -159,24 +148,23 @@ def run_simulation(cfg: Config) -> None:
     geometry = geometry.smooth(n_iter=10)
     geometry = geometry.decimate(factor=0.5)
 
-    # --- 1c) translate so that the domain starts at (0,0,0) ---
+    # Translate so that the domain starts at (0,0,0)
     minc, _ = geometry.bounding_box()
     for cell in geometry.cells:
         cell.points -= minc
 
-    # --- 1d) crop at a fixed reference shrink so the cell set is ecs_ratio-independent ---
+    # Crop at a fixed reference shrink so the cell set is ecs_ratio-independent.
     # Cropping at reference_ecs_ratio (not the run's ecs_ratio) keeps the kept set,
-    # its numbering (step 1f) and synapse seeding (step 5) identical across ratios,
-    # so (seed, synapse_idx) is the same synapse everywhere; step 1e then scales to
-    # the run's ecs_ratio. shrink_cells/LocalizedPeaks are both centroid-radial, so
+    # its numbering and synapse seeding identical across ratios, so (seed,
+    # synapse_idx) is the same synapse everywhere; step 1e then scales to the
+    # run's ecs_ratio. shrink_cells/LocalizedPeaks are both centroid-radial, so
     # only cell size (hence ECS volume) changes. Cropping shrunk (vs full-size)
     # cells also avoids over-packing the box and pinching the ECS apart.
     geometry = geometry.shrink_cells(1 - geom.reference_ecs_ratio, jitter=0.0)
 
     minc3, maxc3 = geometry.bounding_box()
     center = 0.5 * (minc3 + maxc3)
-    box_size = np.array([geom.box_size_x, geom.box_size_y, geom.box_size_z])
-    half_box = box_size / 2.0
+    half_box = np.array([geom.box_size_x, geom.box_size_y, geom.box_size_z]) / 2.0
     min_box = np.maximum(minc3, center - half_box)
     max_box = np.minimum(maxc3, center + half_box)
 
@@ -188,28 +176,22 @@ def run_simulation(cfg: Config) -> None:
     n_cells = len(geometry.cells)
     print(f"  Cells after keep_cells_within (reference ecs={geom.reference_ecs_ratio}): "
           f"{n_cells}")
-
-    # --- 1e) scale the fixed cell set to this run's ECS ratio (grows it for smaller ratios) ---
-    geometry = geometry.shrink_cells(
-        (1 - geom.ecs_ratio) / (1 - geom.reference_ecs_ratio), jitter=0.0
-    )
-    print(f"  Cells scaled to ecs_ratio={geom.ecs_ratio}: {n_cells} cells")
-
     if n_cells == 0:
         raise RuntimeError(
             "No cells remain after keep_cells_within. "
             "Increase one of box_size_x/y/z or relax inside_threshold."
         )
 
-    # ================================================================
-    # 1f) Cell and membrane names
-    # ================================================================
+    # Scale the fixed cell set to this run's ECS ratio (grows it for smaller ratios)
+    geometry = geometry.shrink_cells(
+        (1 - geom.ecs_ratio) / (1 - geom.reference_ecs_ratio), jitter=0.0
+    )
+    print(f"  Cells scaled to ecs_ratio={geom.ecs_ratio}: {n_cells} cells")
+
+    # Name cells and membranes, then generate the NGSolve mesh
     cell_names = [f"cell_{i}" for i in range(n_cells)]
     bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
-    # ================================================================
-    # 1g) Generate NGSolve mesh
-    # ================================================================
     print("Building mesh...")
     tissue_mesh: ngs.Mesh = geometry.to_ngs_mesh(
         mesh_size=geom.mesh_size,
@@ -224,8 +206,7 @@ def run_simulation(cfg: Config) -> None:
     # ECS must be a single connected region (to_ngs_mesh names a disconnected one
     # "ecs:region_0", "ecs:region_1", ...). Fail fast: it's unphysical, and the
     # seed-independent geometry would break every seed identically.
-    ecs_regions = [m for m in set(tissue_mesh.GetMaterials())
-                   if m == "ecs" or m.startswith("ecs:")]
+    ecs_regions = {m for m in tissue_mesh.GetMaterials() if m.split(":")[0] == "ecs"}
     if len(ecs_regions) != 1:
         raise RuntimeError(
             f"ECS split into {len(ecs_regions)} disconnected regions "
@@ -233,9 +214,7 @@ def run_simulation(cfg: Config) -> None:
             f"reference_ecs_ratio (now {geom.reference_ecs_ratio}) toward it."
         )
 
-    # ================================================================
-    # 2) Set up simulation
-    # ================================================================
+    # --- Set up simulation ---
     print("Setting up simulation...")
     sim = bmbcsim.Simulation(
         mesh=tissue_mesh,
@@ -246,20 +225,16 @@ def run_simulation(cfg: Config) -> None:
     geo = sim.simulation_geometry
 
     ecs = geo.compartments["ecs"]
-    cells = [geo.compartments[f"cell_{i}"] for i in range(n_cells)]
-    membranes = [geo.membranes[f"membrane_{i}"] for i in range(n_cells)]
+    cells = [geo.compartments[name] for name in cell_names]
+    membranes = [geo.membranes[name] for name in bnd_names]
 
-    total_cell_volume = sum(cell.volume for cell in cells)
-    total_volume = ecs.volume + total_cell_volume
-    total_membrane_area = sum(membrane.area for membrane in membranes)
+    total_volume = ecs.volume + sum(cell.volume for cell in cells)
     print(f"  Total volume: {total_volume:.2f} um^3")
     print(f"  ECS volume: {ecs.volume:.2f} um^3")
     print(f"  ECS volume fraction: {ecs.volume / total_volume * 100:.2f}%")
-    print(f"  Total membrane area: {total_membrane_area:.2f} um^2")
+    print(f"  Total membrane area: {sum(m.area for m in membranes):.2f} um^2")
 
-    # ================================================================
-    # 2b) Mechanical properties (optional)
-    # ================================================================
+    # Mechanical properties (optional)
     if with_mechanics:
         ecs.add_elasticity(
             youngs_modulus=mech.ecs_youngs_modulus,
@@ -271,20 +246,19 @@ def run_simulation(cfg: Config) -> None:
                 poisson_ratio=mech.cell_poisson_ratio,
             )
 
-    # ================================================================
-    # 3) Species and initialization
-    # ================================================================
+    # --- Species and initialization ---
     ca = sim.add_species("Ca")
     ecs.initialize_species(ca, diff.ca_ecs)
+    for cell in cells:
+        cell.initialize_species(ca, 0.0 * u.mmol / u.L)
 
     if with_ecm:
         ecm_k = (ecm_cfg.ecm_kf / ecm_cfg.ecm_kr).decompose()
         ecm_ca_equilibrium = ecm_k * diff.ca_ecs * ecm_cfg.ecm_total / (1 + ecm_k * diff.ca_ecs)
-        ecm_concentration = ecm_cfg.ecm_total - ecm_ca_equilibrium
 
         ecm = sim.add_species("ECM")
         ecm_ca = sim.add_species("ECM_Ca")
-        ecs.initialize_species(ecm, ecm_concentration)
+        ecs.initialize_species(ecm, ecm_cfg.ecm_total - ecm_ca_equilibrium)
         ecs.initialize_species(ecm_ca, ecm_ca_equilibrium)
 
         if with_mechanics:
@@ -292,14 +266,8 @@ def run_simulation(cfg: Config) -> None:
                 ecm_ca, mech.ecm_ca_coupling, baseline=ecm_ca_equilibrium
             )
 
-    for cell in cells:
-        cell.initialize_species(ca, 0.0 * u.mmol / u.L)
-
-    # ================================================================
-    # 4) Diffusion and reactions
-    # ================================================================
+    # --- Diffusion and reactions ---
     ecs.add_diffusion(ca, diff.diffusivity_ecs)
-
     for cell in cells:
         cell.add_diffusion(ca, diff.diffusivity_cyto)
 
@@ -311,52 +279,38 @@ def run_simulation(cfg: Config) -> None:
             k_r=ecm_cfg.ecm_kr,
         )
 
-    # ================================================================
-    # 5) Ca2+ sink at distributed synapse patches
-    # ================================================================
+    # --- Ca2+ sink at distributed synapse patches ---
     # Q = N * I / (2 F)  (factor 2 for Ca2+)
-    const_F = const.e.si * const.N_A
-    Q_per_synapse = syn.n_channels_per_synapse * syn.i_channel / (2 * const_F)
+    faraday = const.e.si * const.N_A
+    q_per_synapse = syn.n_channels_per_synapse * syn.i_channel / (2 * faraday)
 
-    # Number of active synapses, distributed randomly across cells
-    total_active_synapses = int(syn.n_synapses * syn.f_active)
-    base_synapses_per_cell = total_active_synapses // n_cells
-    remainder = total_active_synapses % n_cells
-
+    # Active synapses, distributed randomly (but reproducibly) across cells
     rng = np.random.default_rng(seed=cfg.seed)
-    cells_with_extra = rng.choice(n_cells, size=remainder, replace=False)
-    synapses_per_cell = np.full(n_cells, base_synapses_per_cell)
-    synapses_per_cell[cells_with_extra] += 1
-
+    base, remainder = divmod(int(syn.n_synapses * syn.f_active), n_cells)
+    synapses_per_cell = np.full(n_cells, base)
+    synapses_per_cell[rng.choice(n_cells, size=remainder, replace=False)] += 1
     print(f"  Active synapses: {synapses_per_cell.sum()} (of {syn.n_synapses} total)")
 
-    # Biexponential NMDAR waveform with multi-pulse stimulation
     def nmdar_waveform(t):
         """J(t) = e^(-t/tau1) - e^(-t/tau2), superposition of pulses."""
-        total = 0.0
-        for t_pulse in syn.pulse_times:
-            dt = t - t_pulse
-            if dt >= 0 * u.ms:
-                total += math.exp(-dt / syn.tau1) - math.exp(-dt / syn.tau2)
-        return total
+        dts = [t - t_pulse for t_pulse in syn.pulse_times if t >= t_pulse]
+        return sum(math.exp(-dt / syn.tau1) - math.exp(-dt / syn.tau2) for dt in dts)
 
     # Skip membrane DOFs that lie on the outer simulation box: synapses there
     # would straddle the simulation boundary rather than the cell membrane.
     exclude_outer_box = _on_outer_box(min_box, max_box)
 
-    # Distributed synapse patches using LocalizedPeaks
-    for i, (membrane, cell) in enumerate(zip(membranes, cells)):
-        n_syn = synapses_per_cell[i]
+    for n_syn, membrane, cell in zip(synapses_per_cell, membranes, cells):
         if n_syn == 0:
             continue
 
         synapse_distribution = cf.LocalizedPeaks(
             seed=int(rng.integers(0, 2**31)),
             num_peaks=n_syn,
-            peak_value=Q_per_synapse,
+            peak_value=q_per_synapse,
             background_value=0.0 * u.mol / u.s,
             peak_width=syn.synapse_diameter / 6.0,
-            total=n_syn * Q_per_synapse,
+            total=n_syn * q_per_synapse,
             exclude_predicate=exclude_outer_box,
         )
         synapse_flux = transport.ProportionalFlux(
@@ -367,9 +321,7 @@ def run_simulation(cfg: Config) -> None:
         )
         membrane.add_transport(ca, synapse_flux, ecs, cell)
 
-    # ================================================================
-    # 6) Robin BC: transport from external reservoir into ECS
-    # ================================================================
+    # --- Robin BC: transport from external reservoir into ECS ---
     for bnd in ["top", "bottom", "left", "right", "front", "back"]:
         boundary = geo.membranes[bnd]
         boundary_flux = transport.Passive(
@@ -377,9 +329,7 @@ def run_simulation(cfg: Config) -> None:
         )
         boundary.add_transport(ca, boundary_flux, None, ecs)
 
-    # ================================================================
-    # 7) Run simulation
-    # ================================================================
+    # --- Run simulation ---
     print("Running simulation...")
     sim.run(
         end_time=cfg.end_time,
@@ -390,20 +340,17 @@ def run_simulation(cfg: Config) -> None:
     print("Simulation complete.")
 
 
-def run(cfg: Config) -> None:
-    """Public entry: run the simulation from a validated config."""
-    run_simulation(cfg)
-
-
-_CONFIGS = str(Path(__file__).resolve().parent / "configs")
-
 # Register the default config as Hydra's schema so CLI overrides of any (nested)
-# field work without a "+". Generated from Config itself -- units serialize to
-# strings, so defaults are declared exactly once, in the Config class above.
+# field work without a "+". Generated from Config itself, so defaults are declared
+# exactly once, in the Config class above (units serialize to strings).
 ConfigStore.instance().store(name="tissue_kinetics", node=Config().model_dump())
 
 
-@hydra.main(version_base=None, config_path=_CONFIGS, config_name="tissue_kinetics")
+@hydra.main(
+    version_base=None,
+    config_path=str(Path(__file__).resolve().parent / "configs"),
+    config_name="tissue_kinetics",
+)
 def main(dcfg) -> None:
     run(Config(**OmegaConf.to_container(dcfg, resolve=True)))
 
