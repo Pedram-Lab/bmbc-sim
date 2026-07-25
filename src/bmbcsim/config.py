@@ -3,7 +3,7 @@
 The two things every config-driven experiment needs:
 
 * :func:`Quantity` / :data:`BareQuantity` -- pydantic field types that turn config
-  strings like ``"1.3 mmol / L"`` into :class:`astropy.units.Quantity`. Group an
+  strings like ``"1.3 mM"`` into :class:`astropy.units.Quantity`. Group an
   experiment's parameters into :class:`SimGroup` subclasses under one
   :class:`SimConfig`; each name/default/unit is declared exactly once. Hydra
   composes the YAML and the one-line bridge
@@ -39,7 +39,7 @@ def _to_quantity(v: Any) -> u.Quantity:
     return v if isinstance(v, u.Quantity) else u.Quantity(v)
 
 
-# A physical quantity parsed from a config string ("1.3 mmol / L") with NO
+# A physical quantity parsed from a config string ("1.3 mM") with NO
 # dimensionality check -- the escape hatch for a field whose dimension legitimately
 # varies. Prefer Quantity(unit) below, which also checks the dimension. Serializes
 # back to a string for provenance dumps.
@@ -54,8 +54,8 @@ def Quantity(unit: str | u.UnitBase):
     """A Quantity field type that rejects values not convertible to ``unit``.
 
     Preferred over :data:`BareQuantity`: a wrong dimension is a silent corruption,
-    so check it. ``Quantity("mmol / L")`` accepts ``"5 uM"`` but rejects ``"5 ms"``.
-    Use as a field type: ``ca: Quantity("mmol / L") = "1.3 mmol / L"``.
+    so check it. ``Quantity("mM")`` accepts ``"5 uM"`` but rejects ``"5 ms"``.
+    Use as a field type: ``ca: Quantity("mM") = "1.3 mM"``.
 
     A call in an annotation position is not a valid *static* type form, so Pylance
     flags this with ``reportInvalidTypeForm`` (same as pydantic's ``conint`` /
@@ -82,7 +82,7 @@ class SimGroup(BaseModel):
     exactly once, in one place.
     """
 
-    # validate_default: defaults are strings ("1.3 mmol / L") that must be parsed
+    # validate_default: defaults are strings ("1.3 mM") that must be parsed
     # too, not just overrides. extra=forbid: an unknown config key is a typo, not
     # a silently-ignored parameter.
     model_config = ConfigDict(

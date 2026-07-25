@@ -41,12 +41,12 @@ class Geometry(SimGroup):
 class Diffusion(SimGroup):
     """ECS/cytosol Ca2+ diffusion and the reservoir boundary condition."""
 
-    ca_ecs: Quantity("mmol / L") = "1.3 mmol / L"
+    ca_ecs: Quantity("mM") = "1.3 mM"
     diffusivity_ecs: Quantity("um2 / ms") = "0.7 um2 / ms"
     diffusivity_cyto: Quantity("um2 / ms") = "0.22 um2 / ms"
     tortuosity: float = 1.6
     boundary_permeability: Optional[Quantity("um / ms")] = None  # derived from tortuosity if None
-    depletion: Quantity("mmol / L") = "0.47 mmol / L"
+    depletion: Quantity("mM") = "0.47 mM"
 
 
 class Synapse(SimGroup):
@@ -66,8 +66,8 @@ class ECM(SimGroup):
     """Extracellular-matrix Ca2+ buffer (Ca + ECM <-> ECM_Ca)."""
 
     enabled: bool = False
-    ecm_total: Quantity("mmol / L") = "2.0 mmol / L"
-    ecm_kf: Quantity("L / (mmol s)") = "10.0 L / (mmol s)"
+    ecm_total: Quantity("mM") = "2.0 mM"
+    ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
     ecm_kr: Quantity("1 / ms") = "0.1 / ms"
 
 
@@ -79,7 +79,7 @@ class Mechanics(SimGroup):
     ecs_poisson_ratio: float = 0.3
     cell_youngs_modulus: Quantity("kPa") = "1.0 kPa"
     cell_poisson_ratio: float = 0.4
-    ecm_ca_coupling: Quantity("kPa L / mmol") = "0.1 kPa L / mmol"  # = 0.1 kPa / (mmol/L)
+    ecm_ca_coupling: Quantity("kPa / mM") = "0.1 kPa / mM"
 
 
 class Config(SimConfig):
