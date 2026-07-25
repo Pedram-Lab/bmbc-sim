@@ -1,0 +1,11 @@
+# Committed single-run variant: mechanics on, low ECS ratio.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/simulation.py --config-name mechanics
+# Unlisted fields fall back to the Config defaults in ../simulation.py.
+defaults:
+  - tissue_kinetics
+  - _self_
+
+mechanics:
+  enabled: true
+geometry:
+  ecs_ratio: 0.04

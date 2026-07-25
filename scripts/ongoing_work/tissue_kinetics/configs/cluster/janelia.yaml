@@ -1,0 +1,7 @@
+# Janelia LSF cluster (one simulation per LSF job). `extra` is forwarded to the
+# LSFCluster constructor (walltime, memory, queue, ...); see create_cluster.
+backend: janelia
+n_workers: 20
+n_threads_per_worker: 4
+extra:
+  walltime: "04:00"

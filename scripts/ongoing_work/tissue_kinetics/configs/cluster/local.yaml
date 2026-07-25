@@ -1,0 +1,4 @@
+# Local multi-process Dask cluster (one simulation per worker process).
+backend: local
+n_workers: null            # null -> one worker per job
+n_threads_per_worker: 4
