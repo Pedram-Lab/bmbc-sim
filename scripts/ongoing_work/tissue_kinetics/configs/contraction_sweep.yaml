@@ -3,7 +3,7 @@
 # (ECM_total = 2 mM); scan the Ca-driven contraction stress and the ECS ratio.
 # Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name contraction_sweep
 defaults:
-  - cluster/local@cluster    # swap for cluster/janelia@cluster on the cluster
+  - cluster: local    # override on the CLI with cluster=janelia
   - _self_
 
 result_root: results/contraction-force-sweep
