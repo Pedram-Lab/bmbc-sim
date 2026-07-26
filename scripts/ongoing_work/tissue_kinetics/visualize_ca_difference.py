@@ -10,7 +10,7 @@ For every shared (seed, synapse_idx) we form the trace
 
     d[Ca](t) = [Ca]_HIGH(t) - [Ca]_LOW(t)
 
-at the synapse's nearest ECS vertex (via evaluate_ecs_ratio.compute_local_ca, whose
+at the synapse's nearest ECS vertex (via analysis.compute_local_ca, whose
 synapse ordering matches across sweeps). Pairs where either trace dips negative
 anywhere (solver undershoot in the tightest synapses) are dropped outright. Pooling
 over the surviving synapses and seeds, we plot the mean (solid) and median (dashed)
@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evaluate_ecs_ratio import compute_local_ca
+from analysis import compute_local_ca
 from evaluate_synapse_distribution_spatial import find_seed_dirs
 
 # ============ Configuration ============

@@ -6,19 +6,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bmbcsim.simulation.result_io import ResultLoader
+from bmbcsim.simulation.result_io import ResultLoader, find_run_dirs
 
 MAX_TRAJECTORIES = 1000  # Limit number of individual trajectories to plot
 
 
 def find_result_dirs(path):
     """Return leaf result dirs under `path` (or [path] if it holds a result directly)."""
-    if (path / "snapshot.pvd").exists() or (path / "snapshot.h5").exists():
-        return [path]
-    dirs = sorted(
-        d for d in path.rglob("*")
-        if d.is_dir() and ((d / "snapshot.pvd").exists() or (d / "snapshot.h5").exists())
-    )
+    dirs = find_run_dirs(path)
     if not dirs:
         raise FileNotFoundError(f"No simulation results found under {path}")
     return dirs

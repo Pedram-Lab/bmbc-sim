@@ -431,17 +431,22 @@ def run_sweep(
     :param sweep: Maps a config field name to the list of values to sweep it over.
     :param seeds: ``n`` (-> ``range(n)``) or an explicit list of seeds.
     :param cluster: Dask cluster settings; defaults to a local cluster.
-    :param result_root: Base output dir; defaults to ``base_config.result_root``.
+    :param result_root: Base output dir; defaults to ``base_config.result_root``. A
+        timestamp is prepended to its last component, as for a single run.
     :returns: List of ``(job_labels, exception)`` for the runs that failed.
     """
     from dask.distributed import Client, as_completed
 
-    from bmbcsim.utils import create_cluster
+    from bmbcsim.utils import create_cluster, timestamped_directory
 
     cluster = cluster or ClusterConfig()
+    # Stamp the sweep root, so that re-running a sweep collects its own tree instead of
+    # merging into the previous run's: results/<sweep> -> results/<timestamp>_<sweep>.
+    configured = Path(result_root) if result_root is not None else Path(base_config.result_root)
+    root = timestamped_directory(configured.parent, configured.name)
     # Validate + materialize every job up front so a bad grid fails fast.
     jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (labels, config_dict)
-    for labels, cfg, subdir in expand_sweep(base_config, sweep, seeds, result_root):
+    for labels, cfg, subdir in expand_sweep(base_config, sweep, seeds, root):
         cfg_dict = cfg.model_dump()
         jobs.append((labels, cfg_dict))
         subdir.mkdir(parents=True, exist_ok=True)
@@ -450,7 +455,6 @@ def run_sweep(
         (subdir / f"{cfg.simulation_name}.config.yaml").write_text(
             yaml.safe_dump(cfg_dict, sort_keys=False)
         )
-    root = Path(result_root) if result_root is not None else Path(base_config.result_root)
     n_seeds = seeds if isinstance(seeds, int) else len(seeds)
 
     print(

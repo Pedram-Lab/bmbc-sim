@@ -28,16 +28,19 @@ VISUALIZE_PY="$SCRIPT_DIR/visualize_spatial_metrics.py"
 PROCESSED_DIR="$SWEEP_DIR/processed-data"
 PLOTS_DIR="$SWEEP_DIR/plots"
 
-# 1. Find every leaf directory (one that directly contains tissue_kinetics_seed*
-#    subdirs) and run the evaluator on it. Prune our own output dirs.
+# 1. Find every leaf directory (one that directly contains simulation runs) and run
+#    the evaluator on it. Prune our own output dirs. Runs are located by the snapshot
+#    file they contain rather than by name, so this is independent of how a sweep
+#    names or nests its runs (cf. bmbcsim.simulation.result_io.find_run_dirs).
 mapfile -t leaves < <(
     find "$SWEEP_DIR" \
         \( -path "$PROCESSED_DIR" -o -path "$PLOTS_DIR" \) -prune -o \
-        -type d -name 'tissue_kinetics_seed*' -printf '%h\n' \
+        -type f -name 'snapshot.h5' -printf '%h\n' \
+        | xargs -r -n1 dirname \
         | sort -u
 )
 if [[ ${#leaves[@]} -eq 0 ]]; then
-    echo "No leaf directories with tissue_kinetics_seed* subdirs found under $SWEEP_DIR" >&2
+    echo "No directories containing simulation runs found under $SWEEP_DIR" >&2
     exit 1
 fi
 echo "Found ${#leaves[@]} leaf director$([[ ${#leaves[@]} -eq 1 ]] && echo y || echo ies) to evaluate."

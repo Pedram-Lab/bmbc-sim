@@ -17,10 +17,10 @@ Two plot modes (``--plot``):
   P(min_ca[regime 1] > min_ca[regime 2]). Negative depletion depths (solver
   undershoot in the tightest synapses) are clipped to zero before any stats / KDE.
 
-* ``time-trace``: repeats the visualize_time_trace.py analysis but over the binned
+* ``time-trace``: repeats the plot_concentration.py analysis but over the binned
   synapse sub-populations. Each selected synapse contributes its per-timestep
   local-ECS Ca trace -- the point value at the nearest ECS vertex, via
-  evaluate_ecs_ratio.compute_local_ca; the (seed, synapse_idx) key joins the two
+  analysis.compute_local_ca; the (seed, synapse_idx) key joins the two
   pipelines, both of which order synapses by find_synapse_centers. Per regime we
   plot the mean (solid) and median (dashed) over the selected synapses, with the
   CENTILE..(100-CENTILE)% range shaded.
@@ -37,7 +37,7 @@ import pandas as pd
 from scipy.stats import gaussian_kde, ks_2samp, mannwhitneyu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evaluate_ecs_ratio import compute_local_ca
+from analysis import compute_local_ca
 from evaluate_synapse_distribution_spatial import find_seed_dirs
 
 # ============ Configuration ============

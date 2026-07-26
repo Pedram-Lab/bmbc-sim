@@ -314,6 +314,23 @@ class ResultLoader:
             },
         )
 
+    def load_concentration(self, region: str, species: str) -> xr.DataArray:
+        """Load one region's mean concentration of a species over every snapshot.
+
+        The region average -- total substance over region volume -- i.e. what a
+        well-mixed measurement of that compartment would report, as opposed to the
+        point values in :meth:`load_snapshot`.
+
+        :param region: Region name, e.g. ``"ecs"``.
+        :param species: Species name, e.g. ``"Ca"``.
+        :returns: Concentration over time, indexed by a ``time`` coordinate.
+        """
+        substance = xr.concat(
+            [self.load_total_substance(step) for step in range(len(self))], dim="time"
+        )
+        volume = self.compute_region_sizes()[region]
+        return substance.sel(region=region, species=species) / volume
+
     def _get_cell_to_region(self) -> tuple[np.ndarray, list[str]]:
         """Return an array that contains the region index for each cell and the
         name of all regions.
