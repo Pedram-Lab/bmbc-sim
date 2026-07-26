@@ -72,8 +72,16 @@ class ECM(ConfigGroup):
 
     enabled: bool = False
     ecm_total: Quantity("mM") = "2.0 mM"
+    # Parametrized by (kf, Kd) rather than (kf, kr): the on-rate kf is a property of
+    # the molecules, while Kd = kr / kf is the affinity the buffer sweeps scan, so kr
+    # is the one to derive. Defaults are unchanged (kr = 100 / s = 0.1 / ms).
     ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
-    ecm_kr: Quantity("1 / ms") = "0.1 / ms"
+    ecm_kd: Quantity("mM") = "10.0 mM"
+
+    @property
+    def ecm_kr(self) -> u.Quantity:
+        """Reverse rate, derived from ``Kd = ecm_kr / ecm_kf``."""
+        return self.ecm_kf * self.ecm_kd
 
 
 class Mechanics(ConfigGroup):

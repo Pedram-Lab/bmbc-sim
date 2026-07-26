@@ -1,0 +1,18 @@
+# Diffusivity sweep (replaces diffusivity_sweep.py).
+# No ECM buffer, no mechanics: pure diffusion at three ECS diffusivities x two ECS
+# ratios. The middle value (0.7 um2 / ms) is the Config default baseline.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name diffusivity_sweep
+defaults:
+  - cluster: local    # override on the CLI with cluster=janelia
+  - _self_            # this file's own values win over the group above
+
+result_root: results/diffusivity-sweep
+
+# No "base": every non-swept parameter is a Config default in ../simulation.py.
+
+# Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
+# values are validated per Config field.
+sweep:
+  diffusion.diffusivity_ecs: ["0.4 um2 / ms", "0.7 um2 / ms", "1.0 um2 / ms"]
+  geometry.ecs_ratio: [0.04, 0.19]
+seeds: 10

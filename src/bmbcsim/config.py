@@ -13,10 +13,12 @@ The things every config-driven experiment needs:
       if __name__ == "__main__":
           run_from_cli(Config, run, __file__)
 
+* :func:`check_sweep_configs` -- validate every sweep config of an experiment without
+  running anything (``sweep.py --check``). Reached via :func:`sweep_from_cli`.
 * :func:`run_sweep` -- expand a parameter grid over an existing simulation and
   fan it out via :func:`bmbcsim.utils.create_cluster` (local processes or LSF
-  jobs), isolating per-run failures. This is the ``contraction_force_sweep.py``
-  driver generalized.
+  jobs), isolating per-run failures. This replaces the hand-written per-sweep Dask
+  drivers each experiment used to carry.
 
 An experiment's ``simulation.py`` only has to expose a ``Config`` (subclass of
 :class:`SimulationConfig`) and a ``run(cfg)`` function; :func:`run_sweep` re-imports
@@ -34,6 +36,7 @@ from typing import Annotated, Any, Literal
 import astropy.units as u
 import hydra
 import yaml
+from hydra import compose, initialize_config_dir
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, PlainSerializer, PlainValidator
@@ -159,16 +162,25 @@ _CLUSTER_PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Registered at import time (not inside sweep_from_cli) so that anything composing a
+# sweep config -- a driver, a check script, a notebook -- can resolve "cluster: local".
+for _preset, _values in _CLUSTER_PRESETS.items():
+    ConfigStore.instance().store(
+        group="cluster", name=_preset, node=ClusterConfig(**_values).model_dump()
+    )
+
 
 def _hydra_cli(config_name: str, script: str | Path, job: Callable[[Any], None]) -> None:
     """Compose ``config_name`` from ``<script>/configs`` and hand the result to ``job``.
 
-    Injects :data:`_HYDRA_OUTPUT_OVERRIDES` ahead of the user's own arguments, and
-    skips any of them the user overrode explicitly (Hydra rejects duplicates).
+    Appends :data:`_HYDRA_OUTPUT_OVERRIDES`, skipping any the user overrode explicitly
+    (Hydra rejects duplicates). Appended rather than prepended: Hydra's argument parser
+    needs all overrides in one contiguous run of positionals, so injecting them in front
+    of a flag like "--config-name x" would make the user's own overrides unparseable.
     """
     given = {arg.split("=")[0] for arg in sys.argv[1:]}
     injected = [o for o in _HYDRA_OUTPUT_OVERRIDES if o.split("=")[0] not in given]
-    sys.argv = [sys.argv[0], *injected, *sys.argv[1:]]
+    sys.argv = [*sys.argv, *injected]
     config_path = str(Path(script).resolve().parent / "configs")
     hydra.main(version_base=None, config_path=config_path, config_name=config_name)(job)()
 
@@ -218,33 +230,104 @@ def sweep_from_cli(
         if __name__ == "__main__":
             sweep_from_cli(Config, __file__, config_name="contraction_sweep")
 
+    Passing ``--check`` instead validates every sweep config in ``<script>/configs``
+    and exits without running anything (see :func:`check_sweep_configs`).
+
     :param config_cls: The simulated experiment's config class. The module that
         defines it is the ``sim_file`` workers re-import, so it must expose ``run``.
     :param script: The sweep driver, normally ``__file__``.
     :param config_name: Default sweep config in ``<script>/configs``.
     """
-    for preset, values in _CLUSTER_PRESETS.items():
-        ConfigStore.instance().store(
-            group="cluster", name=preset, node=ClusterConfig(**values).model_dump()
-        )
+    if "--check" in sys.argv:
+        # Handled here rather than as a Hydra override: Hydra composes one primary
+        # config per run, while a check is only useful across all of them at once.
+        sys.argv.remove("--check")
+        check_sweep_configs(config_cls, script)
+        return
 
     def job(dcfg) -> None:
         cfg = OmegaConf.to_container(dcfg, resolve=True)
-        if unknown := set(cfg) - _SWEEP_KEYS:
-            raise SystemExit(
-                f"unknown key(s) in sweep config: {sorted(unknown)}; "
-                f"expected a subset of {sorted(_SWEEP_KEYS)}"
-            )
-        run_sweep(
-            sim_file=inspect.getfile(config_cls),
-            base_config=config_cls(**cfg.get("base", {})),
-            sweep=cfg["sweep"],
-            seeds=cfg.get("seeds", 1),
-            cluster=ClusterConfig(**cfg.get("cluster", {})),
-            result_root=cfg.get("result_root"),
-        )
+        run_sweep(**_sweep_kwargs(config_cls, cfg))
 
     _hydra_cli(config_name, script, job)
+
+
+def _sweep_kwargs(config_cls: type[SimulationConfig], cfg: dict[str, Any]) -> dict[str, Any]:
+    """Validate a composed sweep config and turn it into :func:`run_sweep` arguments.
+
+    All of the config's own validation happens here: unknown top-level keys, the base
+    config's units and dimensions, and the cluster block. Only the grid itself is left
+    to :func:`expand_sweep`.
+
+    :raises ValueError: On an unknown top-level key. A plain exception rather than
+        ``SystemExit`` so that :func:`check_sweep_configs` can report it alongside the
+        pydantic errors and carry on to the next config.
+    """
+    if unknown := set(cfg) - _SWEEP_KEYS:
+        raise ValueError(
+            f"unknown key(s) in sweep config: {sorted(unknown)}; "
+            f"expected a subset of {sorted(_SWEEP_KEYS)}"
+        )
+    return dict(
+        sim_file=inspect.getfile(config_cls),
+        base_config=config_cls(**cfg.get("base", {})),
+        sweep=cfg["sweep"],
+        seeds=cfg.get("seeds", 1),
+        cluster=ClusterConfig(**cfg.get("cluster", {})),
+        result_root=cfg.get("result_root"),
+    )
+
+
+def check_sweep_configs(
+    config_cls: type[SimulationConfig],
+    script: str | Path,
+    *,
+    pattern: str = "*_sweep.yaml",
+) -> dict[str, list[tuple[dict[str, Any], SimulationConfig, Path]]]:
+    """Statically validate every sweep config next to ``script``; run nothing.
+
+    Composes each config and expands its grid, which is where a bad unit, a wrong
+    dimension, a misspelled key or a dotted path into a nonexistent group raises --
+    all of it in a second, instead of after a cluster has started. Prints the run
+    count, axes and first output path per config, and reports *every* broken config
+    rather than stopping at the first.
+
+    Note this is strictly more than Hydra's ``--cfg job`` does: that prints the
+    merged config without ever validating it against ``config_cls``.
+
+    :param config_cls: The simulated experiment's config class.
+    :param script: The sweep driver, normally ``__file__``; sweep configs are read
+        from its sibling ``configs/`` directory.
+    :param pattern: Which files in there are sweep configs (the rest being e.g.
+        single-run variants for :func:`run_from_cli`).
+    :returns: Expanded jobs per config name, as :func:`expand_sweep` returns them.
+    :raises SystemExit: If any config is invalid (so this is usable as a CI check).
+    """
+    configs = Path(script).resolve().parent / "configs"
+    expanded: dict[str, list[tuple[dict[str, Any], SimulationConfig, Path]]] = {}
+    failures: dict[str, Exception] = {}
+    paths = sorted(configs.glob(pattern))
+    with initialize_config_dir(version_base=None, config_dir=str(configs)):
+        for path in paths:
+            try:
+                cfg = OmegaConf.to_container(compose(path.stem), resolve=True)
+                kwargs = _sweep_kwargs(config_cls, cfg)
+                jobs = expand_sweep(
+                    kwargs["base_config"], kwargs["sweep"],
+                    kwargs["seeds"], kwargs["result_root"],
+                )
+            except Exception as exc:
+                failures[path.stem] = exc
+                print(f"{path.stem:28s} INVALID: {exc}")
+                continue
+            expanded[path.stem] = jobs
+            axes = " x ".join(f"{k.split('.')[-1]}({len(v)})" for k, v in cfg["sweep"].items())
+            print(f"{path.stem:28s} {len(jobs):4d} runs  {axes}")
+            print(f"{'':28s}      -> {jobs[0][2]}/{jobs[0][1].simulation_name}")
+
+    if failures:
+        raise SystemExit(f"{len(failures)} of {len(paths)} sweep configs are invalid")
+    return expanded
 
 
 def dump_resolved(cfg: BaseModel, directory: str | Path, filename: str = "config.yaml") -> Path:
@@ -263,6 +346,8 @@ def _set_dotted(d: dict[str, Any], dotted: str, value: Any) -> None:
     """Set ``d["a"]["b"] = value`` from a dotted key ``"a.b"`` (groups must exist)."""
     *parents, leaf = dotted.split(".")
     for k in parents:
+        if k not in d:
+            raise ValueError(f"{dotted!r}: no config group {k!r} (have {sorted(d)})")
         d = d[k]
     d[leaf] = value
 

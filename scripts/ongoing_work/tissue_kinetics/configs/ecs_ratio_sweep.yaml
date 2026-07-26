@@ -1,0 +1,21 @@
+# ECS-ratio sweep (replaces ecs_ratio.py).
+# One run per ECS volume fraction, no ECM buffer and no mechanics. To repeat it with
+# either switched on, add "base: {ecm: {enabled: true}}" (or mechanics, which implies
+# ECM) here, or override on the CLI with +base.mechanics.enabled=true.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name ecs_ratio_sweep
+defaults:
+  - cluster: local    # override on the CLI with cluster=janelia
+  - _self_            # this file's own values win over the group above
+
+result_root: results/ecs-ratio-sweep
+
+cluster:
+  n_workers: 4    # a full scan is 16 runs; don't start 16 meshers at once
+
+# Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
+# values are validated per Config field.
+sweep:
+  # The full scan is [0.04, 0.05, ..., 0.19]; some values need nudging to avoid
+  # numerical trouble during meshing (0.11 -> 0.112, 0.13 -> 0.134, 0.14 -> 0.142).
+  geometry.ecs_ratio: [0.04, 0.09, 0.142, 0.19]
+seeds: [42]    # the Config default seed: one synapse distribution, as before

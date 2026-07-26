@@ -8,15 +8,14 @@ defaults:
 
 result_root: results/contraction-force-sweep
 
-# Every non-swept parameter (validated against the tissue_kinetics Config).
+# Non-swept parameters; unlisted fields fall back to the Config defaults in ../simulation.py.
 base:
-  simulation_name: tissue_kinetics
   mechanics:
     enabled: true
   ecm:
     ecm_total: "2.0 mM"
-    ecm_kr: "1000 / s"
-    ecm_kf: "769.23 / (mM s)"   # Kd = ecm_kr / ecm_kf = 1.3 mM
+    ecm_kd: "1.3 mM"
+    ecm_kf: "769.23 / (mM s)"   # kr = ecm_kf * ecm_kd = 1000 / s
 
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
