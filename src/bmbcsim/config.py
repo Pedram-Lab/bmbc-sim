@@ -142,6 +142,23 @@ _HYDRA_OUTPUT_OVERRIDES = (
 # misspelled "base:" would silently sweep an all-default config.
 _SWEEP_KEYS = frozenset({"base", "sweep", "seeds", "cluster", "result_root"})
 
+# Where a sweep runs. This describes the machine, not the experiment -- it is the
+# same for every sweep in the repo, so the presets live here as Hydra group options
+# instead of a configs/cluster/*.yaml copy per experiment. A sweep YAML selects one
+# with "defaults: - cluster: local" and the CLI switches it with "cluster=janelia";
+# individual fields stay overridable ("cluster.n_workers=40").
+#
+# Only non-default values are listed: the rest come from ClusterConfig, and the LSF
+# knobs (queue, cores, ncpus, memory, log_directory, ...) from create_cluster.
+_CLUSTER_PRESETS: dict[str, dict[str, Any]] = {
+    "local": {},  # in-process; run_sweep gives it one worker process per job
+    "janelia": {
+        "backend": "janelia",
+        "n_workers": 20,  # cap on concurrent LSF jobs
+        "extra": {"walltime": "04:00"},  # create_cluster defaults to 01:00
+    },
+}
+
 
 def _hydra_cli(config_name: str, script: str | Path, job: Callable[[Any], None]) -> None:
     """Compose ``config_name`` from ``<script>/configs`` and hand the result to ``job``.
@@ -206,6 +223,11 @@ def sweep_from_cli(
     :param script: The sweep driver, normally ``__file__``.
     :param config_name: Default sweep config in ``<script>/configs``.
     """
+    for preset, values in _CLUSTER_PRESETS.items():
+        ConfigStore.instance().store(
+            group="cluster", name=preset, node=ClusterConfig(**values).model_dump()
+        )
+
     def job(dcfg) -> None:
         cfg = OmegaConf.to_container(dcfg, resolve=True)
         if unknown := set(cfg) - _SWEEP_KEYS:
