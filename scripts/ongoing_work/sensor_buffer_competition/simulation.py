@@ -54,7 +54,9 @@ def run_simulation(buffer_conc, buffer_kd):
     )
     Draw(mesh)
 
-    simulation = bmbcsim.Simulation(sim_name, mesh, result_root='results')
+    simulation = bmbcsim.Simulation(
+        mesh, result_directory=bmbcsim.timestamped_directory('results', sim_name)
+    )
     geometry = simulation.simulation_geometry
 
     compartments = geometry.compartments

@@ -22,7 +22,9 @@ from bmbcsim.units import M, uM
 mesh = bmbcsim.geometry.create_sphere_geometry(radius=20 * u.um, mesh_size=2 * u.um)
 
 # Initialize the simulation
-simulation = bmbcsim.Simulation('sala', mesh, result_root='results')
+simulation = bmbcsim.Simulation(
+    mesh, result_directory=bmbcsim.timestamped_directory('results', 'sala')
+)
 geometry = simulation.simulation_geometry
 # geometry.visualize()
 

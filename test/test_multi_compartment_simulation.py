@@ -23,7 +23,7 @@ def create_simulation(tmp_path):
     geo = occ.OCCGeometry(occ.Glue([left, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    simulation = bmbcsim.Simulation("multi_compartment_test", mesh, result_root=tmp_path)
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path)
 
     return simulation
 

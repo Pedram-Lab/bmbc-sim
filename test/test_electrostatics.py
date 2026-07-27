@@ -27,12 +27,7 @@ def create_simulation(tmp_path):
     geo = occ.OCCGeometry(occ.Glue([left, middle, right]))
     mesh = ngs.Mesh(geo.GenerateMesh(maxh=0.2))
 
-    return bmbcsim.Simulation(
-        "electrostatics_test",
-        mesh,
-        result_root=tmp_path,
-        electrostatics=True
-    )
+    return bmbcsim.Simulation(mesh, result_directory=tmp_path, electrostatics=True)
 
 
 def test_pnp_dynamics(tmp_path, visualize=False):

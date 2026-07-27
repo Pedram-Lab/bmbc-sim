@@ -100,7 +100,10 @@ def run_simulation(
     )
 
     # Initialize the simulation and all geometry components
-    simulation = bmbcsim.Simulation(mesh=mesh, name=simulation_name, result_root=result_root)
+    simulation = bmbcsim.Simulation(
+        mesh=mesh,
+        result_directory=bmbcsim.timestamped_directory(result_root, simulation_name),
+    )
     geo = simulation.simulation_geometry
     synapse_ecs = geo.compartments["synapse_ecs"]
     neuropil = geo.compartments["neuropil"]

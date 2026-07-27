@@ -49,7 +49,9 @@ def run_sensor_simulation(
     )
 
     # Create simulation
-    simulation = bmbcsim.Simulation("sensor", mesh, result_root="results")
+    simulation = bmbcsim.Simulation(
+        mesh, result_directory=bmbcsim.timestamped_directory("results", "sensor")
+    )
 
     # Save the variables to the simulation directory as yaml
     simulation_dir = Path(simulation.result_directory)

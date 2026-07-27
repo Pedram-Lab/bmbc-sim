@@ -63,7 +63,12 @@ Draw(mesh)
 
 
 # Initialize simulation
-simulation = bmbcsim.Simulation(f"tour_{buffer_spec.name.lower()}", mesh, result_root='results')
+simulation = bmbcsim.Simulation(
+    mesh,
+    result_directory=bmbcsim.timestamped_directory(
+        "results", f"tour_{buffer_spec.name.lower()}"
+    ),
+)
 geometry = simulation.simulation_geometry
 
 ecs = geometry.compartments['ecs']

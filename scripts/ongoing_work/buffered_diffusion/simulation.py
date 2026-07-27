@@ -98,9 +98,10 @@ def run_simulation(
     print(f"  Mesh has {mesh.ne} elements and {mesh.nv} vertices")
 
     sim = bmbcsim.Simulation(
-        name=f"buffered_diffusion_{label}",
         mesh=mesh,
-        result_root=result_root,
+        result_directory=bmbcsim.timestamped_directory(
+            result_root, f"buffered_diffusion_{label}"
+        ),
     )
     box = sim.simulation_geometry.compartments["box"]
     print(f"  Box volume: {box.volume:.1f}")

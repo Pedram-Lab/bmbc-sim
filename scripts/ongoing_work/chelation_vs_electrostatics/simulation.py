@@ -40,7 +40,9 @@ if ELECTROSTATICS:
 if not simulation_name:
     simulation_name.append("no_interaction")
 simulation = bmbcsim.Simulation(
-    "_".join(simulation_name), mesh, result_root="results", electrostatics=ELECTROSTATICS
+    mesh,
+    result_directory=bmbcsim.timestamped_directory("results", "_".join(simulation_name)),
+    electrostatics=ELECTROSTATICS,
 )
 geometry = simulation.simulation_geometry
 

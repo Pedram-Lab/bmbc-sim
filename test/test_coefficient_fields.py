@@ -393,7 +393,7 @@ def test_peaks_field_exclude_predicate_honored(volume_region, fes):
 # Integration tests
 def test_nodal_noise_in_simulation(simple_mesh, tmp_path):
     """cf.NodalNoise works in a full simulation context."""
-    sim = bmbcsim.Simulation("test_noise", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
 
     ca = sim.add_species("ca")
@@ -406,7 +406,7 @@ def test_nodal_noise_in_simulation(simple_mesh, tmp_path):
 
 def test_smooth_field_in_simulation(simple_mesh, tmp_path):
     """cf.SmoothNoise works in a full simulation context."""
-    sim = bmbcsim.Simulation("test_smooth", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
 
     ca = sim.add_species("ca")
@@ -423,7 +423,7 @@ def test_smooth_field_in_simulation(simple_mesh, tmp_path):
 
 def test_localized_peaks_in_simulation(simple_mesh, tmp_path):
     """cf.LocalizedPeaks works in a full simulation context."""
-    sim = bmbcsim.Simulation("test_peaks", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
 
     ca = sim.add_species("ca")
@@ -442,7 +442,7 @@ def test_localized_peaks_in_simulation(simple_mesh, tmp_path):
 
 def test_random_diffusion_coefficient(simple_mesh, tmp_path):
     """Random fields can be used for diffusion coefficients."""
-    sim = bmbcsim.Simulation("test_diff", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
 
     ca = sim.add_species("ca")
@@ -464,7 +464,7 @@ import bmbcsim.simulation.transport as transport
 
 def test_surface_coefficient_in_transport(simple_mesh, tmp_path):
     """cf.NodalNoise works as a surface coefficient in transport mechanisms."""
-    sim = bmbcsim.Simulation("test_surface", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
     membrane = sim.simulation_geometry.membranes["boundary"]
 
@@ -480,7 +480,7 @@ def test_surface_coefficient_in_transport(simple_mesh, tmp_path):
 
 def test_surface_coefficient_with_temporal_modulation(simple_mesh, tmp_path):
     """Surface coefficients can have temporal modulation."""
-    sim = bmbcsim.Simulation("test_temporal", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
     membrane = sim.simulation_geometry.membranes["boundary"]
 
@@ -502,7 +502,7 @@ def test_surface_coefficient_with_temporal_modulation(simple_mesh, tmp_path):
 
 def test_smooth_surface_coefficient_in_passive_transport(simple_mesh, tmp_path):
     """cf.SmoothNoise works as permeability in passive transport."""
-    sim = bmbcsim.Simulation("test_passive_surface", simple_mesh, result_root=tmp_path)
+    sim = bmbcsim.Simulation(simple_mesh, result_directory=tmp_path)
     cell = sim.simulation_geometry.compartments["sphere"]
     membrane = sim.simulation_geometry.membranes["boundary"]
 
