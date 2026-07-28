@@ -150,10 +150,20 @@ class ClusterConfig(BaseModel):
 # disable_existing_loggers=true and switches off bmbcsim's logger, since that is
 # created at import time, before Hydra configures logging. The symptom is an empty
 # simulation.log in every result directory.
+#
+# The terminal handler is Hydra's own (hydra/hydra_logging=default puts a "[HYDRA]"
+# StreamHandler on the *root* logger, which bmbcsim's DEBUG records reach by
+# propagation -- a handler without a level passes everything). Levelling it at INFO
+# keeps the per-step solver chatter ("Reaction converged after N Newton iterations")
+# in the run's simulation.log, whose FileHandler is the one that wants DEBUG, instead
+# of scrolling it past the tqdm progress bar. It needs the "+" (the key does not exist
+# in Hydra's config) and it assumes that default handler, so drop it if you ever
+# select a different hydra/hydra_logging.
 _HYDRA_OUTPUT_OVERRIDES = (
     "hydra.run.dir=.",
     "hydra.output_subdir=null",
     "hydra/job_logging=none",
+    "+hydra.hydra_logging.handlers.console.level=INFO",
 )
 
 # Keys a sweep YAML may set; anything else is a typo. Every one has a fallback, so
