@@ -1,0 +1,12 @@
+# The single reference run: buffer_sweep.yaml's centre point, with the two swept axes
+# spelled out at their Config defaults. Everything else falls back to ../simulation.py,
+# so running this is the same as running simulation.py with no --config-name,
+# results/<timestamp>_sensor_buffer_competition.
+# Run: uv run scripts/ongoing_work/sensor_buffer_competition/simulation.py --config-name default
+defaults:
+  - sensor_buffer_competition
+  - _self_
+
+buffer:
+  concentration: "1 mM"
+  kd: "1 mM"

@@ -1,0 +1,10 @@
+# Sensor sphere in the buffered (right) half, so buffer and sensor compete for the
+# same Ca -- the counterpart of sensor_left.yaml. This is the Config default spelled
+# out; running it is the same as running simulation.py with no --config-name,
+# results/<timestamp>_sensor.
+# Run: uv run scripts/ongoing_work/sensor_simulation/simulation.py --config-name sensor_right
+defaults:
+  - sensor
+  - _self_
+
+sensor_left: false
