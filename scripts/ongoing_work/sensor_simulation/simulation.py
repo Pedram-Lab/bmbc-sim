@@ -81,7 +81,7 @@ def run(cfg: Config) -> None:
     if sphere_position_x is None:
         sphere_position_x = geom.side_length * (0.25 if cfg.sensor_left else 0.75)
 
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

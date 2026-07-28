@@ -6,7 +6,7 @@ defaults:
   - sala
   - _self_
 
-simulation_name: sala_quick
+postfix: quick     # -> results/<timestamp>_sala_quick
 mesh_size: "8 um"
 end_time: "20 ms"
 record_interval: "5 ms"

@@ -102,3 +102,23 @@ def test_expand_sweep_disambiguates_axes_sharing_a_leaf_name():
     _, cfg, subdir = jobs[0]
     assert str(subdir) == "out/buffer.ecs_ratio=0.04/sensor.ecs_ratio=0.19"
     assert (cfg.buffer.ecs_ratio, cfg.sensor.ecs_ratio) == (0.04, 0.19)
+
+
+def test_run_name_takes_the_postfix_from_the_config_or_the_parameters():
+    class _Variant(SimulationConfig):
+        simulation_name: str = "demo"
+        with_buffer: bool = False
+
+        def derived_postfix(self) -> str:
+            return "buffer" if self.with_buffer else "nobuffer"
+
+    class _Plain(SimulationConfig):
+        simulation_name: str = "demo"
+
+    # No postfix at all -> the bare simulation name; a derived one -> appended.
+    assert _Plain().run_name == "demo"
+    assert _Variant().run_name == "demo_nobuffer"
+    assert _Variant(with_buffer=True).run_name == "demo_buffer"
+    # An explicit postfix (from a config YAML) wins over the derived one, so a
+    # config can always name its own run.
+    assert _Variant(postfix="quick").run_name == "demo_quick"

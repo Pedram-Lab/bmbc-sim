@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from time import sleep
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
@@ -39,13 +40,24 @@ def timestamped_directory(root: str | Path, name: str) -> Path:
     building the simulation. That way a crash during setup (meshing, geometry)
     still leaves a directory saying what was being attempted.
 
+    The directory is claimed exclusively (no ``exist_ok``): the timestamp only
+    resolves to a second, so two runs of the same name started together -- one
+    config per variant, launched in parallel -- would otherwise be handed the
+    same directory and overwrite each other's snapshot.h5 mid-run. On a
+    collision, wait for the next second and retry, rather than decorating the
+    name with a suffix that :meth:`ResultLoader.find` would no longer match.
+
     :param root: Directory under which the run directory is created.
     :param name: Name of the run; the timestamp keeps repeat runs distinct.
     :return: The created directory.
     """
-    directory = Path(root) / f"{datetime.now():%Y-%m-%d-%H%M%S}_{name}"
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
+    while True:
+        directory = Path(root) / f"{datetime.now():%Y-%m-%d-%H%M%S}_{name}"
+        try:
+            directory.mkdir(parents=True)
+            return directory
+        except FileExistsError:
+            sleep(1.0)  # the timestamp's resolution: the next attempt gets a new one
 
 
 def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:

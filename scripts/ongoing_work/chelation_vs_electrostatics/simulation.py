@@ -9,7 +9,7 @@ off, which is what the three configs in ``configs/`` do:
     uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name electrostatics
 
 The result directory is named after the enabled mechanisms (see
-:func:`simulation_label`), which is how ``visualization.py`` finds it.
+:meth:`Config.derived_postfix`), which is how ``visualization.py`` finds it.
 """
 import astropy.units as u
 
@@ -72,25 +72,23 @@ class Config(SimulationConfig):
     time_step: Quantity("ms") = "1 us"
     record_interval: Quantity("ms") = "100 us"
 
-
-def simulation_label(cfg: Config) -> str:
-    """Name the run after the mechanisms it has switched on.
-
-    ``visualization.py`` rebuilds the same label to locate the results, so this
-    is the one place the naming is defined.
-    """
-    parts = [
-        name for name, enabled in
-        (("chelation", cfg.chelation), ("electrostatics", cfg.electrostatics))
-        if enabled
-    ]
-    return "_".join(parts or ["no_interaction"])
+    def derived_postfix(self) -> str:
+        """Name the run after the mechanisms it has switched on -- they *are* the
+        variant. ``visualization.py`` gets the same name from ``Config.run_name``,
+        so this is the one place the naming is defined.
+        """
+        parts = [
+            name for name, enabled in
+            (("chelation", self.chelation), ("electrostatics", self.electrostatics))
+            if enabled
+        ]
+        return "_".join(parts or ["no_interaction"])
 
 
 def run(cfg: Config) -> None:
     """Run the simulation from a validated config."""
     geom = cfg.geometry
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, simulation_label(cfg))
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

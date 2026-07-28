@@ -79,6 +79,10 @@ class Config(SimulationConfig):
     time_step: Quantity("s") = "1.0 ms"
     record_interval: Quantity("s") = "10.0 ms"
 
+    def derived_postfix(self) -> str:
+        """The buffer switch *is* the variant: evaluate.py compares the two runs."""
+        return "buffer" if self.buffer.enabled else "nobuffer"
+
 
 def make_box_mesh(box: Box) -> ngs.Mesh:
     """Build an elongated box mesh, source face at y=0, far face at y=Ly.
@@ -105,10 +109,7 @@ def make_box_mesh(box: Box) -> ngs.Mesh:
 def run(cfg: Config) -> None:
     """Run the simulation from a validated config."""
     buffer_cfg = cfg.buffer
-    # One result directory per condition, so evaluate.py can find both by name.
-    label = "buffer" if buffer_cfg.enabled else "nobuffer"
-    name = f"{cfg.simulation_name}_{label}"
-    print(f"=== Running buffered_diffusion ({label}) ===")
+    print(f"=== Running {cfg.run_name} ===")
 
     source_flux_density = cfg.source_flux_density
     if source_flux_density is None:
@@ -119,7 +120,7 @@ def run(cfg: Config) -> None:
         ).to((u.mmol / u.L) * u.um / u.ms)
     print(f"  Source flux density: {source_flux_density:.4g}")
 
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"  Results and config -> {result_dir}")
 
@@ -175,7 +176,7 @@ def run(cfg: Config) -> None:
         record_interval=cfg.record_interval,
         n_threads=cfg.n_threads,
     )
-    print(f"=== Done ({label}) ===\n")
+    print(f"=== Done ({cfg.run_name}) ===\n")
 
 
 if __name__ == "__main__":

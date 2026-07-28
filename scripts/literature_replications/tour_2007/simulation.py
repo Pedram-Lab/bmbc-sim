@@ -63,14 +63,15 @@ class Config(SimulationConfig):
     time_step: Quantity("ms") = "1 us"
     record_interval: Quantity("ms") = "1 ms"
 
+    def derived_postfix(self) -> str:
+        """The buffer *is* the variant here (see configs/), so it names the run."""
+        return self.buffer.name.lower()
+
 
 def run(cfg: Config) -> None:
     """Run the simulation from a validated config."""
     geom, buffer_cfg = cfg.geometry, cfg.buffer
-    # One result directory per buffer, so the three variants do not overwrite each
-    # other and evaluation.py can find each by name.
-    name = f"{cfg.simulation_name}_{buffer_cfg.name.lower()}"
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

@@ -142,7 +142,7 @@ def run(cfg: Config) -> None:
     # Claim the result directory and record the config that produced it before the
     # geometry work starts: meshing is where runs fail (see the ECS-connectivity
     # check below), and a failed run is only debuggable if its config is on disk.
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

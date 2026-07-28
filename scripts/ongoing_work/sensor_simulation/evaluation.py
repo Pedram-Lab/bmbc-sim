@@ -1,12 +1,19 @@
+"""Plot one sensor_simulation run.
+
+Without arguments this takes the latest sensor run, whichever variant it is (the
+default or "--config-name sensor_left"); pass a result directory to plot that one.
+"""
+import sys
+
 import xarray as xr
 import matplotlib.pyplot as plt
 
 import bmbcsim
 
 
-result_loader = bmbcsim.ResultLoader.find(
-    results_root="results",
-    simulation_name="sensor",
+result_loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name="sensor", results_root="results",
 )
 
 total_substance = xr.concat(

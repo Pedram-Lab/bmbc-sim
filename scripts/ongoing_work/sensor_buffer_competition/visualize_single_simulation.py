@@ -39,14 +39,12 @@ SENSOR_KD = CONFIG.sensor.kd.to_value(mM)
 timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
 FILE_PREFIX = f"{timestamp}_{CONFIG.simulation_name}"
 
-if len(sys.argv) > 1:
-    result_loader = result_loader.ResultLoader(sys.argv[1])
-else:
-    result_loader = result_loader.ResultLoader.find(
-        simulation_name=CONFIG.simulation_name,
-        results_root="results",
-        # time_stamp="2025-08-08-075312",
-    )
+result_loader = result_loader.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name=CONFIG.simulation_name,
+    results_root="results",
+    # time_stamp="2025-08-08-075312",
+)
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],

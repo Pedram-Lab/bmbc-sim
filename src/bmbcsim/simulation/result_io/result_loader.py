@@ -8,6 +8,7 @@ import pyvista as pv
 import numpy as np
 import xarray as xr
 import h5py
+import yaml
 
 from bmbcsim.units import BASE_UNITS
 
@@ -112,6 +113,28 @@ class XdmfDetails(_FormatDetails):
         return pv.UnstructuredGrid(cells, celltypes, points)
 
 
+def _names_this_simulation(run_dir: str, simulation_name: str) -> bool:
+    """Does the run in `run_dir` belong to the simulation `simulation_name` names?
+
+    The directory name alone cannot say: matching a postfix means "sensor" also
+    matches the *different* experiment "sensor_buffer_competition". The run's own
+    dumped config settles it -- ``simulation_name`` there is the simulation class,
+    so it must either be what was asked for, or the class of the variant that was
+    asked for ("tour" for a requested "tour_egta_low").
+
+    Runs archived before configs were dumped have no config.yaml; for those the
+    directory name is all there is, so they are accepted.
+    """
+    config_path = os.path.join(run_dir, "config.yaml")
+    if not os.path.exists(config_path):
+        return True
+    with open(config_path, encoding="utf-8") as f:
+        run_class = (yaml.safe_load(f) or {}).get("simulation_name")
+    if run_class is None:
+        return True
+    return simulation_name == run_class or simulation_name.startswith(f"{run_class}_")
+
+
 class ResultLoader:
     """A class to load results from a specified directory."""
 
@@ -141,6 +164,16 @@ class ResultLoader:
         self.cell_to_region, self.regions = self._get_cell_to_region()
 
     @classmethod
+    def open(cls, path: str | None = None, /, **find_kwargs) -> "ResultLoader":
+        """Load an explicit run directory, or -- if `path` is None -- find one.
+
+        The shape every evaluation script wants: take a directory from the command
+        line when the user names one, otherwise fall back to the latest run of the
+        simulation (see :meth:`find` for the keyword arguments).
+        """
+        return cls(path) if path else cls.find(**find_kwargs)
+
+    @classmethod
     def find(
         cls,
         *,
@@ -148,9 +181,11 @@ class ResultLoader:
         results_root: str,
         time_stamp: str | None = None
     ) -> "ResultLoader":
-        """Find the latest results folder with a given name in a directory.
+        """Find the latest results folder for a simulation in a directory.
 
-        :param simulation_name: The name of the simulation of interest.
+        :param simulation_name: The simulation to look for. A *class* name ("sala")
+            matches its variants too, whatever their postfix ("sala_quick"); pass a
+            full run name ("tour_egta_low") to pin one variant.
         :param results_root: The directory in which to search for results folders.
         :param time_stamp: Optional timestamp to filter results folders. If not
             provided, the latest folder is returned.
@@ -159,14 +194,16 @@ class ResultLoader:
         # Match both run-directory namings: bmbcsim.timestamped_directory writes
         # "{timestamp}_{simulation_name}" (timestamp first, so runs sort
         # chronologically), while archived results predating that use
-        # "{simulation_name}_{timestamp}".
+        # "{simulation_name}_{timestamp}". "(?:_.*)?" is the variant postfix.
         name = re.escape(simulation_name)
         stamp = r"\d{4}-\d{2}-\d{2}-\d{6}"
-        pattern = re.compile(rf"^(?:{stamp}_{name}|{name}_{stamp})$")
+        pattern = re.compile(rf"^(?:{stamp}_{name}(?:_.*)?|{name}(?:_.*)?_{stamp})$")
         result_folders = [
             d
             for d in os.listdir(results_root)
-            if pattern.match(d) and os.path.isdir(os.path.join(results_root, d))
+            if pattern.match(d)
+            and os.path.isdir(os.path.join(results_root, d))
+            and _names_this_simulation(os.path.join(results_root, d), simulation_name)
         ]
         if not result_folders:
             raise RuntimeError(

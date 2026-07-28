@@ -3,7 +3,11 @@
 Loads the latest normal simulation (not from a parameter sweep) and evaluates
 Ca²⁺ concentration at the baseline points plus small perturbations in x and y.
 One figure per evaluation point, showing baseline vs. shifted traces.
+
+Without arguments this takes the latest rusakov run, whichever variant it is
+(presynaptic or "--config-name post"); pass a result directory to use that one.
 """
+import sys
 
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -49,7 +53,10 @@ def make_shifted_points(base_point, shift):
 
 
 # Load latest normal simulation
-loader = bmbcsim.ResultLoader.find(simulation_name="rusakov", results_root="results")
+loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name="rusakov", results_root="results",
+)
 figsize = bmbcsim.plot_style("pedramlab")
 
 # Load time axis

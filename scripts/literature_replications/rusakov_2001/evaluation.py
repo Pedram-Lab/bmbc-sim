@@ -1,3 +1,10 @@
+"""Plot one rusakov_2001 run.
+
+Without arguments this takes the latest rusakov run, whichever variant it is
+(presynaptic or "--config-name post"); pass a result directory to plot that one.
+"""
+import sys
+
 import xarray as xr
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,7 +13,10 @@ import bmbcsim
 
 
 # Load results
-loader = bmbcsim.ResultLoader.find(simulation_name="rusakov", results_root="results")
+loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name="rusakov", results_root="results",
+)
 figsize = bmbcsim.plot_style("pedramlab")
 plt.rcParams.update({"lines.linewidth": 2})
 

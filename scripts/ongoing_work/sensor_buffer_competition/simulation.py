@@ -71,7 +71,7 @@ def run(cfg: Config) -> None:
     geom = cfg.geometry
     zero = 0 * u.mmol / u.L
 
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

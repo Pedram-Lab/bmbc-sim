@@ -105,8 +105,27 @@ class SimulationConfig(ConfigGroup):
     """Top level of an experiment config: cross-cutting fields + nested groups."""
 
     simulation_name: str
+    # Distinguishes variants of one simulation: the run directory is named
+    # "<timestamp>_<simulation_name>[_<postfix>]", so evaluation scripts can ask for
+    # the latest run of a simulation *class* whatever its postfix (see
+    # :meth:`ResultLoader.find`), or pin one variant by passing the full run name.
+    postfix: str = ""
     result_root: str = "results"
     n_threads: int = 4
+
+    @property
+    def run_name(self) -> str:
+        """Name of this run's result directory (without the timestamp)."""
+        postfix = self.postfix or self.derived_postfix()
+        return f"{self.simulation_name}_{postfix}" if postfix else self.simulation_name
+
+    def derived_postfix(self) -> str:
+        """Postfix implied by the parameters, for experiments whose variant *is* a
+        parameter (which buffer, which mechanism switched on). Override in the
+        experiment's ``Config``; an explicit ``postfix`` wins over it, so a config
+        can always name its own run.
+        """
+        return ""
 
 
 class ClusterConfig(BaseModel):

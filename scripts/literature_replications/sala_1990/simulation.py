@@ -82,7 +82,7 @@ class Config(SimulationConfig):
 
 def run(cfg: Config) -> None:
     """Run the simulation from a validated config."""
-    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 

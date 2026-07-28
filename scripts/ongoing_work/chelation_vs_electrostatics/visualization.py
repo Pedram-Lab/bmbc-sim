@@ -6,15 +6,18 @@ It produces four plots showing the temporal evolution of chemical species concen
 3. **Plot 3**: Immobile buffer and immobile complex concentrations over time.
 4. **Plot 4**: All species combined in a single plot to compare their temporal profiles.
 5. **Plot 5**: Potential over time.
-"""
 
+Pass a result directory to visualize that run; without one, the latest run of the
+mechanism combination in CONFIG below is used.
+"""
+import sys
 from datetime import datetime
 
 import xarray as xr
 import matplotlib.pyplot as plt
 import bmbcsim
 
-from simulation import Config, simulation_label
+from simulation import Config
 
 # Which run to visualize: the same switches simulation.py was run with. The
 # directory name follows from them, so simulation.py owns the naming.
@@ -22,13 +25,12 @@ CONFIG = Config(chelation=True, electrostatics=True)
 
 # Timestamp and simulation name
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-simulation_name = simulation_label(CONFIG)
-file_prefix = f"{timestamp}_{simulation_name}"
+file_prefix = f"{timestamp}_{CONFIG.run_name}"
 
 # Load results
-result_loader = bmbcsim.ResultLoader.find(
-    results_root="results",
-    simulation_name=simulation_name,
+result_loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name=CONFIG.run_name, results_root="results",
 )
 
 total_substance = xr.concat(
@@ -73,7 +75,7 @@ for ax, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(f"{simulation_name} simulation", fontsize=9)
+plt.suptitle(f"{CONFIG.run_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_free_total_ca.pdf", bbox_inches="tight")
 plt.show()
@@ -97,7 +99,7 @@ for ax2, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(f"{simulation_name} simulation", fontsize=9)
+plt.suptitle(f"{CONFIG.run_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_mobile_buffer.pdf", bbox_inches="tight")
 plt.show()
@@ -122,7 +124,7 @@ for ax3, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(f"{simulation_name} simulation", fontsize=9)
+plt.suptitle(f"{CONFIG.run_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_immobile_buffer.pdf", bbox_inches="tight")
 plt.show()
@@ -166,7 +168,7 @@ for ax4, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0)
-plt.suptitle(f"{simulation_name} simulation", fontsize=9)
+plt.suptitle(f"{CONFIG.run_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_all_species.pdf", bbox_inches="tight")
 plt.show()
@@ -189,7 +191,7 @@ for ax5, region in zip(axes, regions):
 
 axes[0].legend()
 plt.subplots_adjust(wspace=0.3)
-plt.suptitle(f"{simulation_name} simulation", fontsize=9)
+plt.suptitle(f"{CONFIG.run_name} simulation", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_prefix}_potential.pdf", bbox_inches="tight")
 plt.show()

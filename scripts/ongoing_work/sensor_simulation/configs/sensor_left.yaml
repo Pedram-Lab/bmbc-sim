@@ -7,3 +7,4 @@ defaults:
   - _self_
 
 sensor_left: true
+postfix: left     # -> results/<timestamp>_sensor_left, next to the default run

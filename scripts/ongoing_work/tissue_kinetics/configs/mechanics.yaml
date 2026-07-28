@@ -5,6 +5,8 @@ defaults:
   - tissue_kinetics
   - _self_
 
+postfix: mechanics     # -> results/<timestamp>_tissue_kinetics_mechanics
+
 mechanics:
   enabled: true
 geometry:
