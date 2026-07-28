@@ -41,12 +41,9 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, PlainSerializer, PlainValidator
 
-# Teach astropy's string parser the domain-standard molar units (M, mM, uM, nM,
-# ...) so configs can write "400 nM". bmbcsim.units keeps its Quantity aliases;
-# this only affects parsing of config strings.
-_molar_ns: dict[str, u.UnitBase] = {}
-u.def_unit("M", u.mol / u.L, prefixes=True, namespace=_molar_ns)
-u.add_enabled_units(list(_molar_ns.values()))
+# Imported for its side effect: registering the domain-standard molar units (M,
+# mM, uM, nM, ...) with astropy's string parser, so configs can write "400 nM".
+import bmbcsim.units  # noqa: F401
 
 
 def _to_quantity(v: Any) -> u.Quantity:
@@ -321,7 +318,8 @@ def check_sweep_configs(
                 print(f"{path.stem:28s} INVALID: {exc}")
                 continue
             expanded[path.stem] = jobs
-            axes = " x ".join(f"{k.split('.')[-1]}({len(v)})" for k, v in cfg["sweep"].items())
+            # Full dotted keys, not leaf names: two axes can share a leaf name.
+            axes = " x ".join(f"{k}({len(v)})" for k, v in cfg["sweep"].items())
             print(f"{path.stem:28s} {len(jobs):4d} runs  {axes}")
             print(f"{'':28s}      -> {jobs[0][2]}/{jobs[0][1].simulation_name}")
 
@@ -380,8 +378,10 @@ def expand_sweep(
         dimensions, unknown keys all raise here); ``subdir`` is its output dir.
 
     Swept keys may be dotted (``"geometry.ecs_ratio"``) to target a nested group;
-    the subdir is labelled by the leaf name (``ecs_ratio=0.04``). The cross-cutting
-    fields ``result_root``/``simulation_name``/``seed`` stay top-level.
+    the subdir is labelled by the leaf name (``ecs_ratio=0.04``), or by the full
+    dotted key when two axes share a leaf name (``buffer.kd`` / ``sensor.kd``),
+    which would otherwise give both directory levels the same label. The
+    cross-cutting fields ``result_root``/``simulation_name``/``seed`` stay top-level.
     """
     seed_list = list(range(seeds)) if isinstance(seeds, int) else list(seeds)
     root = Path(result_root) if result_root is not None else Path(base_config.result_root)
@@ -392,10 +392,13 @@ def expand_sweep(
     if not has_seed and len(seed_list) > 1:
         raise ValueError(f"{cls.__name__} has no 'seed' field but {len(seed_list)} seeds requested")
 
+    leaves = [k.split(".")[-1] for k in keys]
+    axis_name = {k: (leaf if leaves.count(leaf) == 1 else k) for k, leaf in zip(keys, leaves)}
+
     jobs: list[tuple[dict[str, Any], SimulationConfig, Path]] = []
     for combo in product(*[sweep[k] for k in keys]):
         combo_labels = dict(zip(keys, combo))
-        subdir = root / Path(*[f"{k.split('.')[-1]}={_slug(v)}" for k, v in combo_labels.items()])
+        subdir = root / Path(*[f"{axis_name[k]}={_slug(v)}" for k, v in combo_labels.items()])
         for seed in seed_list:
             labels = {**combo_labels, **({"seed": seed} if has_seed else {})}
             name = f"{base_config.simulation_name}_seed{seed}" if has_seed else base_config.simulation_name

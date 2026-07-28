@@ -156,8 +156,13 @@ class ResultLoader:
             provided, the latest folder is returned.
         :returns: The result loader instance for the found folder.
         """
-        # Search for folders matching "{simulation_name}_YYYY-MM-DD-hhmmss" pattern
-        pattern = re.compile(re.escape(simulation_name) + r"_\d{4}-\d{2}-\d{2}-\d{6}$")
+        # Match both run-directory namings: bmbcsim.timestamped_directory writes
+        # "{timestamp}_{simulation_name}" (timestamp first, so runs sort
+        # chronologically), while archived results predating that use
+        # "{simulation_name}_{timestamp}".
+        name = re.escape(simulation_name)
+        stamp = r"\d{4}-\d{2}-\d{2}-\d{6}"
+        pattern = re.compile(rf"^(?:{stamp}_{name}|{name}_{stamp})$")
         result_folders = [
             d
             for d in os.listdir(results_root)

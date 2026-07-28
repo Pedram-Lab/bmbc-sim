@@ -1,105 +1,152 @@
-"""
-This code simulates chemical interactions among three species: B1 (immobile),
-B2 (mobile), and Ca (diffusing). The simulation is performed within a two-region
-geometry, where the concentrations of the chemical species are distributed
-unevenly across the regions. The simulation is designed to run under different scenarios:
-1. Pure chelation only -> set "electrostatics = False"
-2. Pure electrostatics only -> set "chelation = False"
-3. Chelation combined with electrostatics -> set both to True
+"""Chelation vs. electrostatics as mechanisms of Ca2+ redistribution.
+
+Three species in a two-region box: an immobile buffer B1 (bottom half only), a
+mobile buffer B2 (everywhere) and diffusing Ca. Either mechanism can be switched
+off, which is what the three configs in ``configs/`` do:
+
+    uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py          # both
+    uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name chelation
+    uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name electrostatics
+
+The result directory is named after the enabled mechanisms (see
+:func:`simulation_label`), which is how ``visualization.py`` finds it.
 """
 import astropy.units as u
-from ngsolve.webgui import Draw
 
 import bmbcsim
 import bmbcsim.geometry as geo
-
-
-# Switches for electrostatics and chelation
-ELECTROSTATICS = True
-CHELATION = True
-
-# Define geometry dimensions
-BOX_HEIGHT = 1 * u.um
-SIDELENGTH = 0.5 * u.um
-SPLIT = 0.5 * u.um
-
-# Create and visualize 3D mesh
-mesh = geo.create_box_geometry(
-    dimensions=(SIDELENGTH, SIDELENGTH, BOX_HEIGHT),
-    mesh_size=SIDELENGTH / 20,
-    split=SPLIT
+from bmbcsim.config import (
+    ConfigGroup,
+    Quantity,
+    SimulationConfig,
+    dump_resolved,
+    run_from_cli,
 )
-Draw(mesh)
 
-# Initialize simulation and link geometry
-simulation_name = []
-if CHELATION:
-    simulation_name.append("chelation")
-if ELECTROSTATICS:
-    simulation_name.append("electrostatics")
-if not simulation_name:
-    simulation_name.append("no_interaction")
-simulation = bmbcsim.Simulation(
-    mesh,
-    result_directory=bmbcsim.timestamped_directory("results", "_".join(simulation_name)),
-    electrostatics=ELECTROSTATICS,
-)
-geometry = simulation.simulation_geometry
 
-# Access compartments
-box = geometry.compartments['box']
+class Geometry(ConfigGroup):
+    """Box split into a "top" and a "bottom" region at height ``split``."""
 
-if ELECTROSTATICS:
-    box.add_relative_permittivity(80)
+    sidelength: Quantity("um") = "0.5 um"
+    height: Quantity("um") = "1 um"
+    split: Quantity("um") = "0.5 um"
+    mesh_size_factor: float = 20  # mesh size = sidelength / this
 
-# Add Ca species
-total_ca = 1 * u.mmol / u.L
 
-ca = simulation.add_species('ca', valence=2)
-box.initialize_species(ca, total_ca)
-box.add_diffusion(ca, 600 * u.um**2 / u.s)
+class Buffer(ConfigGroup):
+    """A Ca2+ buffer, parametrized by its affinity Kd = kr / kf."""
 
-# Add non-diffusive buffer species
-total_immobile_buffer = 1.0 * u.mmol / u.L
-immobile_buffer_kd = 10.0 * u.umol / u.L  # Dissociation constant
-immobile_buffer_kf = 1.0e8 / (u.mol / u.L * u.s)  # Forward rate
-immobile_buffer_kr = immobile_buffer_kf * immobile_buffer_kd   # Reverse rate
+    total: Quantity("mM")
+    kd: Quantity("uM")
+    kf: Quantity("1 / (M s)")
+    diffusivity: Quantity("um2 / s")
 
-immobile_buffer = simulation.add_species('immobile_buffer', valence=-2)
-box.add_diffusion(immobile_buffer, 0 * u.um**2 / u.s)
-box.initialize_species(immobile_buffer, {'top': 0 * u.mmol / u.L, 'bottom': total_immobile_buffer})
+    @property
+    def kr(self) -> u.Quantity:
+        """Reverse rate, derived from ``Kd = kr / kf``."""
+        return self.kf * self.kd
 
-# Add diffusive buffer species
-total_mobile_buffer = 0.5 * u.mmol / u.L
-mobile_buffer_kd = 10.0 * u.umol / u.L  # Dissociation constant
-mobile_buffer_kf = 1e8 / (u.mol / u.L * u.s)  # Forward rate
-mobile_buffer_kr = mobile_buffer_kf * mobile_buffer_kd  # Reverse rate
 
-mobile_buffer = simulation.add_species('mobile_buffer', valence=-2)
-box.add_diffusion(mobile_buffer, 50 * u.um**2 / u.s)
-box.initialize_species(mobile_buffer, total_mobile_buffer)
+class Config(SimulationConfig):
+    """Full config for the chelation/electrostatics comparison."""
 
-if CHELATION:
-    # Add reversible binding reaction: Ca + immobile_buffer <-> immobile_complex
-    immobile_complex = simulation.add_species('immobile_complex', valence=0)
-    box.initialize_species(immobile_complex, {'top': 0 * u.mmol / u.L, 'bottom': 0 * u.mmol / u.L})
-    box.add_diffusion(immobile_complex, 0 * u.um**2 / u.s)
+    simulation_name: str = "chelation_vs_electrostatics"
+    # Mechanisms. Both off is a valid control run (pure diffusion).
+    electrostatics: bool = True
+    chelation: bool = True
+    geometry: Geometry = Geometry()
+    relative_permittivity: float = 80
+    # Calcium
+    total_ca: Quantity("mM") = "1 mM"
+    ca_diffusivity: Quantity("um2 / s") = "600 um2 / s"
+    # Buffers: the immobile one starts in the bottom region only, the mobile one
+    # is spread evenly.
+    immobile_buffer: Buffer = Buffer(
+        total="1.0 mM", kd="10.0 uM", kf="1e8 / (M s)", diffusivity="0 um2 / s"
+    )
+    mobile_buffer: Buffer = Buffer(
+        total="0.5 mM", kd="10.0 uM", kf="1e8 / (M s)", diffusivity="50 um2 / s"
+    )
+    # Timing
+    end_time: Quantity("ms") = "4 ms"
+    time_step: Quantity("ms") = "1 us"
+    record_interval: Quantity("ms") = "100 us"
 
-    box.add_reaction(reactants=[ca, immobile_buffer], products=[immobile_complex],
-                    k_f=immobile_buffer_kf, k_r=immobile_buffer_kr)
 
-    # Add reversible binding reaction: Ca + mobile_buffer <-> mobile_complex
-    mobile_complex = simulation.add_species('mobile_complex', valence=0)
-    box.initialize_species(mobile_complex, {'top': 0 * u.mmol / u.L, 'bottom': 0 * u.mmol / u.L})
-    box.add_diffusion(mobile_complex, 50 * u.um**2 / u.s)
+def simulation_label(cfg: Config) -> str:
+    """Name the run after the mechanisms it has switched on.
 
-    box.add_reaction(reactants=[ca, mobile_buffer], products=[mobile_complex],
-                    k_f=mobile_buffer_kf, k_r=mobile_buffer_kr)
+    ``visualization.py`` rebuilds the same label to locate the results, so this
+    is the one place the naming is defined.
+    """
+    parts = [
+        name for name, enabled in
+        (("chelation", cfg.chelation), ("electrostatics", cfg.electrostatics))
+        if enabled
+    ]
+    return "_".join(parts or ["no_interaction"])
 
-# Run simulation
-simulation.run(
-    end_time=4 * u.ms,
-    time_step=1 * u.us,
-    record_interval=100 * u.us,
-    n_threads=4
-)
+
+def run(cfg: Config) -> None:
+    """Run the simulation from a validated config."""
+    geom = cfg.geometry
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, simulation_label(cfg))
+    dump_resolved(cfg, result_dir)
+    print(f"Results and config -> {result_dir}")
+
+    mesh = geo.create_box_geometry(
+        dimensions=(geom.sidelength, geom.sidelength, geom.height),
+        mesh_size=geom.sidelength / geom.mesh_size_factor,
+        split=geom.split,
+    )
+
+    simulation = bmbcsim.Simulation(
+        mesh, result_directory=result_dir, electrostatics=cfg.electrostatics
+    )
+    box = simulation.simulation_geometry.compartments["box"]
+
+    if cfg.electrostatics:
+        box.add_relative_permittivity(cfg.relative_permittivity)
+
+    # Add Ca species
+    ca = simulation.add_species("ca", valence=2)
+    box.initialize_species(ca, cfg.total_ca)
+    box.add_diffusion(ca, cfg.ca_diffusivity)
+
+    # Buffers. The immobile one is confined to the bottom region; without
+    # chelation neither binds Ca, and only their charge matters.
+    immobile = simulation.add_species("immobile_buffer", valence=-2)
+    box.add_diffusion(immobile, cfg.immobile_buffer.diffusivity)
+    box.initialize_species(
+        immobile, {"top": 0 * u.mmol / u.L, "bottom": cfg.immobile_buffer.total}
+    )
+
+    mobile = simulation.add_species("mobile_buffer", valence=-2)
+    box.add_diffusion(mobile, cfg.mobile_buffer.diffusivity)
+    box.initialize_species(mobile, cfg.mobile_buffer.total)
+
+    if cfg.chelation:
+        for name, free, buffer in (
+            ("immobile_complex", immobile, cfg.immobile_buffer),
+            ("mobile_complex", mobile, cfg.mobile_buffer),
+        ):
+            complex_species = simulation.add_species(name, valence=0)
+            box.initialize_species(complex_species, 0 * u.mmol / u.L)
+            box.add_diffusion(complex_species, buffer.diffusivity)
+            box.add_reaction(
+                reactants=[ca, free],
+                products=[complex_species],
+                k_f=buffer.kf,
+                k_r=buffer.kr,
+            )
+
+    simulation.run(
+        end_time=cfg.end_time,
+        time_step=cfg.time_step,
+        record_interval=cfg.record_interval,
+        n_threads=cfg.n_threads,
+    )
+
+
+if __name__ == "__main__":
+    run_from_cli(Config, run, __file__)

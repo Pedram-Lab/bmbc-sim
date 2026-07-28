@@ -37,6 +37,14 @@ mM = M / 1000
 uM = M / 1e6
 nM = M / 1e9
 
+# Teach astropy's *string* parser the same units (M, mM, uM, nM, ...), so that
+# "1.3 mM" round-trips: configs are written as unit strings and read back by
+# every script that loads a run's config.yaml. Registered here rather than in
+# bmbcsim.config so that reading does not depend on importing the config module.
+_molar_ns: dict[str, u.UnitBase] = {}
+u.def_unit("M", M, prefixes=True, namespace=_molar_ns)
+u.add_enabled_units(list(_molar_ns.values()))
+
 
 def to_simulation_units(value: u.Quantity, physical_name: str = None) -> float:
     """Convert a value to simulation units.

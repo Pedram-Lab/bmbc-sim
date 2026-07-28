@@ -1,0 +1,12 @@
+# Smoke test: coarse mesh, one influx pulse, seconds instead of minutes. Only for
+# checking that the setup runs -- the numbers are not comparable to the paper.
+# Run: uv run scripts/literature_replications/sala_1990/simulation.py --config-name quick
+# Unlisted fields fall back to the Config defaults in ../simulation.py.
+defaults:
+  - sala
+  - _self_
+
+simulation_name: sala_quick
+mesh_size: "8 um"
+end_time: "20 ms"
+record_interval: "5 ms"

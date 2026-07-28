@@ -1,0 +1,8 @@
+# Chelation only: the buffers bind Ca, but carry no charge in the field equation.
+# Results land in results/<timestamp>_chelation/.
+# Run: uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name chelation
+defaults:
+  - chelation_vs_electrostatics
+  - _self_
+
+electrostatics: false

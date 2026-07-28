@@ -14,21 +14,15 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import bmbcsim
 
+from simulation import Config, simulation_label
 
-# Switches for electrostatics and chelation
-ELECTROSTATICS = True
-CHELATION = True
+# Which run to visualize: the same switches simulation.py was run with. The
+# directory name follows from them, so simulation.py owns the naming.
+CONFIG = Config(chelation=True, electrostatics=True)
 
 # Timestamp and simulation name
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-simulation_name = []
-if CHELATION:
-    simulation_name.append("chelation")
-if ELECTROSTATICS:
-    simulation_name.append("electrostatics")
-if not simulation_name:
-    simulation_name.append("no_interaction")
-simulation_name = "_".join(simulation_name)
+simulation_name = simulation_label(CONFIG)
 file_prefix = f"{timestamp}_{simulation_name}"
 
 # Load results

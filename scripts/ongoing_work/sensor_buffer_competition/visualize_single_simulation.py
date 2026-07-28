@@ -1,13 +1,21 @@
 """
-This script visualizes the results from a specific chelation simulation folder.
+This script visualizes the results from a single simulation.py run.
 It produces four plots:
 1. Free Ca²⁺ and total Ca²⁺
 2. Mobile buffer and mobile complex
 3. Mobile sensor and complex
 4. All species together
+
+Pass a run directory to plot a specific run (e.g. one out of a sweep tree);
+without one, the latest simulation.py run in results/ is used.
+
+    uv run .../visualize_single_simulation.py
+    uv run .../visualize_single_simulation.py results/<stamp>_sensor_buffer_competition
 """
+import sys
 from datetime import datetime
 
+import astropy.units as u
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,22 +23,30 @@ import matplotlib.pyplot as plt
 import bmbcsim
 from bmbcsim.simulation.result_io import result_loader
 
+from simulation import Config
+
 # Customizing the plot style
 fig_width, fig_height = bmbcsim.plot_style("pedramlab")
 
-BUFFER_CONC = 1000.0  # mM
-BUFFER_KD = 1000.0  # mM
-SENSOR_KD = 1 # mM
+# Parameters of the run being plotted, read off the config rather than repeated
+# here. Override them on the Config call to describe a non-default run.
+CONFIG = Config()
+mM = u.mmol / u.L
+BUFFER_CONC = CONFIG.buffer.concentration.to_value(mM)
+BUFFER_KD = CONFIG.buffer.kd.to_value(mM)
+SENSOR_KD = CONFIG.sensor.kd.to_value(mM)
 
-SIM_NAME = f"sensor_buffer_competition_conc{BUFFER_CONC:.0e}_kd{BUFFER_KD:.0e}"
 timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-FILE_PREFIX = f"{timestamp}_{SIM_NAME}"
+FILE_PREFIX = f"{timestamp}_{CONFIG.simulation_name}"
 
-result_loader = result_loader.ResultLoader.find(
-    simulation_name=SIM_NAME,
-    results_root="results",
-    # time_stamp="2025-08-08-075312",
-)
+if len(sys.argv) > 1:
+    result_loader = result_loader.ResultLoader(sys.argv[1])
+else:
+    result_loader = result_loader.ResultLoader.find(
+        simulation_name=CONFIG.simulation_name,
+        results_root="results",
+        # time_stamp="2025-08-08-075312",
+    )
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],

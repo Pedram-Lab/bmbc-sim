@@ -1,0 +1,8 @@
+# Electrostatics only: the fixed buffer charge redistributes Ca, but no binding
+# reaction runs. Results land in results/<timestamp>_electrostatics/.
+# Run: uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name electrostatics
+defaults:
+  - chelation_vs_electrostatics
+  - _self_
+
+chelation: false

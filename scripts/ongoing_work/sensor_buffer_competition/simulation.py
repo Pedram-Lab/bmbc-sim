@@ -1,133 +1,138 @@
-"""
-Simulation of chemical interactions among:
-- Immobile buffer (B)
-- Immobile sensor (S)
-- Diffusing calcium (Ca)
+"""Sensor/buffer competition for calcium across a substrate interface.
 
-Two-region geometry: top and bottom.
-You can configure electrostatics and species initial concentrations per compartment.
-"""
-import argparse
+Two-region box (top / bottom). A mobile buffer sits in the bottom region only, a
+mobile sensor everywhere, and calcium crosses the interface once transport
+switches on. The question is how badly the buffer distorts what the sensor
+reports, as a function of the buffer's concentration and affinity.
 
+    uv run scripts/ongoing_work/sensor_buffer_competition/simulation.py
+    uv run scripts/ongoing_work/sensor_buffer_competition/simulation.py buffer.concentration="1 mM"
+
+``sweep.py`` scans concentration x Kd; ``plot_parameter_sweep_heatmaps.py`` turns
+that sweep into heatmaps.
+"""
 import astropy.units as u
-from ngsolve.webgui import Draw
 
 import bmbcsim
 from bmbcsim.geometry import create_box_geometry
 from bmbcsim.simulation import transport
+from bmbcsim.config import (
+    ConfigGroup,
+    Quantity,
+    SimulationConfig,
+    dump_resolved,
+    run_from_cli,
+)
 
 
-def run_simulation(buffer_conc, buffer_kd):
-    """Run simulation with specific buffer concentration and KD."""
-    # Create simulation name based on parameters
-    sim_name = f"sensor_buffer_competition_conc{buffer_conc:.0e}_kd{buffer_kd:.0e}"
+class Geometry(ConfigGroup):
+    """Box split into a "bottom" (substrate) and "top" compartment."""
 
-    # Geometry parameters
-    ca_free = 1 * u.mmol / u.L
-    cube_height = 1 * u.um
-    sidelength = 0.5 * u.um
-    substrate_height = 0.5 * u.um
+    sidelength: Quantity("um") = "0.5 um"
+    cube_height: Quantity("um") = "1 um"
+    substrate_height: Quantity("um") = "0.5 um"
+    mesh_size_factor: float = 20  # mesh size = sidelength / this
 
-    # Initial concentrations per compartment
-    buffer_initial = {
-        'top': 0 * u.mmol / u.L,
-        'bottom': buffer_conc * u.mmol / u.L,
-    }
-    sensor_initial = 10 * u.umol / u.L
 
-    # Buffer reaction constants
-    buffer_kd = buffer_kd * u.mmol / u.L
-    buffer_kf = 1.0e8 / (u.mol / u.L * u.s)
-    buffer_kr = buffer_kf * buffer_kd
+class Binder(ConfigGroup):
+    """A Ca2+-binding species, parametrized by its affinity Kd = kr / kf."""
 
-    # Sensor reaction constants
-    sensor_kd = 1.0 * u.mmol / u.L
-    sensor_kf = 1.0e8 / (u.mol / u.L * u.s)
-    sensor_kr = sensor_kf * sensor_kd
+    concentration: Quantity("mM")
+    kd: Quantity("mM")
+    kf: Quantity("1 / (M s)") = "1.0e8 / (M s)"
+    diffusivity: Quantity("cm2 / s") = "2.5e-6 cm2 / s"
 
-    # Geometry setup
+    @property
+    def kr(self) -> u.Quantity:
+        """Reverse rate, derived from ``Kd = kr / kf``."""
+        return self.kf * self.kd
+
+
+class Config(SimulationConfig):
+    """Full config for the sensor/buffer competition experiment."""
+
+    simulation_name: str = "sensor_buffer_competition"
+    geometry: Geometry = Geometry()
+    ca_free: Quantity("mM") = "1 mM"
+    # Buffer: bottom region only. Concentration and Kd are the swept axes.
+    buffer: Binder = Binder(concentration="1 mM", kd="1 mM")
+    sensor: Binder = Binder(concentration="10 uM", kd="1.0 mM")
+    # Transport across the interface, switched on at `transport_onset`
+    interface_permeability: Quantity("um3 / ms") = "10 um3 / ms"
+    transport_onset: Quantity("ms") = "1 ms"
+    # Timing
+    end_time: Quantity("ms") = "4 ms"
+    time_step: Quantity("ms") = "5 us"
+    record_interval: Quantity("ms") = "100 us"
+
+
+def run(cfg: Config) -> None:
+    """Run the simulation from a validated config."""
+    geom = cfg.geometry
+    zero = 0 * u.mmol / u.L
+
+    result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.simulation_name)
+    dump_resolved(cfg, result_dir)
+    print(f"Results and config -> {result_dir}")
+
     mesh = create_box_geometry(
-        dimensions=(sidelength, sidelength, cube_height),
-        mesh_size=sidelength / 20,
-        split=substrate_height,
+        dimensions=(geom.sidelength, geom.sidelength, geom.cube_height),
+        mesh_size=geom.sidelength / geom.mesh_size_factor,
+        split=geom.substrate_height,
         compartments=True,
     )
-    Draw(mesh)
 
-    simulation = bmbcsim.Simulation(
-        mesh, result_directory=bmbcsim.timestamped_directory('results', sim_name)
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=result_dir)
     geometry = simulation.simulation_geometry
-
     compartments = geometry.compartments
-    interface = geometry.membranes['interface']
+    interface = geometry.membranes["interface"]
 
-    # Add calcium species
-    ca = simulation.add_species('ca', valence=2)
+    # Calcium, present everywhere at the same concentration
+    ca = simulation.add_species("ca", valence=2)
     for comp in compartments.values():
-        comp.initialize_species(ca, ca_free)
+        comp.initialize_species(ca, cfg.ca_free)
         comp.add_diffusion(ca, 600 * u.um**2 / u.s)
 
-    # Mobile buffer
-    buffer = simulation.add_species('buffer')
-    buffer_complex = simulation.add_species('buffer_complex')
+    # Buffer (bottom only) and sensor (everywhere), both mobile and both binding
+    # Ca via X + Ca <-> X_complex.
+    for label, binder, initial in (
+        ("buffer", cfg.buffer, {"top": zero, "bottom": cfg.buffer.concentration}),
+        ("sensor", cfg.sensor, None),
+    ):
+        free = simulation.add_species(label)
+        complex_species = simulation.add_species(f"{label}_complex")
+        for name, comp in compartments.items():
+            comp.add_diffusion(free, binder.diffusivity)
+            comp.initialize_species(
+                free, initial[name] if initial is not None else binder.concentration
+            )
+            comp.add_diffusion(complex_species, binder.diffusivity)
+            comp.initialize_species(complex_species, zero)
+            comp.add_reaction(
+                reactants=[ca, free],
+                products=[complex_species],
+                k_f=binder.kf,
+                k_r=binder.kr,
+            )
 
-    for name, comp in compartments.items():
-        # Initialize buffer and complex per compartment
-        comp.add_diffusion(buffer, 2.5e-6 * u.cm**2 / u.s)
-        comp.initialize_species(buffer, buffer_initial[name])
-        comp.add_diffusion(buffer_complex, 2.5e-6 * u.cm**2 / u.s)
-        comp.initialize_species(buffer_complex, 0 * u.mmol / u.L)
+    # Transport across the interface, off until `transport_onset`
+    spike = lambda t: 0.0 if t < cfg.transport_onset else 1.0
+    interface.add_transport(
+        species=ca,
+        transport=transport.Passive(
+            permeability=cfg.interface_permeability, temporal=spike
+        ),
+        source=compartments["top"],
+        target=compartments["bottom"],
+    )
 
-        # Reaction: Ca + buffer <-> buffer_complex
-        comp.add_reaction(
-            reactants=[ca, buffer],
-            products=[buffer_complex],
-            k_f=buffer_kf,
-            k_r=buffer_kr
-        )
-
-    # Mobile sensor
-    sensor = simulation.add_species('sensor')
-    sensor_complex = simulation.add_species('sensor_complex')
-
-    for name, comp in compartments.items():
-        # Initialize sensor and complex per compartment
-        comp.add_diffusion(sensor, 2.5e-6 * u.cm**2 / u.s)
-        comp.initialize_species(sensor, sensor_initial)
-        comp.add_diffusion(sensor_complex, 2.5e-6 * u.cm**2 / u.s)
-        comp.initialize_species(sensor_complex, 0 * u.mmol / u.L)
-
-        # Reaction: Ca + sensor <-> sensor_complex
-        comp.add_reaction(
-            reactants=[ca, sensor],
-            products=[sensor_complex],
-            k_f=sensor_kf,
-            k_r=sensor_kr
-        )
-
-    # Transport (permeability activates at t=1ms)
-    base_perm = 10 * u.um**3 / u.ms
-    spike = lambda t: 0.0 if t < 1 * u.ms else 1.0
-    t = transport.Passive(permeability=base_perm, temporal=spike)
-    interface.add_transport(species=ca, transport=t,
-                            source=compartments["top"], target=compartments["bottom"])
-
-    # Run simulation
     simulation.run(
-        end_time=4 * u.ms,
-        time_step=5 * u.us,
-        record_interval=100 * u.us,
-        n_threads=4
+        end_time=cfg.end_time,
+        time_step=cfg.time_step,
+        record_interval=cfg.record_interval,
+        n_threads=cfg.n_threads,
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Run buffer simulation with specific parameters')
-    parser.add_argument('--buffer_conc', type=float, required=True,
-                        help='Buffer concentration in mM')
-    parser.add_argument('--buffer_kd', type=float, required=True,
-                        help='Buffer KD value in uM')
-
-    args = parser.parse_args()
-    run_simulation(args.buffer_conc, args.buffer_kd)
+    run_from_cli(Config, run, __file__)

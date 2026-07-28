@@ -1,6 +1,7 @@
 """Analyze the buffered-diffusion experiment.
 
-Loads the two runs produced by ``simulation.py`` (no buffer / with buffer),
+Loads the two runs produced by ``simulation.py`` (its default config, then
+``--config-name buffer``),
 samples [Ca] along the long (y) axis of the box at every recorded snapshot,
 tracks the half-maximum front position y_half(t), and fits y_half^2 vs t to
 extract an effective diffusivity for each condition.
@@ -27,15 +28,16 @@ import matplotlib.pyplot as plt
 
 from bmbcsim import ResultLoader
 from bmbcsim.units import to_simulation_units
-from simulation import BOX_LENGTH_Y, BOX_HEIGHT_Z
+from simulation import Config
 
-# Geometry constants (taken from simulation.py). The source face is at y = 0,
-# so distance from the source equals y.
+# Geometry constants, read off simulation.py's config defaults. The source face is
+# at y = 0, so distance from the source equals y.
+_DEFAULTS = Config()
 RESULT_ROOT = "results"
-BOX_LENGTH = to_simulation_units(BOX_LENGTH_Y, "length")  # um, along the long axis
+BOX_LENGTH = to_simulation_units(_DEFAULTS.box.length_y, "length")  # um, long axis
 MID_X = 0.0
-MID_Z = to_simulation_units(BOX_HEIGHT_Z, "length") / 2.0  # mid-height
-FREE_DIFFUSIVITY = 0.7  # um^2/ms, for reference
+MID_Z = to_simulation_units(_DEFAULTS.box.height_z, "length") / 2.0  # mid-height
+FREE_DIFFUSIVITY = to_simulation_units(_DEFAULTS.diffusivity, "diffusivity")  # reference
 
 N_SAMPLE_POINTS = 120
 FRONT_FRACTION = 0.5  # front = where C drops to this fraction of the surface value

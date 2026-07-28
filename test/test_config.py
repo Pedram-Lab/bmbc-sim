@@ -84,3 +84,21 @@ def test_expand_sweep_dotted_keys_target_nested_groups():
     assert str(subdir) == "out/ecs_ratio=0.04/coupling=0-kPa-L-mmol"
     # The base config is not mutated by expansion (deepcopy per job).
     assert base.mech.ecs_ratio == 0.1
+
+
+def test_expand_sweep_disambiguates_axes_sharing_a_leaf_name():
+    class _TwoGroups(SimulationConfig):
+        simulation_name: str = "demo"
+        buffer: _Group = _Group()
+        sensor: _Group = _Group()
+
+    jobs = expand_sweep(
+        _TwoGroups(),
+        sweep={"buffer.ecs_ratio": [0.04], "sensor.ecs_ratio": [0.19]},
+        result_root="out",
+    )
+    # Both axes would be labelled "ecs_ratio", making the two directory levels
+    # indistinguishable; the full dotted key is used instead.
+    _, cfg, subdir = jobs[0]
+    assert str(subdir) == "out/buffer.ecs_ratio=0.04/sensor.ecs_ratio=0.19"
+    assert (cfg.buffer.ecs_ratio, cfg.sensor.ecs_ratio) == (0.04, 0.19)

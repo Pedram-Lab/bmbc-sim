@@ -1,0 +1,16 @@
+# Buffer concentration x buffer Kd (replaces parameter_sweep.py), four decades apart
+# in each direction. Plot it with plot_parameter_sweep_heatmaps.py.
+# Run: uv run scripts/ongoing_work/sensor_buffer_competition/sweep.py
+defaults:
+  - cluster: local    # override on the CLI with cluster=janelia
+  - _self_            # this file's own values win over the group above
+
+result_root: results/buffer-competition-sweep
+
+cluster:
+  n_workers: 4    # 16 short runs on a small box; the old driver used a Pool(4)
+
+# Cartesian product of these axes.
+sweep:
+  buffer.concentration: ["1e-6 mM", "1e-3 mM", "1 mM", "1e3 mM"]
+  buffer.kd: ["1e-6 mM", "1e-3 mM", "1 mM", "1e3 mM"]
