@@ -6,7 +6,9 @@ One figure per evaluation point, showing baseline vs. shifted traces.
 
 Without arguments this takes the latest rusakov run, whichever variant it is
 (presynaptic or "--config-name post"); pass a result directory to use that one.
+Figures are written to <run directory>/plots/.
 """
+import os
 import sys
 
 import xarray as xr
@@ -106,9 +108,10 @@ for pt_idx, (base_point, label) in enumerate(zip(BASELINE_POINTS, POINT_LABELS))
 
     fig.suptitle(f"Point sensitivity: {label}", fontweight="bold")
     fig.tight_layout()
-    fig.savefig(f"point_sensitivity_{pt_idx}_{label.lower().replace(' ', '_').replace('(', '').replace(')', '')}.png",
+    slug = label.lower().replace(" ", "_").replace("(", "").replace(")", "")
+    fig.savefig(os.path.join(loader.plot_dir, f"point_sensitivity_{pt_idx}_{slug}.png"),
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {label}")
 
-print("Done.")
+print(f"Done. Figures written to {loader.plot_dir}")

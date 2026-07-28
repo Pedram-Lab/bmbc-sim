@@ -2,7 +2,9 @@
 
 Without arguments this takes the latest sala run, whichever variant it is (the
 full replication or "--config-name quick"); pass a result directory to plot that one.
+Figures are written to <run directory>/plots/.
 """
+import os
 import sys
 
 import xarray as xr
@@ -44,7 +46,7 @@ plt.ylabel("Average concentration [mM]")
 plt.title(f"Total concentration in region '{region}'")
 plt.legend()
 plt.tight_layout()
-plt.savefig("sala_species_concentrations.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(loader.plot_dir, "species_concentrations.pdf"), bbox_inches="tight")
 plt.show()
 
 # === Define points in Cartesian coordinates (x, y, z) ===
@@ -83,5 +85,6 @@ plt.legend()
 # plt.tick_params(axis='both')
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("sala_ca_point_profiles.pdf", format="pdf")
+plt.savefig(os.path.join(loader.plot_dir, "ca_point_profiles.pdf"), format="pdf")
 plt.show()
+print(f"Figures written to {loader.plot_dir}")

@@ -163,6 +163,20 @@ class ResultLoader:
         # Initialize variables for caching
         self.cell_to_region, self.regions = self._get_cell_to_region()
 
+    @property
+    def plot_dir(self) -> str:
+        """Where figures made from this run belong: ``<run directory>/plots``.
+
+        Created on access. Keeping figures inside the run they came from means they
+        cannot be mixed up between runs, and the run directory stays self-contained
+        (config + log + data + plots), so filenames need no timestamp of their own.
+        A figure comparing several runs goes in the plots directory of one of them --
+        see the comparison scripts for which.
+        """
+        directory = os.path.join(self.results_root, "plots")
+        os.makedirs(directory, exist_ok=True)
+        return directory
+
     @classmethod
     def open(cls, path: str | None = None, /, **find_kwargs) -> "ResultLoader":
         """Load an explicit run directory, or -- if `path` is None -- find one.

@@ -7,13 +7,14 @@ It produces four plots:
 4. All species together
 
 Pass a run directory to plot a specific run (e.g. one out of a sweep tree);
-without one, the latest simulation.py run in results/ is used.
+without one, the latest simulation.py run in results/ is used. Figures are written
+to <run directory>/plots/.
 
     uv run .../visualize_single_simulation.py
     uv run .../visualize_single_simulation.py results/<stamp>_sensor_buffer_competition
 """
+import os
 import sys
-from datetime import datetime
 
 import astropy.units as u
 import xarray as xr
@@ -36,15 +37,14 @@ BUFFER_CONC = CONFIG.buffer.concentration.to_value(mM)
 BUFFER_KD = CONFIG.buffer.kd.to_value(mM)
 SENSOR_KD = CONFIG.sensor.kd.to_value(mM)
 
-timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-FILE_PREFIX = f"{timestamp}_{CONFIG.simulation_name}"
-
 result_loader = result_loader.ResultLoader.open(
     sys.argv[1] if len(sys.argv) > 1 else None,
     simulation_name=CONFIG.simulation_name,
     results_root="results",
     # time_stamp="2025-08-08-075312",
 )
+# The run directory is already timestamped, so the figures inside it need no prefix.
+PLOT_DIR = result_loader.plot_dir
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],
@@ -91,7 +91,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_free_total_ca.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "free_total_ca.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -120,7 +120,7 @@ axes[0].legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle("Sensor-Buffer competition", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_buffer_complex.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "buffer_complex.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -153,7 +153,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_sensor_complex.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "sensor_complex.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -197,7 +197,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_mass_conservation.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "mass_conservation.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -219,6 +219,6 @@ axes[0].legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle("Estimated $[Ca^{2+}]$", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_estimated_ca.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "estimated_ca.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
