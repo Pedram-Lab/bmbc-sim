@@ -10,15 +10,18 @@ Uses an interval halving method:
 
 import numpy as np
 import xarray as xr
-import astropy.units as u
 
 import bmbcsim
 
-from simulation import run_simulation, M50, J50
+from simulation import Config, run
 
 TARGET_MIN = 0.65  # mM — 50% depletion of 1.3 mM
 RESULT_ROOT = "results/rusakov_channel_tuning"
 CENTER_POINT = [[0, 0, 0]]
+
+# Starting upper bounds: the tuned values currently in the config.
+M50 = Config().presynaptic.m50
+J50 = Config().postsynaptic.j50
 
 
 def run_and_evaluate(channel_param, pre_or_post):
@@ -27,17 +30,17 @@ def run_and_evaluate(channel_param, pre_or_post):
 
     sim_name = f"rusakov_m{channel_param}"
 
-    kwargs = {
-        "simulation_name": sim_name,
-        "result_root": RESULT_ROOT,
-        "pre_or_post_synaptic": pre_or_post,
-    }
     if pre_or_post == "pre":
-        kwargs["m50"] = channel_param
-    elif pre_or_post == "post":
-        kwargs["j50"] = channel_param * u.pA / u.um**2
+        overrides = {"presynaptic": {"m50": channel_param}}
+    else:
+        overrides = {"postsynaptic": {"j50": f"{channel_param} pA / um2"}}
 
-    run_simulation(**kwargs)
+    run(Config(
+        simulation_name=sim_name,
+        result_root=RESULT_ROOT,
+        mode=pre_or_post,
+        **overrides,
+    ))
 
     # Evaluate: load point values at center and find minimum
     loader = bmbcsim.ResultLoader.find(

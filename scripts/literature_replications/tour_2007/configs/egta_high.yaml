@@ -1,0 +1,9 @@
+# EGTA at 40 mM: same buffer as egta_low, ~9x the capacity.
+# Run: uv run scripts/literature_replications/tour_2007/simulation.py --config-name egta_high
+defaults:
+  - egta_low
+  - _self_
+
+buffer:
+  name: EGTA_high
+  initial_concentration: "40 mM"

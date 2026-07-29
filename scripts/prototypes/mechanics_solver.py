@@ -48,9 +48,8 @@ print(f"Created mesh with {mesh.nv} vertices and {mesh.ne} elements")
 
 # Create simulation with mechanics enabled
 sim = bmbcsim.Simulation(
-    "tissue_mechanics",
     mesh,
-    result_root="results",
+    result_directory=bmbcsim.timestamped_directory("results", "tissue_mechanics"),
     mechanics=True,
 )
 

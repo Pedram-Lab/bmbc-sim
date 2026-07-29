@@ -1,6 +1,7 @@
 """Analyze the buffered-diffusion experiment.
 
-Loads the two runs produced by ``simulation.py`` (no buffer / with buffer),
+Loads the two runs produced by ``simulation.py`` (its default config, then
+``--config-name buffer``),
 samples [Ca] along the long (y) axis of the box at every recorded snapshot,
 tracks the half-maximum front position y_half(t), and fits y_half^2 vs t to
 extract an effective diffusivity for each condition.
@@ -27,15 +28,16 @@ import matplotlib.pyplot as plt
 
 from bmbcsim import ResultLoader
 from bmbcsim.units import to_simulation_units
-from simulation import BOX_LENGTH_Y, BOX_HEIGHT_Z
+from simulation import Config
 
-# Geometry constants (taken from simulation.py). The source face is at y = 0,
-# so distance from the source equals y.
+# Geometry constants, read off simulation.py's config defaults. The source face is
+# at y = 0, so distance from the source equals y.
+_DEFAULTS = Config()
 RESULT_ROOT = "results"
-BOX_LENGTH = to_simulation_units(BOX_LENGTH_Y, "length")  # um, along the long axis
+BOX_LENGTH = to_simulation_units(_DEFAULTS.box.length_y, "length")  # um, long axis
 MID_X = 0.0
-MID_Z = to_simulation_units(BOX_HEIGHT_Z, "length") / 2.0  # mid-height
-FREE_DIFFUSIVITY = 0.7  # um^2/ms, for reference
+MID_Z = to_simulation_units(_DEFAULTS.box.height_z, "length") / 2.0  # mid-height
+FREE_DIFFUSIVITY = to_simulation_units(_DEFAULTS.diffusivity, "diffusivity")  # reference
 
 N_SAMPLE_POINTS = 120
 FRONT_FRACTION = 0.5  # front = where C drops to this fraction of the surface value
@@ -68,12 +70,11 @@ CONDITIONS = {
 }
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PLOT_DIR = os.path.join(SCRIPT_DIR, "plots")
 DATA_DIR = os.path.join(SCRIPT_DIR, "processed-data")
 
 
 def load_kymograph(simulation_name):
-    """Return (times_ms, y_from_source_um, ca_mM[n_times, n_points])."""
+    """Return (loader, times_ms, y_from_source_um, ca_mM[n_times, n_points])."""
     loader = ResultLoader.find(
         simulation_name=simulation_name, results_root=RESULT_ROOT
     )
@@ -94,7 +95,7 @@ def load_kymograph(simulation_name):
         times.append(float(ds.coords["time"].values[0]))
         profiles.append(ds.sel(species="Ca").values[0])
 
-    return np.array(times), y_from_source, np.array(profiles)
+    return loader, np.array(times), y_from_source, np.array(profiles)
 
 
 def half_max_position(y_from_source, ca_profile, threshold):
@@ -134,16 +135,16 @@ def fit_effective_diffusivity(times, y_half):
 
 def analyze_run(simulation_name):
     """Load a run and front-track it. Returns a dict with times, y, ca, cs,
-    y_half, d_eff, mask -- everything main()'s report/CSV/plot code needs,
+    y_half, d_eff, mask, loader -- everything main()'s report/CSV/plot code needs,
     and what other scripts need to pull the fitted diffusivity back out."""
-    times, y, ca = load_kymograph(simulation_name)
+    loader, times, y, ca = load_kymograph(simulation_name)
     cs, y_half = track_front(times, y, ca)
     d_eff, mask = fit_effective_diffusivity(times, y_half)
-    return dict(times=times, y=y, ca=ca, cs=cs, y_half=y_half, d_eff=d_eff, mask=mask)
+    return dict(times=times, y=y, ca=ca, cs=cs, y_half=y_half, d_eff=d_eff, mask=mask,
+                loader=loader)
 
 
 def main():
-    os.makedirs(PLOT_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
 
     results = {}
@@ -216,7 +217,9 @@ def main():
 
     fig.suptitle("Buffering slows Ca$^{2+}$ diffusion through an elongated box")
     fig.tight_layout()
-    fig_path = os.path.join(PLOT_DIR, "buffered_diffusion.png")
+    # The comparison lives with the buffered run: it is the one being characterized.
+    # Only that run's plots/ is asked for, so the other one is not created empty.
+    fig_path = os.path.join(results["with buffer"]["loader"].plot_dir, "buffered_diffusion.png")
     fig.savefig(fig_path, dpi=150)
     print(f"Wrote {fig_path}")
 

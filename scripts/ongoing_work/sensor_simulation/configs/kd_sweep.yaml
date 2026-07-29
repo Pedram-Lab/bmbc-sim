@@ -1,0 +1,17 @@
+# Affinity sweep (replaces parameter_sweep.py): buffer Kd x sensor Kd, 1 uM to
+# 10 mM in decades. Collect the results with collect_kd_sweep.py.
+# Run: uv run scripts/ongoing_work/sensor_simulation/sweep.py
+defaults:
+  - cluster: local    # override on the CLI with cluster=janelia
+  - _self_            # this file's own values win over the group above
+
+result_root: results/sensor-kd-sweep
+
+cluster:
+  n_workers: 5    # 25 runs; the 200 um cube is not cheap to mesh
+
+# Cartesian product of these axes. Both axes end in "kd", so the run directories
+# are labelled by the full dotted key ("buffer.kd=1-uM/sensor.kd=1-uM").
+sweep:
+  buffer.kd: ["1 uM", "10 uM", "100 uM", "1 mM", "10 mM"]
+  sensor.kd: ["1 uM", "10 uM", "100 uM", "1 mM", "10 mM"]

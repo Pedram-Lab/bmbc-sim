@@ -1,13 +1,22 @@
 """
-This script visualizes the results from a specific chelation simulation folder.
+This script visualizes the results from a single simulation.py run.
 It produces four plots:
 1. Free Ca²⁺ and total Ca²⁺
 2. Mobile buffer and mobile complex
 3. Mobile sensor and complex
 4. All species together
-"""
-from datetime import datetime
 
+Pass a run directory to plot a specific run (e.g. one out of a sweep tree);
+without one, the latest simulation.py run in results/ is used. Figures are written
+to <run directory>/plots/.
+
+    uv run .../visualize_single_simulation.py
+    uv run .../visualize_single_simulation.py results/<stamp>_sensor_buffer_competition
+"""
+import os
+import sys
+
+import astropy.units as u
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,22 +24,27 @@ import matplotlib.pyplot as plt
 import bmbcsim
 from bmbcsim.simulation.result_io import result_loader
 
+from simulation import Config
+
 # Customizing the plot style
 fig_width, fig_height = bmbcsim.plot_style("pedramlab")
 
-BUFFER_CONC = 1000.0  # mM
-BUFFER_KD = 1000.0  # mM
-SENSOR_KD = 1 # mM
+# Parameters of the run being plotted, read off the config rather than repeated
+# here. Override them on the Config call to describe a non-default run.
+CONFIG = Config()
+mM = u.mmol / u.L
+BUFFER_CONC = CONFIG.buffer.concentration.to_value(mM)
+BUFFER_KD = CONFIG.buffer.kd.to_value(mM)
+SENSOR_KD = CONFIG.sensor.kd.to_value(mM)
 
-SIM_NAME = f"sensor_buffer_competition_conc{BUFFER_CONC:.0e}_kd{BUFFER_KD:.0e}"
-timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-FILE_PREFIX = f"{timestamp}_{SIM_NAME}"
-
-result_loader = result_loader.ResultLoader.find(
-    simulation_name=SIM_NAME,
+result_loader = result_loader.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name=CONFIG.simulation_name,
     results_root="results",
     # time_stamp="2025-08-08-075312",
 )
+# The run directory is already timestamped, so the figures inside it need no prefix.
+PLOT_DIR = result_loader.plot_dir
 
 total_substance = xr.concat(
     [result_loader.load_total_substance(i) for i in range(len(result_loader))],
@@ -77,7 +91,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_free_total_ca.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "free_total_ca.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -106,7 +120,7 @@ axes[0].legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle("Sensor-Buffer competition", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_buffer_complex.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "buffer_complex.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -139,7 +153,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_sensor_complex.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "sensor_complex.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -183,7 +197,7 @@ plt.suptitle(
     fontsize=9,
 )
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_mass_conservation.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "mass_conservation.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()
 
@@ -205,6 +219,6 @@ axes[0].legend()
 plt.subplots_adjust(wspace=0)
 plt.suptitle("Estimated $[Ca^{2+}]$", fontsize=9)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{FILE_PREFIX}_estimated_ca.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(PLOT_DIR, "estimated_ca.pdf"), bbox_inches="tight")
 plt.show()
 plt.close()

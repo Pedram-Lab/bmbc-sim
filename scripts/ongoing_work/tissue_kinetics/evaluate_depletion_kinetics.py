@@ -20,8 +20,9 @@ time constants poorly identifiable, whereas the 95% crossing times are
 well-conditioned and track the swept parameter monotonically.
 
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
-of the sweep root (excluding processed-data/ and plots/), and every
-``tissue_kinetics_seed*`` directory found anywhere beneath it is pooled.
+of the sweep root (excluding processed-data/ and plots/), and every simulation run
+found anywhere beneath it is pooled -- so with more than one swept axis, the outer
+axis is the parameter and the inner ones are pooled into it.
 
 Output, per sweep: a stacked 3-panel box plot at
 ``<sweep>/plots/depletion_kinetics.png`` and a tidy per-synapse CSV at
@@ -41,15 +42,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evaluate_ecs_ratio import compute_local_ca
+from bmbcsim.simulation.result_io import NON_RUN_DIRS, find_run_dirs
+from analysis import compute_local_ca
 
 # ============ Fixed depletion-protocol constants ============
 C0 = 1.3      # baseline Ca (mM); the recovery asymptote
 T0 = 300.0    # stimulus onset (ms); traces are flat at C0 before this
 # ============================================================
 
-_SEED_PATTERN = re.compile(r"tissue_kinetics(?:_\w+?)?_seed\d+_\d{4}-\d{2}-\d{2}-\d{6}$")
-_RESERVED_DIRS = {"processed-data", "plots"}
+_RESERVED_DIRS = NON_RUN_DIRS
 
 METRICS = [
     # (csv/key name, axis label)
@@ -64,13 +65,8 @@ METRICS = [
 # ---------------------------------------------------------------------------
 
 def find_seed_dirs(root):
-    """All tissue_kinetics_seed* directories anywhere beneath `root`."""
-    out = []
-    for dirpath, dirnames, _ in os.walk(root):
-        if _SEED_PATTERN.match(os.path.basename(dirpath)):
-            out.append(dirpath)
-            dirnames[:] = []  # don't descend into a seed dir
-    return sorted(out)
+    """All simulation runs anywhere beneath `root`, at any sweep depth."""
+    return [str(path) for path in find_run_dirs(root)]
 
 
 def discover_parameters(sweep_dir):

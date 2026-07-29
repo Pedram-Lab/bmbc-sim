@@ -15,7 +15,7 @@ import numpy as np
 import pyvista as pv
 from scipy.spatial import cKDTree
 
-from evaluate_ecs_ratio import SPECIES_NAME, find_synapse_centers
+from analysis import SPECIES_NAME, find_synapse_centers
 from evaluate_synapse_distribution_spatial import (
     DEFAULT_HEAT_M,
     assemble_heat_method,

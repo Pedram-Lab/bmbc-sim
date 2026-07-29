@@ -23,9 +23,7 @@ def create_box_mesh():
 def test_mechanics_solver_setup(tmp_path):
     """Test that the mechanics solver can be set up with elasticity parameters."""
     mesh = create_box_mesh()
-    simulation = bmbcsim.Simulation(
-        "mechanics_test", mesh, result_root=tmp_path, mechanics=True
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
 
     cell = simulation.simulation_geometry.compartments["cell"]
 
@@ -44,9 +42,7 @@ def test_mechanics_solver_setup(tmp_path):
 def test_mechanics_with_custom_poisson_ratio(tmp_path):
     """Test that custom Poisson ratio can be set."""
     mesh = create_box_mesh()
-    simulation = bmbcsim.Simulation(
-        "mechanics_test", mesh, result_root=tmp_path, mechanics=True
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
 
     cell = simulation.simulation_geometry.compartments["cell"]
 
@@ -63,9 +59,7 @@ def test_mechanics_with_custom_poisson_ratio(tmp_path):
 def test_mechanics_missing_elasticity_raises(tmp_path):
     """Test that missing elasticity parameters raise an error."""
     mesh = create_box_mesh()
-    simulation = bmbcsim.Simulation(
-        "mechanics_test", mesh, result_root=tmp_path, mechanics=True
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
 
     cell = simulation.simulation_geometry.compartments["cell"]
 
@@ -84,9 +78,7 @@ def test_mechanics_missing_elasticity_raises(tmp_path):
 def test_mechanics_with_driving_species(tmp_path):
     """Test that a species can drive mechanical contraction."""
     mesh = create_box_mesh()
-    simulation = bmbcsim.Simulation(
-        "mechanics_driving_test", mesh, result_root=tmp_path, mechanics=True
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
 
     cell = simulation.simulation_geometry.compartments["cell"]
 
@@ -123,9 +115,7 @@ def test_mechanics_with_driving_species(tmp_path):
 def test_mechanics_with_dynamic_species(tmp_path):
     """Test that a species can drive mechanical contraction."""
     mesh = create_box_mesh()
-    simulation = bmbcsim.Simulation(
-        "mechanics_dynamic_test", mesh, result_root=tmp_path, mechanics=True
-    )
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
 
     cell = simulation.simulation_geometry.compartments["cell"]
     influx_bnd = simulation.simulation_geometry.membranes["influx"]

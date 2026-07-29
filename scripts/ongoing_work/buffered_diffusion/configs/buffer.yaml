@@ -1,0 +1,9 @@
+# With the immobile ECM buffer. The Config default is the unbuffered baseline, so
+# run both to have something to compare: the buffered front is the slower one.
+# Run: uv run scripts/ongoing_work/buffered_diffusion/simulation.py --config-name buffer
+defaults:
+  - buffered_diffusion
+  - _self_
+
+buffer:
+  enabled: true

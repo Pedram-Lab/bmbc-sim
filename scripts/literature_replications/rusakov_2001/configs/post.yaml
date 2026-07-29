@@ -1,0 +1,9 @@
+# Postsynaptic calcium influx (Fig. 4, bottom row). Timing comes from
+# MODE_TIMING["post"] in ../simulation.py: ~50x longer than the presynaptic case.
+# Run: uv run scripts/literature_replications/rusakov_2001/simulation.py --config-name post
+defaults:
+  - rusakov
+  - _self_
+
+mode: post
+postfix: post     # -> results/<timestamp>_rusakov_post, next to the presynaptic run

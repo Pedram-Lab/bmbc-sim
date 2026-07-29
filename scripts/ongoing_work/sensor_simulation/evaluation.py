@@ -1,12 +1,21 @@
+"""Plot one sensor_simulation run.
+
+Without arguments this takes the latest sensor run, whichever variant it is (the
+default or "--config-name sensor_left"); pass a result directory to plot that one.
+The figure is written to <run directory>/plots/.
+"""
+import os
+import sys
+
 import xarray as xr
 import matplotlib.pyplot as plt
 
 import bmbcsim
 
 
-result_loader = bmbcsim.ResultLoader.find(
-    results_root="results",
-    simulation_name="sensor",
+result_loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name="sensor", results_root="results",
 )
 
 total_substance = xr.concat(
@@ -55,4 +64,7 @@ axes[0].legend()
 plt.subplots_adjust(wspace=0)  # Remove gap between subplots
 plt.suptitle("Free Ca and Total Ca over Time by Region")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plot_path = os.path.join(result_loader.plot_dir, "free_total_ca_by_region.pdf")
+plt.savefig(plot_path, bbox_inches="tight")
 plt.show()
+print(f"Figure written to {plot_path}")

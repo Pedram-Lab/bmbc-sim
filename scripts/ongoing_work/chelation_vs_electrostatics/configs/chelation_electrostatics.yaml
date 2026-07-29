@@ -1,0 +1,11 @@
+# Both mechanisms: the buffers bind Ca *and* carry charge in the field equation --
+# the full model the two single-mechanism configs are compared against. This is the
+# Config default spelled out; running it is the same as running simulation.py with no
+# --config-name, results/<timestamp>_chelation_vs_electrostatics_chelation_electrostatics.
+# Run: uv run scripts/ongoing_work/chelation_vs_electrostatics/simulation.py --config-name chelation_electrostatics
+defaults:
+  - chelation_vs_electrostatics
+  - _self_
+
+chelation: true
+electrostatics: true

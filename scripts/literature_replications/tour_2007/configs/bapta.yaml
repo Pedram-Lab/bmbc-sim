@@ -1,0 +1,12 @@
+# BAPTA at 1 mM: lower capacity than EGTA but ~170x faster on-rate.
+# Run: uv run scripts/literature_replications/tour_2007/simulation.py --config-name bapta
+defaults:
+  - tour
+  - _self_
+
+buffer:
+  name: BAPTA
+  initial_concentration: "1 mM"
+  diffusivity: "95 um2 / s"
+  kf: "450 / (uM s)"
+  kr: "80 / s"

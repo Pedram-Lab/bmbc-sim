@@ -1,0 +1,13 @@
+# EGTA at 4.5 mM (the Config default; here as a config so all three buffers are
+# selected the same way).
+# Run: uv run scripts/literature_replications/tour_2007/simulation.py --config-name egta_low
+defaults:
+  - tour
+  - _self_
+
+buffer:
+  name: EGTA_low
+  initial_concentration: "4.5 mM"
+  diffusivity: "113 um2 / s"
+  kf: "2.7 / (uM s)"
+  kr: "0.5 / s"

@@ -4,7 +4,9 @@ import bmbcsim.simulation.transport as transport
 
 # Create a spherical mesh with a radius of 10 micrometers and a mesh size of 1 micrometer
 mesh = bmbcsim.geometry.create_sphere_geometry(radius=10 * u.um, mesh_size=1 * u.um)
-sim = bmbcsim.Simulation("demo", mesh, result_root="results")
+sim = bmbcsim.Simulation(
+    mesh, result_directory=bmbcsim.timestamped_directory("results", "demo")
+)
 
 # Access the compartment named "sphere" from the simulation geometry
 # and add species that can diffuse and react within it

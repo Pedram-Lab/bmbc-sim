@@ -12,22 +12,20 @@ For each seed result in a sweep directory, the script:
        * v_local[r]  - volume of {phi < r} via exact marching tetrahedra on the
                        piecewise-linear interpolant, one column per radius r
 
-The sweep layout is auto-detected: every ``tissue_kinetics_seed*`` directory
-found anywhere beneath the given path is processed, so the path may be a whole
-sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) or a single leaf
-directory that directly contains the seed dirs.
+The sweep layout is auto-detected: every simulation run found anywhere beneath the
+given path is processed, at any nesting depth, so the path may be a whole sweep root,
+one axis subtree of it, or a single run.
 
 Output: a single pooled CSV (default ``<path>/spatial_metrics.csv``) with one row
 per synapse. A leading ``group`` column records each seed's location relative to
-the given path (e.g. ``coupling_1e-1kPa_mM/ecs_0.04``, or ``.`` for a leaf run) so
-that pooled rows from different parameter / ECS-ratio sublevels stay distinct.
+the given path (e.g. ``ecm_kd=1.3-mM/ecs_ratio=0.04``, or ``.`` for a leaf run) so
+that pooled rows from different sweep-axis sublevels stay distinct.
 """
 
 import argparse
 import csv
 import math
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -41,8 +39,9 @@ from scipy.integrate import quad
 from scipy.spatial import cKDTree
 
 from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
+from bmbcsim.simulation.result_io import find_run_dirs, run_seed
 from bmbcsim.utils import create_cluster
-from evaluate_ecs_ratio import compute_local_ca, find_synapse_centers
+from analysis import compute_local_ca, find_synapse_centers
 
 DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
 # Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat globally
@@ -56,34 +55,18 @@ DEFAULT_HEAT_M = 30
 # Sweep / seed discovery
 # ---------------------------------------------------------------------------
 
-_SEED_PATTERN = re.compile(
-    r"tissue_kinetics(?:_\w+?)?_seed(\d+)_\d{4}-\d{2}-\d{2}-\d{6}$"
-)
-_RESERVED_DIRS = {"processed-data", "plots"}
-
-
 def find_seed_dirs(root):
-    """All (seed_idx, path) for tissue_kinetics_seed* dirs anywhere beneath `root`.
+    """All (seed_idx, path) for the simulation runs anywhere beneath `root`.
 
-    The sweep layout is auto-detected by walking the tree: pointing this at a
-    whole sweep root (``<param>/<ecs_ratio>/tissue_kinetics_seed*``) pools every
-    seed across all parameter / ECS-ratio sublevels, while pointing it at a
-    single leaf directory returns just the seeds directly inside it. Our own
-    ``processed-data``/``plots`` output dirs are pruned from the walk.
+    Any sweep layout works: pointing this at a whole sweep root pools every seed
+    across all axis sublevels, while pointing it at a single leaf (or at one run)
+    returns just what is there. See :func:`bmbcsim.simulation.result_io.find_run_dirs`.
 
     Seed indices are NOT unique across sublevels (seed 0 recurs under every
     combination); callers that pool must also record each seed's location (see
     the ``group`` column in ``main``).
     """
-    root = os.path.abspath(root)
-    out = []
-    for dirpath, dirnames, _ in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _RESERVED_DIRS]
-        m = _SEED_PATTERN.match(os.path.basename(dirpath))
-        if m:
-            out.append((int(m.group(1)), dirpath))
-            dirnames[:] = []  # a seed dir has no seed dirs beneath it
-    return sorted(out, key=lambda t: (os.path.dirname(t[1]), t[0]))
+    return [(run_seed(path), str(path)) for path in find_run_dirs(root)]
 
 
 # ---------------------------------------------------------------------------

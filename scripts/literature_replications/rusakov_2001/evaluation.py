@@ -1,3 +1,12 @@
+"""Plot one rusakov_2001 run.
+
+Without arguments this takes the latest rusakov run, whichever variant it is
+(presynaptic or "--config-name post"); pass a result directory to plot that one.
+Figures are written to <run directory>/plots/.
+"""
+import os
+import sys
+
 import xarray as xr
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,7 +15,10 @@ import bmbcsim
 
 
 # Load results
-loader = bmbcsim.ResultLoader.find(simulation_name="rusakov", results_root="results")
+loader = bmbcsim.ResultLoader.open(
+    sys.argv[1] if len(sys.argv) > 1 else None,
+    simulation_name="rusakov", results_root="results",
+)
 figsize = bmbcsim.plot_style("pedramlab")
 plt.rcParams.update({"lines.linewidth": 2})
 
@@ -44,6 +56,7 @@ axes[1].set_xlabel("Time [s]")
 axes[1].set_ylabel("Mass conservation error")
 plt.title("Mass conservation")
 plt.tight_layout()
+plt.savefig(os.path.join(loader.plot_dir, "concentrations_mass_conservation.pdf"), bbox_inches="tight")
 plt.show()
 
 # Plot concentration traces in five points of interest given in the original paper
@@ -82,4 +95,6 @@ plt.title("Calcium concentration at different radial distances")
 plt.legend(point_labels)
 plt.grid(True)
 plt.tight_layout()
+plt.savefig(os.path.join(loader.plot_dir, "ca_point_traces.pdf"), bbox_inches="tight")
 plt.show()
+print(f"Figures written to {loader.plot_dir}")

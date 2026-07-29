@@ -1,0 +1,10 @@
+# Sensor sphere in the clean (left) half instead of the buffered one, so the
+# sensor reads Ca that no buffer has competed for. The sphere position follows
+# from the switch (see run() in ../simulation.py).
+# Run: uv run scripts/ongoing_work/sensor_simulation/simulation.py --config-name sensor_left
+defaults:
+  - sensor
+  - _self_
+
+sensor_left: true
+postfix: left     # -> results/<timestamp>_sensor_left, next to the default run

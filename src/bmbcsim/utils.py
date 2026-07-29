@@ -1,8 +1,14 @@
 import logging
+from datetime import datetime
+from pathlib import Path
+from time import sleep
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from dask.distributed import LocalCluster, SpecCluster
+
+from bmbcsim.logging import logger
 
 
 def _silence_heartbeat_shutdown(record: logging.LogRecord) -> bool:
@@ -26,6 +32,57 @@ def _install_heartbeat_shutdown_filter() -> None:
     _heartbeat_filter_installed = True
 
 
+def timestamped_directory(root: str | Path, name: str) -> Path:
+    """Create and return ``<root>/<timestamp>_<name>/`` to hold one run's output.
+
+    The timestamp leads so that runs sort chronologically in a shared result root.
+
+    :class:`bmbcsim.Simulation` takes a finished directory rather than inventing
+    one, so a script can name its output directory up front and write everything
+    that describes the run -- a resolved config, the inputs -- there *before*
+    building the simulation. That way a crash during setup (meshing, geometry)
+    still leaves a directory saying what was being attempted.
+
+    The directory is claimed exclusively (no ``exist_ok``): the timestamp only
+    resolves to a second, so two runs of the same name started together -- one
+    config per variant, launched in parallel -- would otherwise be handed the
+    same directory and overwrite each other's snapshot.h5 mid-run. On a
+    collision, wait for the next second and retry, rather than decorating the
+    name with a suffix that :meth:`ResultLoader.find` would no longer match.
+
+    :param root: Directory under which the run directory is created.
+    :param name: Name of the run; the timestamp keeps repeat runs distinct.
+    :return: The created directory.
+    """
+    while True:
+        directory = Path(root) / f"{datetime.now():%Y-%m-%d-%H%M%S}_{name}"
+        try:
+            directory.mkdir(parents=True)
+            return directory
+        except FileExistsError:
+            sleep(1.0)  # the timestamp's resolution: the next attempt gets a new one
+
+
+def _sans_family() -> list[str]:
+    """The lab's font, or the closest thing this machine actually has installed.
+
+    Arial is what the lab style asks for; on Ubuntu it comes from the
+    ttf-mscorefonts-installer package (whose download server is currently dead, hence
+    this fallback). Naming a font that is missing makes matplotlib log "findfont: Font
+    family 'Arial' not found." *once per text object* -- a later entry in the list does
+    not silence it -- so only installed families are named. Liberation Sans is
+    metrically identical to Arial, so figures come out the same size either way.
+    """
+    installed = {font.name for font in font_manager.fontManager.ttflist}
+    preferred = [f for f in ("Arial", "Liberation Sans", "Nimbus Sans") if f in installed]
+    if "Arial" not in installed:
+        logger.warning(
+            "Arial is not installed; falling back to %s.",
+            preferred[0] if preferred else "matplotlib's default sans-serif",
+        )
+    return [*preferred, "sans-serif"]
+
+
 def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:
     """Set the plot style according to the specified style.
 
@@ -45,7 +102,7 @@ def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:
                 "legend.edgecolor": "black",
                 "legend.frameon": False,
                 "lines.linewidth": 0.5,
-                "font.family": ["Arial", "sans-serif"],
+                "font.family": _sans_family(),  # Arial if installed, see above
                 "axes.spines.top": True,
                 "axes.spines.right": True,
                 "axes.spines.left": True,
@@ -107,7 +164,7 @@ def create_cluster(
                 **cluster_kwargs,
             )
         case "janelia":
-            from dask_jobqueue import LSFCluster
+            from dask_jobqueue.lsf import LSFCluster
 
             # Janelia allocates memory by slot (15G / slot).
             #

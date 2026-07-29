@@ -1,0 +1,26 @@
+# Buffer-kinetics sweep (replaces buffer_kinetics_sweep.py).
+# The mirror image of buffer_capacity_sweep: ECM_total and Kd are held fixed while the
+# absolute reaction speed scans six decades (kr = ecm_kf * Kd follows, so the
+# equilibrium never moves and only how fast the buffer reaches it changes).
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name buffer_kinetics_sweep
+defaults:
+  - cluster: local    # override on the CLI with cluster=janelia
+  - _self_            # this file's own values win over the group above
+
+result_root: results/buffer-kinetics-sweep
+
+# Non-swept parameters; unlisted fields fall back to the Config defaults in ../simulation.py.
+base:
+  ecm:
+    enabled: true
+    ecm_total: "2.0 mM"
+    ecm_kd: "2.0 mM"   # fixed
+
+# Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
+# values are validated per Config field.
+sweep:
+  # kr = ecm_kf * Kd = 1 / s ... 1e6 / s, the decades the old driver swept.
+  ecm.ecm_kf: ["0.5 / (mM s)", "5 / (mM s)", "50 / (mM s)", "500 / (mM s)",
+               "5e3 / (mM s)", "5e4 / (mM s)", "5e5 / (mM s)"]
+  geometry.ecs_ratio: [0.04, 0.19]
+seeds: 10
