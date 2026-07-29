@@ -5,7 +5,10 @@ from time import sleep
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from dask.distributed import LocalCluster, SpecCluster
+
+from bmbcsim.logging import logger
 
 
 def _silence_heartbeat_shutdown(record: logging.LogRecord) -> bool:
@@ -60,6 +63,26 @@ def timestamped_directory(root: str | Path, name: str) -> Path:
             sleep(1.0)  # the timestamp's resolution: the next attempt gets a new one
 
 
+def _sans_family() -> list[str]:
+    """The lab's font, or the closest thing this machine actually has installed.
+
+    Arial is what the lab style asks for; on Ubuntu it comes from the
+    ttf-mscorefonts-installer package (whose download server is currently dead, hence
+    this fallback). Naming a font that is missing makes matplotlib log "findfont: Font
+    family 'Arial' not found." *once per text object* -- a later entry in the list does
+    not silence it -- so only installed families are named. Liberation Sans is
+    metrically identical to Arial, so figures come out the same size either way.
+    """
+    installed = {font.name for font in font_manager.fontManager.ttflist}
+    preferred = [f for f in ("Arial", "Liberation Sans", "Nimbus Sans") if f in installed]
+    if "Arial" not in installed:
+        logger.warning(
+            "Arial is not installed; falling back to %s.",
+            preferred[0] if preferred else "matplotlib's default sans-serif",
+        )
+    return [*preferred, "sans-serif"]
+
+
 def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:
     """Set the plot style according to the specified style.
 
@@ -79,7 +102,7 @@ def plot_style(style: Literal["default", "pedramlab"]) -> tuple[float, float]:
                 "legend.edgecolor": "black",
                 "legend.frameon": False,
                 "lines.linewidth": 0.5,
-                "font.family": ["Arial", "sans-serif"],
+                "font.family": _sans_family(),  # Arial if installed, see above
                 "axes.spines.top": True,
                 "axes.spines.right": True,
                 "axes.spines.left": True,
@@ -141,7 +164,7 @@ def create_cluster(
                 **cluster_kwargs,
             )
         case "janelia":
-            from dask_jobqueue import LSFCluster
+            from dask_jobqueue.lsf import LSFCluster
 
             # Janelia allocates memory by slot (15G / slot).
             #
