@@ -153,17 +153,18 @@ class ClusterConfig(BaseModel):
 #
 # The terminal handler is Hydra's own (hydra/hydra_logging=default puts a "[HYDRA]"
 # StreamHandler on the *root* logger, which bmbcsim's DEBUG records reach by
-# propagation -- a handler without a level passes everything). Levelling it at INFO
-# keeps the per-step solver chatter ("Reaction converged after N Newton iterations")
-# in the run's simulation.log, whose FileHandler is the one that wants DEBUG, instead
-# of scrolling it past the tqdm progress bar. It needs the "+" (the key does not exist
-# in Hydra's config) and it assumes that default handler, so drop it if you ever
-# select a different hydra/hydra_logging.
+# propagation -- a handler without a level passes everything). Levelling it at WARNING
+# keeps bmbcsim's bookkeeping (per-step solver chatter, the compartment/membrane
+# inventory, DOF counts) in the run's simulation.log, whose FileHandler is the one that
+# wants DEBUG, instead of scrolling it past the tqdm progress bar. Scripts print their
+# own progress, so the terminal only gets that plus anything actually wrong. It needs
+# the "+" (the key does not exist in Hydra's config) and it assumes that default
+# handler, so drop it if you ever select a different hydra/hydra_logging.
 _HYDRA_OUTPUT_OVERRIDES = (
     "hydra.run.dir=.",
     "hydra.output_subdir=null",
     "hydra/job_logging=none",
-    "+hydra.hydra_logging.handlers.console.level=INFO",
+    "+hydra.hydra_logging.handlers.console.level=WARNING",
 )
 
 # Keys a sweep YAML may set; anything else is a typo. Every one has a fallback, so

@@ -45,13 +45,10 @@ class Simulation:
         :param mechanics: Whether to include mechanics in the simulation. If yes,
             compartments must have elasticity parameters set.
         """
-        self.simulation_geometry = SimulationGeometry(mesh)
-
-        self.species: list[ChemicalSpecies] = []
-        self.electrostatics = electrostatics
-        self.mechanics = mechanics
-
-        # Set up result directory and logging
+        # Set up result directory and logging first: SimulationGeometry logs the
+        # compartment/membrane inventory, which is only in the file if the handler
+        # already exists (the console handler is levelled at WARNING, see
+        # bmbcsim.config._HYDRA_OUTPUT_OVERRIDES).
         self.result_directory = os.fspath(result_directory)
         os.makedirs(self.result_directory, exist_ok=True)
 
@@ -60,6 +57,12 @@ class Simulation:
         file_handler.setFormatter(formatter)
         file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
+
+        self.simulation_geometry = SimulationGeometry(mesh)
+
+        self.species: list[ChemicalSpecies] = []
+        self.electrostatics = electrostatics
+        self.mechanics = mechanics
 
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
