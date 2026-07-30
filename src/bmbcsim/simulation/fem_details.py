@@ -544,6 +544,12 @@ class MechanicSolver:
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
 
+        # Elastic energy of an order-one strain over the whole body. Used by
+        # :meth:`step` to say how small a remaining displacement error has to be
+        # to count as converged, in a way that does not shrink to nothing when the
+        # chemical load does.
+        self._energy_scale = ngs.Integrate(mu, mesh)
+
         # Set up bulk term (neo-Hookean elasticity)
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
         trial = self._fes.TrialFunction()
@@ -619,21 +625,46 @@ class MechanicSolver:
         # `self.deformation`, so integrating over an already-deformed mesh would
         # compound the deformation and leave a nonzero residual floor.
         self._mesh.UnsetDeformation()
+        self._load_factor.Set(1.0)
+
+        # Convergence threshold for the whole step, scaled to the *applied load*:
+        # the residual of the undeformed configuration, where the elastic and
+        # spring forces vanish and only the chemical pressure remains. Scaling it
+        # to the residual of whatever Newton starts from instead is self-defeating
+        # -- a warm start is already near equilibrium, and a small load increment
+        # is nearer still, so the threshold shrinks with the very quantity it is
+        # meant to bound. Converged states then get reported as failures and
+        # halving a load increment can never rescue one, since the attainable
+        # residual is floored by round-off and no longer by the load.
+        self._trial[:] = 0.0
+        self._stiffness.Apply(self._trial, self._residual)
+        tol = atol + rtol * np.linalg.norm(self._residual.FV().NumPy())
+
+        # ...and the second criterion, which does not vanish with the load. A
+        # remaining displacement error below `rtol` times the size of the body is
+        # physically meaningless; in the energy norm -- which is what the Newton
+        # decrement measures -- that corresponds to this much energy. Needed
+        # because `tol` above goes to zero with the chemical load, while the noise
+        # it has to beat does not: an unloaded body is in equilibrium at u = 0 for
+        # any deformation the round-off of a 10^5-element assembly can produce, so
+        # a purely load-relative test turns into a coin flip on that noise (and
+        # NGSolve's threaded assembly does not even sum the elements in a
+        # reproducible order). The coin landing badly used to abort the run.
+        min_decrement = rtol ** 2 * self._energy_scale
 
         # Fast path: full load in one solve, warm-started from the previous step.
-        self._load_factor.Set(1.0)
-        if not self._newton_solve(self.deformation.vec, max_newton, atol, rtol):
+        if not self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
             # Fallback: ramp the load 0 -> 1 with adaptive increments. Restart
             # from the undeformed state so each increment begins at a valid
             # (finite-energy) configuration.
             self.deformation.vec[:] = 0.0
-            self._solve_by_load_stepping(max_newton, atol, rtol)
+            self._solve_by_load_stepping(max_newton, tol, min_decrement)
             self._load_factor.Set(1.0)
 
         # Apply the converged deformation to the mesh.
         self._mesh.SetDeformation(self.deformation)
 
-    def _newton_solve(self, u, max_newton, atol, rtol):
+    def _newton_solve(self, u, max_newton, tol, min_decrement):
         """Line-searched Newton solve for elastic equilibrium at the current load.
 
         Minimises the (nonlinear) elastic + spring + chemical-pressure energy by
@@ -643,16 +674,24 @@ class MechanicSolver:
         a valid configuration and never goes singular. A non-descent Newton
         direction (indefinite tangent, past a limit point) is treated as a stall.
 
+        Converged means the residual is below ``tol`` *or* the remaining
+        displacement is negligible (``min_decrement``), whichever comes first;
+        see the two checks below for why both are needed.
+
         :param u: deformation vector; updated in place, must start finite-energy.
-        :returns: True if the force residual is driven below tolerance, False if
-            the solve stalls (which tells the caller to cut the load increment).
+        :param tol: absolute residual threshold, scaled to the applied load by
+            the caller (see :meth:`step`) so that it does not depend on how close
+            to equilibrium this solve happens to start.
+        :param min_decrement: Newton decrement below which the deformation is
+            physically converged regardless of ``tol``; also set by :meth:`step`.
+        :returns: True if either criterion is met, False if the solve stalls
+            (which tells the caller to cut the load increment).
         """
         energy = self._stiffness.Energy(u)
         if not np.isfinite(energy):
             return False
 
         self._stiffness.Apply(u, self._residual)
-        tol = atol + rtol * np.linalg.norm(self._residual.FV().NumPy())
 
         for _ in range(max_newton):
             if np.linalg.norm(self._residual.FV().NumPy()) <= tol:
@@ -671,6 +710,16 @@ class MechanicSolver:
             slope = self._residual.InnerProduct(self._direction)
             if slope <= 0:
                 return False
+
+            # The Newton decrement is (twice) the energy drop this step predicts,
+            # i.e. the displacement still missing, measured in the energy norm.
+            # Once that is negligible, u is the equilibrium for all practical
+            # purposes and the Armijo test below can no longer tell a real
+            # decrease from round-off, so it would reject every trial step. That
+            # is convergence, not a stall; reporting it as a stall is what sent
+            # already-converged steps into load stepping, which cannot do better.
+            if slope <= min_decrement:
+                return True
 
             # Armijo backtracking on the energy, guarding against inverted elements.
             alpha = 1.0
@@ -693,7 +742,7 @@ class MechanicSolver:
         # Exhausted Newton iterations; converged only if the residual is small.
         return np.linalg.norm(self._residual.FV().NumPy()) <= tol
 
-    def _solve_by_load_stepping(self, max_newton, atol, rtol):
+    def _solve_by_load_stepping(self, max_newton, tol, min_decrement):
         """Apply the chemical load incrementally with adaptive step sizing.
 
         Each increment advances ``self._load_factor`` toward 1 and re-solves to
@@ -710,7 +759,7 @@ class MechanicSolver:
         while load < 1.0 - _LOAD_EPS:
             trial_load = min(load + increment, 1.0)
             self._load_factor.Set(trial_load)
-            if self._newton_solve(self.deformation.vec, max_newton, atol, rtol):
+            if self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
                 load = trial_load
                 u_safe.data = self.deformation.vec
                 increment = min(increment * 1.5, 1.0 - load)
@@ -750,7 +799,14 @@ class MechanicSolver:
 
 
 def neo_hooke(f, mu, lam):
-    """Neo-Hookean material model.
+    """Neo-Hookean material model, normalised to vanish in the reference state.
+
+    Both terms are written to be zero at F = I, so the stored energy of an
+    undeformed body is 0 rather than an arbitrary offset ``mu * (mu/lam - 1)``
+    per unit volume. That offset changes no force -- it is constant in the
+    deformation -- but it dominates the value of ``BilinearForm.Energy`` by
+    orders of magnitude, and the Newton solve compares energies (Armijo line
+    search, round-off convergence check) against exactly that value.
 
     :param f: Deformation gradient tensor (F = I + grad(u)).
     :param mu: Shear modulus (first Lamé parameter).
@@ -759,6 +815,5 @@ def neo_hooke(f, mu, lam):
     det_f = ngs.Det(f)
     return mu * (
         0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
-        + mu / lam * det_f ** (-lam / mu)
-        - 1
+        + mu / lam * (det_f ** (-lam / mu) - 1)
     )

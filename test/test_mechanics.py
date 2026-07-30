@@ -9,6 +9,7 @@ import xarray as xr
 import bmbcsim
 from bmbcsim.units import mM
 from bmbcsim.simulation import transport
+from bmbcsim.simulation.fem_details import MechanicSolver, neo_hooke
 
 
 def create_box_mesh():
@@ -18,6 +19,20 @@ def create_box_mesh():
     box.faces[0].bc("influx")
     geo = occ.OCCGeometry(box)
     return ngs.Mesh(geo.GenerateMesh(maxh=0.2))
+
+
+def test_neo_hooke_vanishes_in_reference_state():
+    """The stored energy density must be 0 at F = I, not an arbitrary offset.
+
+    The offset cancels out of every force, so it is invisible in the solution --
+    but it inflates the magnitude of the energy the Newton line search compares
+    against, and with it the round-off of that comparison. Left in, it swamped
+    the real energy decrease on fine meshes and stalled the solve.
+    """
+    mesh = create_box_mesh()
+    for mu, lam in [(1.0, 1.5), (385.0, 1430.0), (0.01, 0.007)]:
+        density = neo_hooke(ngs.Id(3), ngs.CF(mu), ngs.CF(lam))
+        assert abs(ngs.Integrate(density, mesh)) < 1e-12 * max(mu, lam)
 
 
 def test_mechanics_solver_setup(tmp_path):
@@ -110,6 +125,41 @@ def test_mechanics_with_driving_species(tmp_path):
     # Final concentration should be higher due to volume contraction
     # (chemical pressure drives contraction, concentration increases to conserve mass)
     assert ca_values.isel(time=-1) == pytest.approx(1.089, rel=1e-2)
+
+
+def test_mechanics_takes_fast_path_when_warm_started(tmp_path, monkeypatch):
+    """A step warm-started at equilibrium must converge without load stepping.
+
+    Regression guard for a Newton threshold scaled to the residual the solve
+    happens to start from: a warm start is already near equilibrium, so the
+    threshold shrank along with the thing it was meant to bound, converged states
+    were reported as failures, and every step paid for the load-stepping
+    fallback. Load stepping could not rescue them either -- a smaller increment
+    tightens the threshold in exactly the same way -- so this eventually
+    surfaced as a spurious "no stable equilibrium exists" on stiffer meshes.
+    """
+    fallbacks = []
+    fall_back = MechanicSolver._solve_by_load_stepping
+
+    def counted(self, *args):
+        fallbacks.append(len(fallbacks))
+        return fall_back(self, *args)
+
+    monkeypatch.setattr(MechanicSolver, "_solve_by_load_stepping", counted)
+
+    mesh = create_box_mesh()
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
+
+    cell = simulation.simulation_geometry.compartments["cell"]
+    ca = simulation.add_species("ca")
+    cell.initialize_species(ca, 1.0 * mM)
+    cell.add_diffusion(ca, 0.1 * u.um**2 / u.ms)
+    cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
+    cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
+
+    simulation.run(end_time=1 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
+
+    assert not fallbacks, f"load stepping was triggered on {len(fallbacks)} steps"
 
 
 def test_mechanics_with_dynamic_species(tmp_path):
