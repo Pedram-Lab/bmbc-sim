@@ -12,10 +12,19 @@ For every shared (seed, synapse_idx) we form the trace
 
 at the synapse's nearest ECS vertex (via analysis.compute_local_ca, whose
 synapse ordering matches across sweeps). Pairs where either trace dips negative
-anywhere (solver undershoot in the tightest synapses) are dropped outright. Pooling
-over the surviving synapses and seeds, we plot the mean (solid) and median (dashed)
-difference with the CENTILE..(100-CENTILE)% range shaded, plus a faint subsample of
-the individual difference traces.
+anywhere (solver undershoot in the tightest synapses) are dropped outright. Two plot modes (``--plot``):
+
+* ``trace`` (default): pooling over the surviving synapses and seeds, the mean (solid)
+  and median (dashed) difference with the CENTILE..(100-CENTILE)% range shaded, plus a
+  faint subsample of the individual difference traces.
+
+* ``vs-ecs``: one point per synapse -- its peak difference (the signed d[Ca] at the
+  time of largest |d[Ca]|) against how much local ECS that synapse GAINED between the
+  two runs, d_vfrac = vfrac_HIGH - vfrac_LOW, where vfrac is the local ECS volume
+  fraction at radius RADIUS (``v_local_r<R> / v_sphere_box_r<R>`` from
+  ``<sweep>/spatial_metrics.csv``, written by evaluate_synapse_distribution_spatial.py;
+  both sweeps need that CSV with RADIUS among its --radii). A binned median over
+  deciles of d_vfrac is drawn on top.
 """
 
 import argparse
@@ -25,10 +34,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from analysis import compute_local_ca
 from evaluate_synapse_distribution_spatial import find_seed_dirs
+from visualize_by_regime import _vfrac
 
 # ============ Configuration ============
 # (sweep dir, label). HIGH - LOW is the plotted difference; the suffix in each dir
@@ -39,7 +50,12 @@ SPECIES_NAME = "Ca"
 CENTILE = 5                  # shaded band is CENTILE..(100-CENTILE)%
 SHOW_INDIVIDUAL = True       # overlay a faint subsample of per-synapse traces
 MAX_INDIVIDUAL = 400         # cap on how many individual traces to draw
-OUT_PATH = "results/ca_difference_by_synapse.png"
+RADIUS = 0.4                 # um; selects the v_local_r<R>/v_sphere_box_r<R> columns
+N_BINS = 10                  # quantile bins for the binned median (vs-ecs)
+OUT_PATHS = {                # default output per --plot mode
+    "trace": "results/ca_difference_by_synapse.png",
+    "vs-ecs": "results/ca_difference_vs_ecs_volume.png",
+}
 SHOW = True
 # =======================================
 
@@ -138,7 +154,72 @@ def plot_differences(times, diffs, low_label, high_label, ax):
     ax.grid(True, alpha=0.3)
 
 
-def main(out_path, show):
+def peak_differences(times, diffs):
+    """Per-synapse signed d[Ca] at its own time of largest |d[Ca]|, and that time."""
+    t_idx = np.nanargmax(np.abs(diffs), axis=0)
+    return diffs[t_idx, np.arange(diffs.shape[1])], times[t_idx]
+
+
+def load_vfrac(sweep, pair_seeds, pair_synapse_idx):
+    """Local ECS volume fraction at RADIUS for each (seed, synapse_idx) pair.
+
+    Missing pairs (seeds the spatial evaluation skipped or never covered) come back
+    as NaN, so the caller can just drop them.
+    """
+    csv_path = os.path.join(sweep, "spatial_metrics.csv")
+    if not os.path.isfile(csv_path):
+        raise SystemExit(
+            f"Error: '{csv_path}' not found. Run\n"
+            f"  uv run python evaluate_synapse_distribution_spatial.py {sweep} "
+            f"--radii {RADIUS:g}\nfirst.")
+    df = pd.read_csv(csv_path)
+    df["vfrac"] = _vfrac(df, RADIUS)
+    lookup = df.set_index(["seed", "synapse_idx"])["vfrac"]
+    lookup = lookup[~lookup.index.duplicated()]
+    return lookup.reindex(pd.MultiIndex.from_arrays(
+        [pair_seeds, pair_synapse_idx])).to_numpy()
+
+
+def plot_peak_vs_vfrac(times, diffs, pair_seeds, pair_synapse_idx,
+                       low_label, high_label, ax):
+    peaks, peak_times = peak_differences(times, diffs)
+    # x axis is the per-synapse GAIN in local ECS between the two runs, not either
+    # run's fraction on its own.
+    vfrac = (load_vfrac(HIGH[0], pair_seeds, pair_synapse_idx)
+             - load_vfrac(LOW[0], pair_seeds, pair_synapse_idx))
+
+    keep = np.isfinite(vfrac) & np.isfinite(peaks)
+    print(f"{keep.sum()} of {len(peaks)} synapse pairs have a finite r={RADIUS:g} "
+          f"fraction in both sweeps")
+    if keep.sum() < 2:
+        raise SystemExit("Not enough synapses with a local ECS fraction to plot.")
+    vfrac, peaks, peak_times = vfrac[keep], peaks[keep], peak_times[keep]
+
+    color = plt.cm.tab10.colors[0]
+    ax.axhline(0.0, color="black", linewidth=0.8, linestyle=":")
+    ax.axvline(0.0, color="black", linewidth=0.8, linestyle=":")
+    ax.scatter(vfrac, peaks, s=8, alpha=0.3, color=color, edgecolors="none")
+
+    # Binned median over quantile bins of the fraction (equal counts per bin).
+    edges = np.nanquantile(vfrac, np.linspace(0, 1, N_BINS + 1))
+    edges = np.unique(edges)
+    bin_idx = np.clip(np.digitize(vfrac, edges[1:-1]), 0, len(edges) - 2)
+    centers = np.array([np.median(vfrac[bin_idx == b]) for b in range(len(edges) - 1)])
+    medians = np.array([np.median(peaks[bin_idx == b]) for b in range(len(edges) - 1)])
+    ax.plot(centers, medians, "o-", color="black", linewidth=2, markersize=5,
+            label=f"binned median ({N_BINS} quantile bins)")
+
+    ax.set_xlabel(f"Local ECS volume fraction gain at r={RADIUS:g} um: "
+                  f"{high_label} - {low_label}")
+    ax.set_ylabel(f"Peak d[{SPECIES_NAME}] = [{high_label}] - [{low_label}] (mM)")
+    ax.set_title(
+        f"Per-synapse peak local [{SPECIES_NAME}] difference vs local ECS gain "
+        f"(n={len(peaks)}, peak at t={np.median(peak_times):.0f} ms median)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+
+def main(plot_kind, out_path, show):
     low_sweep, low_label = LOW
     high_sweep, high_label = HIGH
     times, diffs, pair_seeds, pair_synapse_idx = collect_differences(low_sweep, high_sweep)
@@ -153,7 +234,11 @@ def main(out_path, show):
               f"seed={pair_seeds[pair_idx]}, synapse_idx={pair_synapse_idx[pair_idx]}")
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    plot_differences(times, diffs, low_label, high_label, ax)
+    if plot_kind == "trace":
+        plot_differences(times, diffs, low_label, high_label, ax)
+    else:
+        plot_peak_vs_vfrac(times, diffs, pair_seeds, pair_synapse_idx,
+                           low_label, high_label, ax)
     plt.tight_layout()
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -166,7 +251,10 @@ def main(out_path, show):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", default=OUT_PATH, help="Output PNG path.")
+    parser.add_argument("--plot", choices=list(OUT_PATHS), default="trace",
+                        help="Which analysis to plot (default: trace).")
+    parser.add_argument("--out", default=None,
+                        help="Output PNG path (default: per-mode entry in OUT_PATHS).")
     parser.add_argument("--no-show", action="store_true",
                         help="Save the figure without opening a window.")
     return parser.parse_args()
@@ -174,4 +262,4 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.out, SHOW and not args.no_show)
+    main(args.plot, args.out or OUT_PATHS[args.plot], SHOW and not args.no_show)

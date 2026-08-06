@@ -1,11 +1,10 @@
-# The unbuffered baseline, i.e. the counterpart of buffer.yaml: free diffusion from
-# the source face, which evaluate.py fits the reference diffusivity from. This is the
-# Config default spelled out; running it is the same as running simulation.py with no
-# --config-name, results/<timestamp>_buffered_diffusion_nobuffer.
+# Free diffusion from the source face, no buffer: the reference evaluate.py scales
+# every other scenario by. This is the Config default spelled out; running it is the
+# same as running simulation.py with no --config-name,
+# results/<timestamp>_buffered_diffusion_nobuffer.
 # Run: uv run scripts/ongoing_work/buffered_diffusion/simulation.py --config-name nobuffer
 defaults:
   - buffered_diffusion
   - _self_
 
-buffer:
-  enabled: false
+scenario: nobuffer
