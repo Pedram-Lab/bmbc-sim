@@ -173,63 +173,69 @@ class Simulation:
             )
 
             t = start_time.copy()
-            for _ in trange(n_steps):
-                # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
+            try:
+                for _ in trange(n_steps):
+                    # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
 
-                # 1. Mechanics — deform mesh before geometry-dependent steps
-                if self.mechanics:
-                    self._mechanics.step()
-                    self._mechanics.adjust_concentrations(self._concentrations)
-                    self.simulation_geometry.update_measures()
+                    # 1. Mechanics — deform mesh before geometry-dependent steps
+                    if self.mechanics:
+                        self._mechanics.step()
+                        self._mechanics.adjust_concentrations(self._concentrations)
+                        self.simulation_geometry.update_measures()
 
-                # Reassemble diffusion operators once per timestep (after mesh deformation)
-                for solver in self._diffusion.values():
-                    solver.prepare()
+                    # Reassemble diffusion operators once per timestep (after mesh deformation)
+                    for solver in self._diffusion.values():
+                        solver.prepare()
 
-                # 2. Diffusion half-step (implicit, with drift)
-                for species, c in self._concentrations.items():
-                    self._diffusion[species].diffusion_half_step(c)
+                    # 2. Diffusion half-step (implicit, with drift)
+                    for species, c in self._concentrations.items():
+                        self._diffusion[species].diffusion_half_step(c)
 
-                # 3. Electrostatics (if applicable)
-                if self.electrostatics:
-                    self._pnp.step()
+                    # 3. Electrostatics (if applicable)
+                    if self.electrostatics:
+                        self._pnp.step()
 
-                # 4. Reactions (implicit Newton)
-                old_concentrations = np.stack(
-                    [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
-                )
-                new_concentrations, n_iter, is_converged = self._reaction.newton_step(
-                    old_concentrations,
-                    max_newton_iterations,
-                    newton_tol
-                )
-                for i, c in enumerate(self._concentrations.values()):
-                    c.vec.FV().NumPy()[:] = new_concentrations[i]
-
-                if is_converged:
-                    logger.debug("Reaction converged after %d Newton iterations.", n_iter)
-                else:
-                    logger.warning(
-                        "Reaction did not converge after %d Newton iterations. "
-                        "Consider increasing the number of iterations or decreasing the time step.",
-                        max_newton_iterations,
+                    # 4. Reactions (implicit Newton)
+                    old_concentrations = np.stack(
+                        [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
                     )
+                    new_concentrations, n_iter, is_converged = self._reaction.newton_step(
+                        old_concentrations,
+                        max_newton_iterations,
+                        newton_tol
+                    )
+                    for i, c in enumerate(self._concentrations.values()):
+                        c.vec.FV().NumPy()[:] = new_concentrations[i]
 
-                # 5. Transport (explicit membrane transport)
-                for membrane in self.simulation_geometry.membranes.values():
-                    for _, _, _, transport in membrane.get_transport():
-                        transport.update_flux(t)
-                for species, c in self._concentrations.items():
-                    self._diffusion[species].transport_step(c)
+                    if is_converged:
+                        logger.debug("Reaction converged after %d Newton iterations.", n_iter)
+                    else:
+                        logger.warning(
+                            "Reaction did not converge after %d Newton iterations. "
+                            "Consider increasing the number of iterations or decreasing the time step.",
+                            max_newton_iterations,
+                        )
 
-                # 6. Diffusion half-step (implicit, with drift)
-                for species, c in self._concentrations.items():
-                    self._diffusion[species].diffusion_half_step(c)
+                    # 5. Transport (explicit membrane transport)
+                    for membrane in self.simulation_geometry.membranes.values():
+                        for _, _, _, transport in membrane.get_transport():
+                            transport.update_flux(t)
+                    for species, c in self._concentrations.items():
+                        self._diffusion[species].transport_step(c)
 
-                t += time_step
-                recorder.record(current_time=t)
+                    # 6. Diffusion half-step (implicit, with drift)
+                    for species, c in self._concentrations.items():
+                        self._diffusion[species].diffusion_half_step(c)
 
-            recorder.finalize(end_time=t)
+                    t += time_step
+                    recorder.record(current_time=t)
+            finally:
+                # Always close out the recording. Every recorded frame is already
+                # in the HDF5 file, but the time dataset is only written here, and
+                # without it the results cannot be opened at all. A solver that
+                # gives up hours into a run should not also throw away everything
+                # computed up to that point.
+                recorder.finalize(end_time=t)
 
 
     def _setup(self, dt) -> None:

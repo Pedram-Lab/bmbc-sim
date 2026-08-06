@@ -768,10 +768,10 @@ class MechanicSolver:
                 increment *= 0.5
                 if increment < _MIN_LOAD_INCREMENT:
                     raise RuntimeError(
-                        "Mechanics solver failed to converge even with load "
-                        f"stepping (stalled at load factor {load:.4g}). This "
-                        "usually means no stable equilibrium exists at the "
-                        "requested coupling strength."
+                        "No elastic equilibrium exists at the current chemical "
+                        f"load: the largest sustainable fraction of it is {load:.4g}"
+                        + (f", so the coupling is ~{1 / load:.3g}x too strong."
+                           if load > 0 else ".")
                     )
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
