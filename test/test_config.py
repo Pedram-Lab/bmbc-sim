@@ -122,3 +122,23 @@ def test_run_name_takes_the_postfix_from_the_config_or_the_parameters():
     # An explicit postfix (from a config YAML) wins over the derived one, so a
     # config can always name its own run.
     assert _Variant(postfix="quick").run_name == "demo_quick"
+
+
+def test_janelia_job_script_has_a_project_and_no_memory_directive(tmp_path):
+    """Janelia's LSF rejects a job without "-P" (bsub exits 255, stderr swallowed
+    by dask-jobqueue) and allocates memory by slot, so "-M" must not be emitted.
+    """
+    from bmbcsim.utils import create_cluster
+
+    # n_workers=0: build the job script, submit nothing (no LSF needed here).
+    cluster = create_cluster(
+        "janelia", n_workers=0, n_threads_per_worker=4, log_directory=str(tmp_path)
+    )
+    try:
+        script = cluster.job_script()
+    finally:
+        cluster.close()
+
+    assert '#BSUB -P "pedram"' in script
+    assert "#BSUB -M" not in script
+    assert "#BSUB -n 4" in script  # slots are what actually reserve the memory

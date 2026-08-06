@@ -184,7 +184,9 @@ _CLUSTER_PRESETS: dict[str, dict[str, Any]] = {
     "local": {},  # in-process; run_sweep gives it one worker process per job
     "janelia": {
         "backend": "janelia",
-        "n_workers": 20,  # cap on concurrent LSF jobs
+        # n_workers stays None: one LSF job per run, so the whole sweep is
+        # submitted at once and LSF's own scheduling decides how many run
+        # concurrently. Set it to cap the number of jobs in flight.
         "extra": {"walltime": "04:00"},  # create_cluster defaults to 01:00
     },
 }

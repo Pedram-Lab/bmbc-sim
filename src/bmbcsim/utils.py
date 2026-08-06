@@ -166,22 +166,32 @@ def create_cluster(
         case "janelia":
             from dask_jobqueue.lsf import LSFCluster
 
-            # Janelia allocates memory by slot (15G / slot).
+            # Janelia allocates memory by slot (15G / slot), so the number of
+            # slots (``ncpus``, LSF ``-n``) is the *only* thing that reserves
+            # memory: an explicit "#BSUB -M" is ignored by the scheduler, and
+            # emitting one just risks bsub rejecting the job. ``memory`` still
+            # has to be passed -- dask-jobqueue requires it -- but it is used
+            # only for Dask's own per-worker accounting (``--memory-limit``),
+            # so it states what the slots give us.
             #
             # ``cores`` is what Dask turns into ``--nthreads`` (= task slots per
             # worker), so it must be 1: one simulation per LSF job. The cores
-            # and memory the simulation actually needs are reserved separately
-            # via ``ncpus`` (LSF ``-n``) and ``memory`` (LSF ``-M``); NGSolve's
+            # the simulation actually needs are reserved via ``ncpus``; NGSolve's
             # internal threads then run on those reserved cores. Setting
             # ``cores=n_threads_per_worker`` instead would pack that many
             # simulations into a single worker process and exhaust the job's
             # memory reservation.
             defaults: dict[str, Any] = {
                 "queue": "local",
+                # Billing project ("#BSUB -P"). Janelia's LSF rejects jobs
+                # without one -- bsub exits 255 and dask-jobqueue discards its
+                # stderr, so the only symptom is every worker failing to start.
+                "project": "pedram",
                 "cores": 1,
                 "processes": 1,
                 "ncpus": n_threads_per_worker,
                 "memory": f"{15 * n_threads_per_worker}GB",
+                "job_directives_skip": ["#BSUB -M"],
                 # dask-jobqueue's LSFCluster default is 30 min, which is too
                 # short for our NGSolve sweeps and silently produces partial
                 # snapshot.h5 files (no data/time) when LSF kills the worker.
