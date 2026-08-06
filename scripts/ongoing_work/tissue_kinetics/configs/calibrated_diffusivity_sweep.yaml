@@ -1,0 +1,45 @@
+# Calibrated-diffusivity sweep.
+# ECM buffer on; scan the free ECS diffusivities that make the *buffered* front advance
+# like unbuffered diffusion at 0.7 um2 / ms, as measured by
+# scripts/ongoing_work/buffered_diffusion/invert_diffusivity.py. One value per buffer
+# state that script can invert, plus 0.7 itself (the Config default baseline, i.e. the
+# uncalibrated buffered run):
+#
+#   0.7000  baseline      -- no calibration; the buffer slows this one down
+#   0.9312  saturated     -- buffer half-bound at Kd, Ca flowing in
+#   1.0435  replenishment -- buffer half-bound at Kd, Ca drawn out: matches this sim
+#                            (ECS starts at ca_ecs in equilibrium, synapses drain it)
+#   1.5283  depleted      -- buffer starts fully unbound, Ca flowing in
+#
+# CAVEAT: the inversion ran at Kd = 1.3 mM (invert_diffusivity.py's TISSUE_KD), while
+# ecm.ecm_kd is left at its Config default of 10 mM here, so the buffer in this sweep
+# has less bound Ca and more free capacity than the one those numbers were fitted to.
+# Re-run the inversion with --scenario replenishment and TISSUE_KD = "10.0 mM" if the
+# calibration is meant to be exact.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name calibrated_diffusivity_sweep
+defaults:
+  - cluster: janelia    # override on the CLI with cluster=local
+  - _self_              # this file's own values win over the group above
+
+result_root: results/calibrated-diffusivity-sweep
+
+# LSF: one simulation per job, 4 cores each, all 80 submitted at once (LSF decides how
+# many run at a time). Add "n_workers: 20" to cap the jobs in flight instead.
+cluster:
+  n_threads_per_worker: 4
+  extra:
+    walltime: "04:00"
+
+# Non-swept parameters; unlisted fields fall back to the Config defaults in
+# ../simulation.py. Only the buffer is switched on -- its kd/kf/total are the defaults,
+# deliberately untouched (see the caveat above).
+base:
+  ecm:
+    enabled: true
+
+# Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
+# values are validated per Config field.
+sweep:
+  diffusion.diffusivity_ecs: ["0.7 um2 / ms", "0.9312 um2 / ms", "1.0435 um2 / ms", "1.5283 um2 / ms"]
+  geometry.ecs_ratio: [0.04, 0.19]
+seeds: 10
