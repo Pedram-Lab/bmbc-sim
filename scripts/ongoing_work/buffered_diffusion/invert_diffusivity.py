@@ -1,13 +1,15 @@
 """Invert the buffered-diffusion forward model.
 
-``simulation.run(Config(buffer={"enabled": True}, diffusivity=D, ...))`` produces a
-front that ``evaluate.py`` fits to an *effective* diffusivity D_eff(D). There
+``simulation.run(Config(scenario=..., diffusivity=D, ...))`` produces a front that
+``evaluate.py`` fits to an *effective* diffusivity D_eff(D). There
 is no closed form for D_eff here -- it's measured from the simulated front,
 not a rapid-buffering-approximation formula -- so we treat the pipeline as a
 black-box forward map and invert it with a bracketed line search:
 D_eff(D) only increases with D (more free diffusivity never slows the
 front), so ``scipy.optimize.brentq`` on ``residual(D) = D_eff(D) - target``
-converges reliably.
+converges reliably. Any of the buffered scenarios can be inverted (``--scenario``);
+buffering slows the front in all of them, uptake and release alike, so the
+bracketing below holds regardless.
 
 Each evaluation of D_eff(D) is a full FEM simulation, so this is slow --
 expect on the order of ten simulation runs (bracket expansion plus
@@ -17,9 +19,11 @@ This is meant to calibrate ``scripts/ongoing_work/tissue_kinetics/simulation.py`
 run it once with ``ecm.enabled=false`` (pure diffusion, diffusivity_ecs=
 TISSUE_DIFFUSIVITY_ECS) and once with ``ecm.enabled=true`` using the diffusivity
 this script returns, so the buffered run's *effective* ECS diffusivity
-matches the unbuffered baseline. The buffer/reservoir parameters below are
-copied from that script's defaults so the calibration reaction matches; both
-configs are parametrized by (kf, Kd), so they transfer directly.
+matches the unbuffered baseline. Both configs are parametrized by (kf, Kd), so the
+buffer/reservoir parameters below transfer directly -- but check them against the
+tissue config you actually intend to calibrate, since they are constants here and
+that script's ECM group has since moved (its Config default is Kd = 10 mM, and the
+contraction sweeps run kf = 769.23 / (mM s)).
 """
 import argparse
 
@@ -28,9 +32,16 @@ import numpy as np
 from scipy.optimize import brentq
 
 import evaluate
+from bmbcsim.units import to_simulation_units
 from simulation import Config, run
 
 RESULT_ROOT = "results"
+# The tissue sim starts its ECS at ca_ecs with the ECM in equilibrium against it, and
+# its synapses are Ca sinks (transport ecs -> cell), so the disturbance that travels
+# through the ECS is a depletion wave off an equilibrated baseline: "replenishment".
+# The other scenarios invert the same way, but their result only transfers to a tissue
+# run that starts from the same buffer state and drives it in the same direction.
+DEFAULT_SCENARIO = "replenishment"
 
 # Mirrors scripts/ongoing_work/tissue_kinetics/simulation.py's defaults.
 TISSUE_DIFFUSIVITY_ECS = 0.7  # um^2/ms, the "diffusion only" baseline to match
@@ -40,26 +51,34 @@ TISSUE_KD = "1.3 mM"
 TISSUE_ECM_KF = "10.0 / (mM s)"
 
 
-def measure_d_eff(diffusivity, *, result_root=RESULT_ROOT, **overrides):
+def measure_d_eff(diffusivity, *, scenario=DEFAULT_SCENARIO, result_root=RESULT_ROOT,
+                  **overrides):
     """Run the buffered simulation at `diffusivity` (um^2/ms) and return the
     measured effective diffusivity (um^2/ms), using evaluate.py's own fit.
 
+    :param scenario: Which buffered scenario to invert; see ``simulation.Config``.
     :param overrides: Extra ``Config`` fields, e.g. ``end_time`` or ``box``.
     """
-    run(Config(
+    cfg = Config(
         result_root=result_root,
+        scenario=scenario,
         ca_source=TISSUE_CA_ECS,
         diffusivity=diffusivity * u.um**2 / u.ms,
         buffer={
-            "enabled": True,
             "ecm_total": TISSUE_ECM_TOTAL,
             "ecm_kf": TISSUE_ECM_KF,
             "kd": TISSUE_KD,
         },
         **overrides,
-    ))
+    )
+    run(cfg)
     evaluate.RESULT_ROOT = result_root
-    d_eff = evaluate.analyze_run("buffered_diffusion_buffer")["d_eff"]
+    # The front is measured against the scenario's initial [Ca], not against 0: the
+    # equilibrated scenarios start at Kd, where a threshold on [Ca] itself finds no
+    # front at all and the fit below would fail.
+    d_eff = evaluate.analyze_run(
+        cfg.run_name, to_simulation_units(cfg.initial_ca)
+    )["d_eff"]
     if not np.isfinite(d_eff):
         raise RuntimeError(
             f"Could not fit D_eff at diffusivity={diffusivity:.4g} um^2/ms: "
@@ -68,14 +87,16 @@ def measure_d_eff(diffusivity, *, result_root=RESULT_ROOT, **overrides):
     return d_eff
 
 
-def find_diffusivity(target_d_eff, *, result_root=RESULT_ROOT, xtol=1e-3, **overrides):
+def find_diffusivity(target_d_eff, *, scenario=DEFAULT_SCENARIO, result_root=RESULT_ROOT,
+                     xtol=1e-3, **overrides):
     """Line search: return the free diffusivity whose measured D_eff matches
     `target_d_eff` (um^2/ms), to within `xtol`."""
     cache = {}
 
     def residual(d):
         if d not in cache:
-            cache[d] = measure_d_eff(d, result_root=result_root, **overrides)
+            cache[d] = measure_d_eff(d, scenario=scenario, result_root=result_root,
+                                     **overrides)
             print(f"  D={d:.4f} um^2/ms  ->  D_eff={cache[d]:.4f} um^2/ms")
         return cache[d] - target_d_eff
 
@@ -104,6 +125,14 @@ if __name__ == "__main__":
         help=f"target effective diffusivity, um^2/ms (default: {TISSUE_DIFFUSIVITY_ECS}, "
              "tissue_kinetics's no-ECM diffusivity_ecs)",
     )
+    # "nobuffer" is not offered: with no buffer to compensate for, D_eff == D and the
+    # inversion is the identity.
+    parser.add_argument(
+        "--scenario", default=DEFAULT_SCENARIO,
+        choices=["depleted", "saturated", "replenishment"],
+        help=f"buffered scenario to invert (default: {DEFAULT_SCENARIO}, the one that "
+             "matches tissue_kinetics: an equilibrated ECS drained by its synapses)",
+    )
     parser.add_argument("--xtol", type=float, default=1e-3, help="um^2/ms")
     parser.add_argument("--result-root", default=RESULT_ROOT)
     parser.add_argument("--mesh-size", type=float, default=None, help="um; coarser = faster search")
@@ -119,4 +148,5 @@ if __name__ == "__main__":
     if args.n_threads is not None:
         overrides["n_threads"] = args.n_threads
 
-    find_diffusivity(args.target_d_eff, result_root=args.result_root, xtol=args.xtol, **overrides)
+    find_diffusivity(args.target_d_eff, scenario=args.scenario,
+                     result_root=args.result_root, xtol=args.xtol, **overrides)
