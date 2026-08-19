@@ -498,8 +498,8 @@ class PnpSolver:
 # Globalization parameters for the mechanics Newton solve.
 _ARMIJO_C1 = 1e-4           # sufficient-decrease constant for the line search
 _MAX_BACKTRACK = 30         # max line-search halvings before declaring no progress
-_MIN_LOAD_INCREMENT = 1e-3  # smallest load fraction before load stepping gives up
-_MIN_SWELLING = 1e-3        # floor on the target volume ratio J_g (see __init__)
+_MIN_LOAD_INCREMENT = 1e-3  # below this, conclude the mesh cannot represent the swell
+_MIN_SWELLING = 1e-3        # floor on the target volume ratio J_g
 _LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
 
 
@@ -545,25 +545,20 @@ class MechanicSolver:
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
 
-        # Elastic energy of an order-one strain over the whole body. Used by
-        # :meth:`step` to say how small a remaining displacement error has to be
-        # to count as converged, in a way that does not shrink to nothing when the
-        # chemical load does.
+        # Elastic energy of an order-one strain over the whole body; sets the
+        # load-independent convergence floor in :meth:`step`.
         self._energy_scale = ngs.Integrate(mu, mesh)
 
-        # Chemical swelling: the driving species sets the *stress-free* volume the
-        # material wants locally, J_g, rather than applying a pressure to it. This
-        # is what makes the solve unconditionally solvable. A pressure term
-        # `p * det(F)` is a dead load -- its energy falls linearly in J while the
-        # strain energy only grows like J^(2/3), so above |p| ~ 0.64 mu the total
-        # energy has no stationary point at all and no amount of load stepping
-        # finds one (a limit point, not a numerical failure). Rescaling the
-        # reference state keeps the energy coercive for *any* J_g: it still tends
-        # to +infinity as J -> 0 and as J -> infinity, so a minimiser always exists.
+        # Chemical swelling: the driving species sets the local stress-free
+        # volume J_g rather than applying a pressure. This is what makes the
+        # problem unconditionally solvable -- a pressure term `p * det(F)` is a
+        # dead load whose energy falls linearly in J while the strain energy
+        # grows only like J^(2/3), so beyond |p| ~ 0.64 mu no stationary point
+        # exists. Rescaling the reference state instead keeps the energy coercive
+        # (it tends to +infinity as J -> 0 and as J -> infinity) for every J_g.
         #
-        # The load factor (a runtime-adjustable Parameter) interpolates J_g from 1
-        # to its target so `step()` can approach a large swell incrementally; it is
-        # kept at 1 for a normal full-load solve.
+        # `_load_factor` interpolates J_g from 1 to its target so :meth:`step` can
+        # reach a large swell incrementally; it stays at 1 for a full-load solve.
         self._load_factor = ngs.Parameter(1.0)
         swelling = {}
         for i, compartment in enumerate(compartments):
@@ -572,17 +567,15 @@ class MechanicSolver:
                 species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
                 target = 1 + self._load_factor * strength * (concentration - baseline)
-                # J_g <= 0 is not a volume. Only reachable by a coupling strong
-                # enough to demand total collapse, where the model has stopped
-                # meaning anything -- but it would produce NaN rather than say so.
+                # J_g <= 0 is not a volume; unclamped it yields NaN rather than
+                # any diagnosable failure.
                 target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
                 for full_name in compartment.get_region_names(full_names=True):
                     swelling[full_name] = target
         growth = mesh.MaterialCF(swelling, default=1)
 
-        # Set up bulk term (neo-Hookean elasticity on the elastic part of F).
-        # F = F_e F_g with F_g = J_g^(1/3) I, and the energy density is per unit
-        # *grown* volume, hence the J_g factor in front.
+        # Neo-Hookean energy of the elastic part of F: F = F_e F_g with
+        # F_g = J_g^(1/3) I. The density is per unit *grown* volume, hence the J_g.
         self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
         trial = self._fes.TrialFunction()
         deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
@@ -599,10 +592,10 @@ class MechanicSolver:
             mu_bnd = ngs.BoundaryFromVolumeCF(mu)
             n = ngs.specialcf.normal(3)
             normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
-            # Tangential part is the projection off the normal. Do NOT use
-            # specialcf.tangential(3): that is an edge (codim-2) quantity and
-            # evaluates to exactly zero on the facets of a 3D mesh, which
-            # silently removes the shear resistance of the embedding.
+            # Tangential part as the projection off the normal. Not
+            # specialcf.tangential(3): that is an edge (codim-2) quantity, exactly
+            # zero on the facets of a 3D mesh, which would silently drop all shear
+            # resistance of the embedding.
             tangential = ngs.InnerProduct(trial, trial) - ngs.InnerProduct(trial, n) ** 2
             tangent_springs = (mu_bnd / (2 * characteristic_length)) * tangential
             for boundary_name in exterior_boundaries:
@@ -628,54 +621,41 @@ class MechanicSolver:
         self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
 
     def step(self, max_newton=50, atol=1e-12, rtol=1e-8):
-        """Solve the nonlinear elastic equilibrium under the current chemical load.
+        """Solve for elastic equilibrium under the current swelling.
 
-        Uses a line-searched Newton solve (:meth:`_newton_solve`). If the full
-        chemical-pressure load cannot be applied in a single solve -- the classic
-        failure being a Newton overshoot that inverts an element and makes the
-        tangent singular -- the load is instead applied incrementally with
-        adaptive step sizing, re-solving to equilibrium at each increment. The
-        increment is driven by ``self._load_factor``, which scales the
-        chemical-pressure term in the energy.
+        Attempts one line-searched Newton solve (:meth:`_newton_solve`) at full
+        load, warm-started from the previous step; if that stalls, applies the
+        swelling in adaptive increments (:meth:`_solve_by_load_stepping`).
         """
         # Solve on the reference configuration. The mesh still carries the
-        # previous step's deformation (set below so diffusion/reaction run on the
-        # deformed geometry); the elastic energy is total-Lagrangian in
+        # previous step's deformation (applied below so diffusion/reaction run on
+        # the deformed geometry), and the energy is total-Lagrangian in
         # `self.deformation`, so integrating over an already-deformed mesh would
-        # compound the deformation and leave a nonzero residual floor.
+        # compound the two and leave a nonzero residual floor.
         self._mesh.UnsetDeformation()
         self._load_factor.Set(1.0)
 
-        # Convergence threshold for the whole step, scaled to the *applied load*:
-        # the residual of the undeformed configuration, where the elastic and
-        # spring forces vanish and only the chemical pressure remains. Scaling it
-        # to the residual of whatever Newton starts from instead is self-defeating
-        # -- a warm start is already near equilibrium, and a small load increment
-        # is nearer still, so the threshold shrinks with the very quantity it is
-        # meant to bound. Converged states then get reported as failures and
-        # halving a load increment can never rescue one, since the attainable
-        # residual is floored by round-off and no longer by the load.
+        # Two convergence criteria; each covers where the other fails.
+        #
+        # `tol` scales with the applied load: the residual at u = 0, which is
+        # exactly the force the swelling exerts (u = 0 is not stress-free once
+        # J_g != 1). Scaling instead to the residual Newton happens to start from
+        # is self-defeating, since a warm start is already near equilibrium and
+        # the threshold would shrink with the quantity it is meant to bound.
         self._trial[:] = 0.0
         self._stiffness.Apply(self._trial, self._residual)
         tol = atol + rtol * np.linalg.norm(self._residual.FV().NumPy())
 
-        # ...and the second criterion, which does not vanish with the load. A
-        # remaining displacement error below `rtol` times the size of the body is
-        # physically meaningless; in the energy norm -- which is what the Newton
-        # decrement measures -- that corresponds to this much energy. Needed
-        # because `tol` above goes to zero with the chemical load, while the noise
-        # it has to beat does not: an unloaded body is in equilibrium at u = 0 for
-        # any deformation the round-off of a 10^5-element assembly can produce, so
-        # a purely load-relative test turns into a coin flip on that noise (and
-        # NGSolve's threaded assembly does not even sum the elements in a
-        # reproducible order). The coin landing badly used to abort the run.
+        # `min_decrement` does not vanish with the load, and `tol` does. Under no
+        # load u = 0 is an equilibrium to within assembly round-off, which NGSolve
+        # produces in no reproducible order across threads, so a purely
+        # load-relative test becomes a coin flip on that noise. A residual
+        # displacement below `rtol` times the size of the body is meaningless;
+        # in the energy norm the Newton decrement measures, that is this energy.
         min_decrement = rtol ** 2 * self._energy_scale
 
-        # Fast path: full load in one solve, warm-started from the previous step.
         if not self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
-            # Fallback: ramp the load 0 -> 1 with adaptive increments. Restart
-            # from the undeformed state so each increment begins at a valid
-            # (finite-energy) configuration.
+            # Restart undeformed so each increment begins at a finite-energy state.
             self.deformation.vec[:] = 0.0
             self._solve_by_load_stepping(max_newton, tol, min_decrement)
             self._load_factor.Set(1.0)
@@ -684,27 +664,19 @@ class MechanicSolver:
         self._mesh.SetDeformation(self.deformation)
 
     def _newton_solve(self, u, max_newton, tol, min_decrement):
-        """Line-searched Newton solve for elastic equilibrium at the current load.
+        """Damped Newton with Armijo backtracking on the elastic + spring energy.
 
-        Minimises the (nonlinear) elastic + spring + chemical-pressure energy by
-        damped Newton with an Armijo backtracking line search on the energy. The
-        line search rejects any trial step whose energy is non-finite -- i.e. an
-        inverted element (det F <= 0) -- so the tangent is only ever factorised at
-        a valid configuration and never goes singular. A non-descent Newton
-        direction (indefinite tangent, past a limit point) is treated as a stall.
-
-        Converged means the residual is below ``tol`` *or* the remaining
-        displacement is negligible (``min_decrement``), whichever comes first;
-        see the two checks below for why both are needed.
+        The line search rejects any trial step of non-finite energy -- an
+        inverted element, det F <= 0 -- so the tangent is only ever factorised at
+        a valid configuration. Converged means the residual is below ``tol`` *or*
+        the Newton decrement is below ``min_decrement``, whichever comes first.
 
         :param u: deformation vector; updated in place, must start finite-energy.
-        :param tol: absolute residual threshold, scaled to the applied load by
-            the caller (see :meth:`step`) so that it does not depend on how close
-            to equilibrium this solve happens to start.
-        :param min_decrement: Newton decrement below which the deformation is
-            physically converged regardless of ``tol``; also set by :meth:`step`.
-        :returns: True if either criterion is met, False if the solve stalls
-            (which tells the caller to cut the load increment).
+        :param tol: absolute residual threshold, set by :meth:`step`.
+        :param min_decrement: decrement below which ``u`` counts as converged
+            regardless of ``tol``, also set by :meth:`step`.
+        :returns: True if either criterion is met, False on a stall, which tells
+            the caller to cut the load increment.
         """
         energy = self._stiffness.Energy(u)
         if not np.isfinite(energy):
@@ -724,19 +696,17 @@ class MechanicSolver:
                 return False
             self._direction.data = inv * self._residual
 
-            # r . K^{-1} r > 0 for an SPD tangent; <= 0 means no descent (a limit
-            # point / indefinite Hessian) -> let the caller cut the load.
+            # r . K^{-1} r > 0 for an SPD tangent; <= 0 is an indefinite Hessian,
+            # so the direction is not a descent direction.
             slope = self._residual.InnerProduct(self._direction)
             if slope <= 0:
                 return False
 
-            # The Newton decrement is (twice) the energy drop this step predicts,
-            # i.e. the displacement still missing, measured in the energy norm.
-            # Once that is negligible, u is the equilibrium for all practical
-            # purposes and the Armijo test below can no longer tell a real
-            # decrease from round-off, so it would reject every trial step. That
-            # is convergence, not a stall; reporting it as a stall is what sent
-            # already-converged steps into load stepping, which cannot do better.
+            # The Newton decrement is twice the energy drop this step predicts:
+            # the displacement still missing, in the energy norm. Once negligible,
+            # u is the equilibrium and the Armijo test below can no longer tell a
+            # real decrease from round-off, so it would reject every trial step.
+            # That is convergence, not a stall.
             if slope <= min_decrement:
                 return True
 
@@ -762,14 +732,16 @@ class MechanicSolver:
         return np.linalg.norm(self._residual.FV().NumPy()) <= tol
 
     def _solve_by_load_stepping(self, max_newton, tol, min_decrement):
-        """Apply the chemical load incrementally with adaptive step sizing.
+        """Reach the full swelling through adaptive increments.
 
-        Each increment advances ``self._load_factor`` toward 1 and re-solves to
-        equilibrium, warm-started from the previous converged increment. A failed
-        increment is rejected (deformation restored) and the increment halved,
-        until the load reaches 1 or the increment underflows -- the latter being a
-        genuine loss of a stable equilibrium (past the mechanochemical
-        bifurcation), reported as a clear error rather than a singular matrix.
+        Each increment advances ``self._load_factor`` toward 1 and re-solves,
+        warm-started from the previous converged increment; a failed increment is
+        rejected and halved.
+
+        This is a homotopy, not a bifurcation detector: the energy is coercive for
+        every target volume, so a minimiser always exists, but neo-Hookean energy
+        is polyconvex rather than convex and a cold start at a large J_g can fall
+        outside the basin of attraction. Continuation walks it in.
         """
         u_safe = self.deformation.vec.CreateVector()
         u_safe.data = self.deformation.vec  # last converged state (at `load`)
@@ -788,12 +760,11 @@ class MechanicSolver:
                 if increment < _MIN_LOAD_INCREMENT:
                     raise RuntimeError(
                         "Mechanics solve stalled at load fraction "
-                        f"{load:.4g} of the requested swelling. Unlike the old "
-                        "dead-pressure model this is not a limit point -- an "
-                        "equilibrium exists for every target volume -- so it "
-                        "indicates a degenerate mesh or a swelling so large the "
-                        "elements invert on the way. Check element quality at "
-                        "the driving compartment's boundary."
+                        f"{load:.4g} of the requested swelling. An equilibrium "
+                        "exists for every target volume, so this is a mesh "
+                        "problem, not a physical limit: elements degenerate or "
+                        "invert on the way. Check element quality in the driving "
+                        "compartment, or reduce the coupling strength."
                     )
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
@@ -821,14 +792,12 @@ class MechanicSolver:
 
 
 def neo_hooke(f, mu, lam):
-    """Neo-Hookean material model, normalised to vanish in the reference state.
+    """Neo-Hookean strain energy density, normalised to vanish at F = I.
 
-    Both terms are written to be zero at F = I, so the stored energy of an
-    undeformed body is 0 rather than an arbitrary offset ``mu * (mu/lam - 1)``
-    per unit volume. That offset changes no force -- it is constant in the
-    deformation -- but it dominates the value of ``BilinearForm.Energy`` by
-    orders of magnitude, and the Newton solve compares energies (Armijo line
-    search, round-off convergence check) against exactly that value.
+    Both terms are zero at F = I, so an undeformed body stores 0 rather than a
+    constant ``mu * (mu/lam - 1)`` per unit volume. That offset changes no force,
+    but it dominates ``BilinearForm.Energy``, which the Newton solve compares
+    against in the Armijo line search and the round-off convergence check.
 
     :param f: Deformation gradient tensor (F = I + grad(u)).
     :param mu: Shear modulus (first Lamé parameter).

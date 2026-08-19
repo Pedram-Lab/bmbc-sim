@@ -13,7 +13,7 @@ Available sweeps (``configs/*_sweep.yaml``), all also overridable on the CLI:
 
     buffer_capacity_sweep       Kd x ECS ratio x 10 seeds     (120 runs)
     buffer_kinetics_sweep       kr x ECS ratio x 10 seeds     (140 runs)
-    contraction_sweep           coupling x ECS ratio x 10 seeds (60 runs, mechanics)
+    contraction_sweep           condensation x ECS ratio x 10 seeds (100 runs, mechanics)
     diffusivity_sweep           D_ecs x ECS ratio x 10 seeds   (60 runs)
     ecs_ratio_sweep             ECS ratio, one seed             (4 runs)
     synapse_distribution_sweep  100 seeds at one ECS ratio    (100 runs)
