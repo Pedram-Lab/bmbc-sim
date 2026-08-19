@@ -36,6 +36,12 @@ cluster:
 base:
   ecm:
     enabled: true
+  diffusion:
+    # Pin the outer-boundary permeability to the value the tortuosity formula
+    # gives at the 0.7 um2/ms baseline, so it doesn't move with the swept
+    # diffusion.diffusivity_ecs below (0.7 / tortuosity^2 / l_char, l_char =
+    # max(box_size_x/y/z)/2 = 10 um).
+    boundary_permeability: "0.02734375 um / ms"
 
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
