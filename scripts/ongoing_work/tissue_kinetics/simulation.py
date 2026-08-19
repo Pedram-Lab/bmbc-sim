@@ -92,7 +92,13 @@ class Mechanics(ConfigGroup):
     ecs_poisson_ratio: float = 0.3
     cell_youngs_modulus: Quantity("kPa") = "1.0 kPa"
     cell_poisson_ratio: float = 0.4
-    ecm_ca_coupling: Quantity("kPa / mM") = "0.1 kPa / mM"
+    # Fractional shrinkage of the ECS's stress-free volume per mM of bound Ca:
+    # the gel condenses as Ca binds, so ECM_Ca depletion makes it swell. Named
+    # for the sign it carries -- `add_driving_species` measures *swelling*, so
+    # this is passed negated, and calling it a "coupling" hid that flip.
+    # (Was a pressure, kPa/mM; the solver now takes a target volume instead,
+    # which removes the ~0.64 mu limit point that capped expansion.)
+    ecm_ca_condensation: Quantity("1 / mM") = "0.25 / mM"
 
 
 class Config(SimulationConfig):
@@ -278,7 +284,7 @@ def run(cfg: Config) -> None:
 
         if with_mechanics:
             ecs.add_driving_species(
-                ecm_ca, mech.ecm_ca_coupling, baseline=ecm_ca_equilibrium
+                ecm_ca, -mech.ecm_ca_condensation, baseline=ecm_ca_equilibrium
             )
 
     # --- Diffusion and reactions ---

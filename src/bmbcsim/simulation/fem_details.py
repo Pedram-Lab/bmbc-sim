@@ -495,6 +495,14 @@ class PnpSolver:
         return self.potential.components[k]
 
 
+# Globalization parameters for the mechanics Newton solve.
+_ARMIJO_C1 = 1e-4           # sufficient-decrease constant for the line search
+_MAX_BACKTRACK = 30         # max line-search halvings before declaring no progress
+_MIN_LOAD_INCREMENT = 1e-3  # below this, conclude the mesh cannot represent the swell
+_MIN_SWELLING = 1e-3        # floor on the target volume ratio J_g
+_LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
+
+
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
@@ -537,27 +545,44 @@ class MechanicSolver:
         mu = mesh.MaterialCF(mu_values)
         lam = mesh.MaterialCF(lam_values)
 
-        # Set up bulk term (neo-Hookean elasticity)
-        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
-        trial = self._fes.TrialFunction()
-        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
-        self._stiffness += ngs.Variation(
-            neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx
-        )
+        # Elastic energy of an order-one strain over the whole body; sets the
+        # load-independent convergence floor in :meth:`step`.
+        self._energy_scale = ngs.Integrate(mu, mesh)
 
-        # Add chemical pressure term restricted to compartments with driving species
+        # Chemical swelling: the driving species sets the local stress-free
+        # volume J_g rather than applying a pressure. This is what makes the
+        # problem unconditionally solvable -- a pressure term `p * det(F)` is a
+        # dead load whose energy falls linearly in J while the strain energy
+        # grows only like J^(2/3), so beyond |p| ~ 0.64 mu no stationary point
+        # exists. Rescaling the reference state instead keeps the energy coercive
+        # (it tends to +infinity as J -> 0 and as J -> infinity) for every J_g.
+        #
+        # `_load_factor` interpolates J_g from 1 to its target so :meth:`step` can
+        # reach a large swell incrementally; it stays at 1 for a full-load solve.
+        self._load_factor = ngs.Parameter(1.0)
+        swelling = {}
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
                 species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
-                chemical_pressure = strength * (concentration - baseline)
-                # Restrict chemical pressure to this compartment's regions
-                region_names = compartment.get_region_names(full_names=True)
-                dx_compartment = ngs.dx(definedon=mesh.Materials('|'.join(region_names)))
-                self._stiffness += ngs.Variation(
-                    (chemical_pressure * ngs.Det(deformation_tensor)).Compile() * dx_compartment
-                )
+                target = 1 + self._load_factor * strength * (concentration - baseline)
+                # J_g <= 0 is not a volume; unclamped it yields NaN rather than
+                # any diagnosable failure.
+                target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
+                for full_name in compartment.get_region_names(full_names=True):
+                    swelling[full_name] = target
+        growth = mesh.MaterialCF(swelling, default=1)
+
+        # Neo-Hookean energy of the elastic part of F: F = F_e F_g with
+        # F_g = J_g^(1/3) I. The density is per unit *grown* volume, hence the J_g.
+        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
+        trial = self._fes.TrialFunction()
+        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        elastic_tensor = deformation_tensor / growth ** (1 / 3)
+        self._stiffness += ngs.Variation(
+            (growth * neo_hooke(elastic_tensor, mu, lam)).Compile() * ngs.dx
+        )
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
@@ -566,9 +591,13 @@ class MechanicSolver:
             young_bnd = ngs.BoundaryFromVolumeCF(young)
             mu_bnd = ngs.BoundaryFromVolumeCF(mu)
             n = ngs.specialcf.normal(3)
-            t = ngs.specialcf.tangential(3)
             normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
-            tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
+            # Tangential part as the projection off the normal. Not
+            # specialcf.tangential(3): that is an edge (codim-2) quantity, exactly
+            # zero on the facets of a 3D mesh, which would silently drop all shear
+            # resistance of the embedding.
+            tangential = ngs.InnerProduct(trial, trial) - ngs.InnerProduct(trial, n) ** 2
+            tangent_springs = (mu_bnd / (2 * characteristic_length)) * tangential
             for boundary_name in exterior_boundaries:
                 self._stiffness += ngs.Variation(
                     (normal_springs + tangent_springs) * ngs.ds(boundary_name)
@@ -580,6 +609,8 @@ class MechanicSolver:
         self.deformation.vec[:] = 0
 
         self._residual = self.deformation.vec.CreateVector()
+        self._direction = self.deformation.vec.CreateVector()
+        self._trial = self.deformation.vec.CreateVector()
 
         # Set up volume tracking for concentration adjustment
         self._patch_mass = ngs.LinearForm(concentration_fes)
@@ -589,16 +620,152 @@ class MechanicSolver:
 
         self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
 
-    def step(self, n_iter=5):
-        """Perform a nonlinear solve via simple Newton iterations."""
-        for _ in range(n_iter):
-            self._stiffness.Apply(self.deformation.vec, self._residual)
-            self._stiffness.AssembleLinearization(self.deformation.vec)
-            inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
-            self.deformation.vec.data -= inv * self._residual
+    def step(self, max_newton=50, atol=1e-12, rtol=1e-8):
+        """Solve for elastic equilibrium under the current swelling.
 
-        # Apply deformation to mesh
+        Attempts one line-searched Newton solve (:meth:`_newton_solve`) at full
+        load, warm-started from the previous step; if that stalls, applies the
+        swelling in adaptive increments (:meth:`_solve_by_load_stepping`).
+        """
+        # Solve on the reference configuration. The mesh still carries the
+        # previous step's deformation (applied below so diffusion/reaction run on
+        # the deformed geometry), and the energy is total-Lagrangian in
+        # `self.deformation`, so integrating over an already-deformed mesh would
+        # compound the two and leave a nonzero residual floor.
+        self._mesh.UnsetDeformation()
+        self._load_factor.Set(1.0)
+
+        # Two convergence criteria; each covers where the other fails.
+        #
+        # `tol` scales with the applied load: the residual at u = 0, which is
+        # exactly the force the swelling exerts (u = 0 is not stress-free once
+        # J_g != 1). Scaling instead to the residual Newton happens to start from
+        # is self-defeating, since a warm start is already near equilibrium and
+        # the threshold would shrink with the quantity it is meant to bound.
+        self._trial[:] = 0.0
+        self._stiffness.Apply(self._trial, self._residual)
+        tol = atol + rtol * np.linalg.norm(self._residual.FV().NumPy())
+
+        # `min_decrement` does not vanish with the load, and `tol` does. Under no
+        # load u = 0 is an equilibrium to within assembly round-off, which NGSolve
+        # produces in no reproducible order across threads, so a purely
+        # load-relative test becomes a coin flip on that noise. A residual
+        # displacement below `rtol` times the size of the body is meaningless;
+        # in the energy norm the Newton decrement measures, that is this energy.
+        min_decrement = rtol ** 2 * self._energy_scale
+
+        if not self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
+            # Restart undeformed so each increment begins at a finite-energy state.
+            self.deformation.vec[:] = 0.0
+            self._solve_by_load_stepping(max_newton, tol, min_decrement)
+            self._load_factor.Set(1.0)
+
+        # Apply the converged deformation to the mesh.
         self._mesh.SetDeformation(self.deformation)
+
+    def _newton_solve(self, u, max_newton, tol, min_decrement):
+        """Damped Newton with Armijo backtracking on the elastic + spring energy.
+
+        The line search rejects any trial step of non-finite energy -- an
+        inverted element, det F <= 0 -- so the tangent is only ever factorised at
+        a valid configuration. Converged means the residual is below ``tol`` *or*
+        the Newton decrement is below ``min_decrement``, whichever comes first.
+
+        :param u: deformation vector; updated in place, must start finite-energy.
+        :param tol: absolute residual threshold, set by :meth:`step`.
+        :param min_decrement: decrement below which ``u`` counts as converged
+            regardless of ``tol``, also set by :meth:`step`.
+        :returns: True if either criterion is met, False on a stall, which tells
+            the caller to cut the load increment.
+        """
+        energy = self._stiffness.Energy(u)
+        if not np.isfinite(energy):
+            return False
+
+        self._stiffness.Apply(u, self._residual)
+
+        for _ in range(max_newton):
+            if np.linalg.norm(self._residual.FV().NumPy()) <= tol:
+                return True
+
+            # Newton direction d = K(u)^{-1} r; the update is u <- u - alpha*d.
+            self._stiffness.AssembleLinearization(u)
+            try:
+                inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
+            except Exception:
+                return False
+            self._direction.data = inv * self._residual
+
+            # r . K^{-1} r > 0 for an SPD tangent; <= 0 is an indefinite Hessian,
+            # so the direction is not a descent direction.
+            slope = self._residual.InnerProduct(self._direction)
+            if slope <= 0:
+                return False
+
+            # The Newton decrement is twice the energy drop this step predicts:
+            # the displacement still missing, in the energy norm. Once negligible,
+            # u is the equilibrium and the Armijo test below can no longer tell a
+            # real decrease from round-off, so it would reject every trial step.
+            # That is convergence, not a stall.
+            if slope <= min_decrement:
+                return True
+
+            # Armijo backtracking on the energy, guarding against inverted elements.
+            alpha = 1.0
+            accepted = False
+            for _ in range(_MAX_BACKTRACK):
+                self._trial.data = u - alpha * self._direction
+                trial_energy = self._stiffness.Energy(self._trial)
+                if np.isfinite(trial_energy) and \
+                        trial_energy <= energy - _ARMIJO_C1 * alpha * slope:
+                    accepted = True
+                    break
+                alpha *= 0.5
+            if not accepted:
+                return False
+
+            u.data = self._trial
+            energy = trial_energy
+            self._stiffness.Apply(u, self._residual)
+
+        # Exhausted Newton iterations; converged only if the residual is small.
+        return np.linalg.norm(self._residual.FV().NumPy()) <= tol
+
+    def _solve_by_load_stepping(self, max_newton, tol, min_decrement):
+        """Reach the full swelling through adaptive increments.
+
+        Each increment advances ``self._load_factor`` toward 1 and re-solves,
+        warm-started from the previous converged increment; a failed increment is
+        rejected and halved.
+
+        This is a homotopy, not a bifurcation detector: the energy is coercive for
+        every target volume, so a minimiser always exists, but neo-Hookean energy
+        is polyconvex rather than convex and a cold start at a large J_g can fall
+        outside the basin of attraction. Continuation walks it in.
+        """
+        u_safe = self.deformation.vec.CreateVector()
+        u_safe.data = self.deformation.vec  # last converged state (at `load`)
+        load = 0.0
+        increment = 0.5
+        while load < 1.0 - _LOAD_EPS:
+            trial_load = min(load + increment, 1.0)
+            self._load_factor.Set(trial_load)
+            if self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
+                load = trial_load
+                u_safe.data = self.deformation.vec
+                increment = min(increment * 1.5, 1.0 - load)
+            else:
+                self.deformation.vec.data = u_safe  # reject and restore
+                increment *= 0.5
+                if increment < _MIN_LOAD_INCREMENT:
+                    raise RuntimeError(
+                        "Mechanics solve stalled at load fraction "
+                        f"{load:.4g} of the requested swelling. An equilibrium "
+                        "exists for every target volume, so this is a mesh "
+                        "problem, not a physical limit: elements degenerate or "
+                        "invert on the way. Check element quality in the driving "
+                        "compartment, or reduce the coupling strength."
+                    )
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
         """Adjust concentrations based on the volume change due to mesh deformation.
@@ -625,7 +792,12 @@ class MechanicSolver:
 
 
 def neo_hooke(f, mu, lam):
-    """Neo-Hookean material model.
+    """Neo-Hookean strain energy density, normalised to vanish at F = I.
+
+    Both terms are zero at F = I, so an undeformed body stores 0 rather than a
+    constant ``mu * (mu/lam - 1)`` per unit volume. That offset changes no force,
+    but it dominates ``BilinearForm.Energy``, which the Newton solve compares
+    against in the Armijo line search and the round-off convergence check.
 
     :param f: Deformation gradient tensor (F = I + grad(u)).
     :param mu: Shear modulus (first Lamé parameter).
@@ -634,6 +806,5 @@ def neo_hooke(f, mu, lam):
     det_f = ngs.Det(f)
     return mu * (
         0.5 * ngs.Trace(f.trans * f - ngs.Id(3))
-        + mu / lam * det_f ** (-lam / mu)
-        - 1
+        + mu / lam * (det_f ** (-lam / mu) - 1)
     )

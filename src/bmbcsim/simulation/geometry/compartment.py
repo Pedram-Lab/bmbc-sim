@@ -222,14 +222,22 @@ class Compartment:
     ) -> None:
         """Set the species whose concentration drives mechanical deformation.
 
-        The coupling strength represents the pressure generated per unit concentration.
-        For example, a value of 1 kPa/mM means that 1 mM above baseline generates
-        1 kPa of chemical pressure driving contraction.
+        The coupling strength is the *fractional change of stress-free volume*
+        per unit concentration: the material's preferred volume ratio is
+        ``J_g = 1 + coupling_strength * (c - baseline)``. A value of 0.3 /mM
+        means 1 mM above baseline makes the material want to be 30% larger.
+
+        This is a swelling model, not a pressure model. The deformation that
+        results is whatever equilibrium the surrounding stiffness allows, so a
+        confined compartment reaches far less than ``J_g``; in exchange an
+        equilibrium exists for *every* coupling strength, which is not true of a
+        pressure load (see the note in ``MechanicSolver.__init__``).
 
         :param species: Chemical species that drives deformation.
-        :param coupling_strength: Pressure generated per unit concentration (e.g., kPa/mM).
+        :param coupling_strength: Fractional stress-free volume change per unit
+            concentration (e.g., ``0.3 / mM``). Dimensionless per concentration.
         :param baseline: Baseline concentration at which no deformation occurs (default: 0).
-            Concentrations below baseline cause expansion; above baseline cause contraction.
+            Concentrations below baseline cause contraction; above baseline cause swelling.
         :raises ValueError: If a driving species is already defined for this compartment.
         """
         if self.coefficients.driving_species is not None:
