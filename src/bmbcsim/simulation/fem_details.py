@@ -583,9 +583,13 @@ class MechanicSolver:
             young_bnd = ngs.BoundaryFromVolumeCF(young)
             mu_bnd = ngs.BoundaryFromVolumeCF(mu)
             n = ngs.specialcf.normal(3)
-            t = ngs.specialcf.tangential(3)
             normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
-            tangent_springs = (mu_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, t) ** 2
+            # Tangential part is the projection off the normal. Do NOT use
+            # specialcf.tangential(3): that is an edge (codim-2) quantity and
+            # evaluates to exactly zero on the facets of a 3D mesh, which
+            # silently removes the shear resistance of the embedding.
+            tangential = ngs.InnerProduct(trial, trial) - ngs.InnerProduct(trial, n) ** 2
+            tangent_springs = (mu_bnd / (2 * characteristic_length)) * tangential
             for boundary_name in exterior_boundaries:
                 self._stiffness += ngs.Variation(
                     (normal_springs + tangent_springs) * ngs.ds(boundary_name)

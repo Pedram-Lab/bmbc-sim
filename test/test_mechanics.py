@@ -222,3 +222,25 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmpdir:
         test_mechanics_with_driving_species(tmpdir)
         print("test_mechanics_with_driving_species passed")
+
+
+def test_tangential_spring_penalty_is_nonzero():
+    """The tangential spring must actually resist in-plane sliding.
+
+    ``specialcf.tangential(3)`` is an edge quantity and is identically zero on
+    the facets of a 3D mesh, so using it silently deletes the shear resistance
+    of the compliant embedding, leaving the boundary anchored only along its
+    normal. Guard the projection form used instead.
+    """
+    mesh = create_box_mesh()
+    n = ngs.specialcf.normal(3)
+    displacement = ngs.CF((1, 0, 0))
+
+    projected = (ngs.InnerProduct(displacement, displacement)
+                 - ngs.InnerProduct(displacement, n) ** 2)
+    surface_area = ngs.Integrate(ngs.CF(1) * ngs.ds, mesh)
+
+    # A unit x-displacement is tangential on the four faces normal to y and z.
+    assert ngs.Integrate(projected * ngs.ds, mesh) == pytest.approx(4 / 6 * surface_area)
+    assert ngs.Integrate(ngs.InnerProduct(displacement, ngs.specialcf.tangential(3)) ** 2
+                         * ngs.ds, mesh) == 0.0
