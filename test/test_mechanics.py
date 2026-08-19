@@ -97,14 +97,15 @@ def test_mechanics_with_driving_species(tmp_path):
 
     cell = simulation.simulation_geometry.compartments["cell"]
 
-    # Add a species that will drive contraction
+    # Add a species that will drive contraction (negative = the material
+    # wants a smaller stress-free volume as the species accumulates)
     ca = simulation.add_species("ca")
     cell.initialize_species(ca, 1.0 * mM)
     cell.add_diffusion(ca, 0.1 * u.um**2 / u.ms)
 
     # Add elasticity and driving species
     cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
-    cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
+    cell.add_driving_species(ca, coupling_strength=-0.1 / mM)
 
     # Run simulation
     simulation.run(end_time=1 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
@@ -155,7 +156,7 @@ def test_mechanics_takes_fast_path_when_warm_started(tmp_path, monkeypatch):
     cell.initialize_species(ca, 1.0 * mM)
     cell.add_diffusion(ca, 0.1 * u.um**2 / u.ms)
     cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
-    cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
+    cell.add_driving_species(ca, coupling_strength=-0.1 / mM)
 
     simulation.run(end_time=1 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
 
@@ -170,7 +171,8 @@ def test_mechanics_with_dynamic_species(tmp_path):
     cell = simulation.simulation_geometry.compartments["cell"]
     influx_bnd = simulation.simulation_geometry.membranes["influx"]
 
-    # Add a species that will drive contraction
+    # Add a species that will drive contraction (negative = the material
+    # wants a smaller stress-free volume as the species accumulates)
     ca = simulation.add_species("ca")
     cell.initialize_species(ca, 0.0 * mM)
     cell.add_diffusion(ca, 5.0 * u.um**2 / u.ms)
@@ -183,7 +185,7 @@ def test_mechanics_with_dynamic_species(tmp_path):
 
     # Add elasticity and driving species
     cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
-    cell.add_driving_species(ca, coupling_strength=0.1 * u.kPa / mM)
+    cell.add_driving_species(ca, coupling_strength=-0.1 / mM)
 
     # Run simulation
     simulation.run(end_time=2 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
@@ -244,3 +246,38 @@ def test_tangential_spring_penalty_is_nonzero():
     assert ngs.Integrate(projected * ngs.ds, mesh) == pytest.approx(4 / 6 * surface_area)
     assert ngs.Integrate(ngs.InnerProduct(displacement, ngs.specialcf.tangential(3)) ** 2
                          * ngs.ds, mesh) == 0.0
+
+
+def test_large_swelling_has_an_equilibrium(tmp_path):
+    """A swelling far past the old dead-pressure limit point must still solve.
+
+    The previous model applied `p * det(F)`, whose energy falls linearly in J
+    while the strain energy only grows like J^(2/3); above |p| ~ 0.64 mu no
+    stationary point existed and the solve raised "no stable equilibrium".
+    For E = 1 kPa that ceiling sat at ~0.25 kPa/mM, so this coupling -- the
+    material asking to triple its stress-free volume -- was unreachable.
+    Rescaling the reference state keeps the energy coercive, so it is not.
+    """
+    mesh = create_box_mesh()
+    simulation = bmbcsim.Simulation(mesh, result_directory=tmp_path, mechanics=True)
+
+    cell = simulation.simulation_geometry.compartments["cell"]
+    ca = simulation.add_species("ca")
+    cell.initialize_species(ca, 1.0 * mM)
+    cell.add_diffusion(ca, 0.1 * u.um**2 / u.ms)
+    cell.add_elasticity(youngs_modulus=1.0 * u.kPa)
+    cell.add_driving_species(ca, coupling_strength=2.0 / mM)
+
+    simulation.run(end_time=1 * u.ms, time_step=0.1 * u.ms, record_interval=1 * u.ms)
+
+    result_loader = bmbcsim.ResultLoader(simulation.result_directory)
+    values = xr.concat(
+        [result_loader.load_point_values(i, points=[(0.5, 0.5, 0.5)])
+         for i in range(len(result_loader))],
+        dim="time",
+    ).sel(species="ca").isel(point=0)
+
+    # Converging at all is the point. Mass is conserved, so the dilution
+    # measures the swell: ~0.55 mM here, i.e. about 1.8x the original volume.
+    assert values.isel(time=0) == pytest.approx(1.0)
+    assert float(values.isel(time=-1)) < 0.6

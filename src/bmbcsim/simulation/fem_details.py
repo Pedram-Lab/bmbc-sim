@@ -499,6 +499,7 @@ class PnpSolver:
 _ARMIJO_C1 = 1e-4           # sufficient-decrease constant for the line search
 _MAX_BACKTRACK = 30         # max line-search halvings before declaring no progress
 _MIN_LOAD_INCREMENT = 1e-3  # smallest load fraction before load stepping gives up
+_MIN_SWELLING = 1e-3        # floor on the target volume ratio J_g (see __init__)
 _LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
 
 
@@ -550,31 +551,45 @@ class MechanicSolver:
         # chemical load does.
         self._energy_scale = ngs.Integrate(mu, mesh)
 
-        # Set up bulk term (neo-Hookean elasticity)
-        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
-        trial = self._fes.TrialFunction()
-        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
-        self._stiffness += ngs.Variation(
-            neo_hooke(deformation_tensor, mu, lam).Compile() * ngs.dx
-        )
-
-        # Add chemical pressure term restricted to compartments with driving species.
-        # The load factor (a runtime-adjustable Parameter) scales the chemical
-        # pressure so `step()` can apply it incrementally for robustness; it is
+        # Chemical swelling: the driving species sets the *stress-free* volume the
+        # material wants locally, J_g, rather than applying a pressure to it. This
+        # is what makes the solve unconditionally solvable. A pressure term
+        # `p * det(F)` is a dead load -- its energy falls linearly in J while the
+        # strain energy only grows like J^(2/3), so above |p| ~ 0.64 mu the total
+        # energy has no stationary point at all and no amount of load stepping
+        # finds one (a limit point, not a numerical failure). Rescaling the
+        # reference state keeps the energy coercive for *any* J_g: it still tends
+        # to +infinity as J -> 0 and as J -> infinity, so a minimiser always exists.
+        #
+        # The load factor (a runtime-adjustable Parameter) interpolates J_g from 1
+        # to its target so `step()` can approach a large swell incrementally; it is
         # kept at 1 for a normal full-load solve.
         self._load_factor = ngs.Parameter(1.0)
+        swelling = {}
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
                 species, strength, baseline = driving
                 concentration = concentrations[species].components[i]
-                chemical_pressure = self._load_factor * strength * (concentration - baseline)
-                # Restrict chemical pressure to this compartment's regions
-                region_names = compartment.get_region_names(full_names=True)
-                dx_compartment = ngs.dx(definedon=mesh.Materials('|'.join(region_names)))
-                self._stiffness += ngs.Variation(
-                    (chemical_pressure * ngs.Det(deformation_tensor)).Compile() * dx_compartment
-                )
+                target = 1 + self._load_factor * strength * (concentration - baseline)
+                # J_g <= 0 is not a volume. Only reachable by a coupling strong
+                # enough to demand total collapse, where the model has stopped
+                # meaning anything -- but it would produce NaN rather than say so.
+                target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
+                for full_name in compartment.get_region_names(full_names=True):
+                    swelling[full_name] = target
+        growth = mesh.MaterialCF(swelling, default=1)
+
+        # Set up bulk term (neo-Hookean elasticity on the elastic part of F).
+        # F = F_e F_g with F_g = J_g^(1/3) I, and the energy density is per unit
+        # *grown* volume, hence the J_g factor in front.
+        self._stiffness = ngs.BilinearForm(self._fes, symmetric=False)
+        trial = self._fes.TrialFunction()
+        deformation_tensor = ngs.Id(mesh.dim) + ngs.Grad(trial)
+        elastic_tensor = deformation_tensor / growth ** (1 / 3)
+        self._stiffness += ngs.Variation(
+            (growth * neo_hooke(elastic_tensor, mu, lam)).Compile() * ngs.dx
+        )
 
         # Set up boundary conditions (spring anchoring, "local compliant embedding")
         # Use BoundaryFromVolumeCF to evaluate MaterialCF on boundary elements
@@ -772,10 +787,13 @@ class MechanicSolver:
                 increment *= 0.5
                 if increment < _MIN_LOAD_INCREMENT:
                     raise RuntimeError(
-                        "No elastic equilibrium exists at the current chemical "
-                        f"load: the largest sustainable fraction of it is {load:.4g}"
-                        + (f", so the coupling is ~{1 / load:.3g}x too strong."
-                           if load > 0 else ".")
+                        "Mechanics solve stalled at load fraction "
+                        f"{load:.4g} of the requested swelling. Unlike the old "
+                        "dead-pressure model this is not a limit point -- an "
+                        "equilibrium exists for every target volume -- so it "
+                        "indicates a degenerate mesh or a swelling so large the "
+                        "elements invert on the way. Check element quality at "
+                        "the driving compartment's boundary."
                     )
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):

@@ -20,6 +20,6 @@ base:
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
 sweep:
-  mechanics.ecm_ca_coupling: ["0 kPa / mM", "0.03 kPa / mM", "0.1 kPa / mM"]
+  mechanics.ecm_ca_coupling: ["0 / mM", "0.075 / mM", "0.25 / mM"]
   geometry.ecs_ratio: [0.04, 0.19]
 seeds: 10
