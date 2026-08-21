@@ -4,10 +4,23 @@
 # ECS ratio. Depletion of ECM_Ca therefore drives *expansion*.
 # Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name contraction_sweep
 defaults:
-  - cluster: local    # override on the CLI with cluster=janelia
-  - _self_            # this file's own values win over the group above
+  - cluster: janelia    # override on the CLI with cluster=local
+  - _self_              # this file's own values win over the group above
 
 result_root: results/contraction-force-sweep
+
+# LSF: one simulation per job, 4 cores each, all 100 submitted at once (LSF decides
+# how many run at a time). Add "n_workers: 20" to cap the jobs in flight instead.
+#
+# 24 h, not the janelia preset's 4 h: these are 1000-step runs on the full 20x20x1
+# box with mechanics on. The 2026-08-05 sweep took 12.5 h per run at the same 4
+# cores, and the growth model adds load-stepping fallbacks on the stiff top points,
+# so 4 h would kill every job. LSF truncating a run leaves a snapshot.h5 with no
+# data -- it does not fail loudly.
+cluster:
+  n_threads_per_worker: 4
+  extra:
+    walltime: "24:00"
 
 # Non-swept parameters; unlisted fields fall back to the Config defaults in ../simulation.py.
 base:
@@ -21,21 +34,32 @@ base:
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
 #
-# Range set from 10x10 probes at dt = 0.125 ms, measured at t = 25 ms:
+# Range set from 10x10 solver_stress probes at dt = 0.125 ms, t = 25 ms:
 #
 #   k (/mM)   ECS volume   ECS fraction   max|u|    min J
 #      0.25       1.0255         19.17%    19 nm   0.9924
 #      1.00       1.1943         21.63%   142 nm   0.8893
-#      2.00       1.5485         26.30%   606 nm   0.0006  <- mesh destroyed
+#      1.50       1.3215         23.37%   328 nm   0.0012  <- element flattened
+#      2.00       1.5485         26.30%   606 nm   0.0006  <- element flattened
 #
-# The old dead-pressure fold is gone, so nothing here fails to find an
-# equilibrium. The binding constraint is now MESH QUALITY: min J collapses
-# between k = 1 and k = 2. 1.5 is deliberately close to that edge -- check
-# min J in the results before trusting the top point, and note the limit is
-# ecs_ratio-dependent (thin 0.04 sheets degenerate first), so the same k is
-# not equally safe on both arms of the ratio axis.
+# Nothing here fails to find an equilibrium -- the growth model always has one.
+# The binding constraint is MESH QUALITY, and it is a cliff: min J falls from
+# 0.89 to ~1e-3 somewhere between k = 1.0 and k = 1.5. A flattened element gives
+# a garbage Jacobian long before any element actually inverts, so "the run
+# finished" is not evidence the top point is usable -- check min J.
+#
+# The probe carries ~3x the synapse density of this sweep, so its ECS *volume*
+# numbers are an overestimate here. min J is not: it is a worst-element quantity
+# set by one local hot spot, which this sweep has too.
+#
+# The limit is also ecs_ratio-dependent (thin 0.04 sheets degenerate first), so
+# the same k is not equally safe on both arms of the ratio axis.
+#
+# Top point is 1.25, not the 1.5 the table above rules out. It sits inside the
+# cliff and is NOT yet probed -- if it also comes back with min J ~ 1e-3, the
+# highest defensible point is 1.0.
 sweep:
   mechanics.ecm_ca_condensation:
-    ["0 / mM", "0.25 / mM", "0.5 / mM", "1.0 / mM", "1.5 / mM"]
+    ["0 / mM", "0.25 / mM", "0.5 / mM", "1.0 / mM", "1.25 / mM"]
   geometry.ecs_ratio: [0.04, 0.19]
 seeds: 10
