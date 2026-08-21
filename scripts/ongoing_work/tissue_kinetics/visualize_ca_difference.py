@@ -29,17 +29,23 @@ anywhere (solver undershoot in the tightest synapses) are dropped outright. Two 
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyvista as pv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analysis import compute_local_ca
+from analysis import compute_local_ca, find_synapse_centers
+from bmbcsim.simulation.result_io import ResultLoader
 from evaluate_synapse_distribution_spatial import find_seed_dirs
 from visualize_by_regime import _vfrac
+
+EXPLORE_RADIUS = 3.0  # um, half-width of the pyvista crop box around a synapse center
 
 # ============ Configuration ============
 # (sweep dir, label). HIGH - LOW is the plotted difference; the suffix in each dir
@@ -180,6 +186,129 @@ def load_vfrac(sweep, pair_seeds, pair_synapse_idx):
         [pair_seeds, pair_synapse_idx])).to_numpy()
 
 
+MARKER_RADIUS = 0.15  # um, synapse-location sphere
+TITLE_POSITION = 2  # CornerAnnotation index for the default "upper_left" add_text position
+
+
+def crop_to_synapse(grid, center, radius):
+    """Restrict a snapshot grid to a box of half-width `radius` around `center`.
+
+    `crinkle=True` keeps whole original cells instead of cutting through them at
+    the box face -- a plain clip interpolates new points at the cut, which have
+    no entry in `_orig_idx` and would corrupt the fast per-step field swap below.
+    """
+    cx, cy, cz = center
+    bounds = (cx - radius, cx + radius, cy - radius, cy + radius, cz - radius, cz + radius)
+    return grid.clip_box(bounds, invert=False, crinkle=True)
+
+
+def _load_ecs_panel(path, step, center, radius):
+    """ECS-only, cropped snapshot grid, plus what's needed to re-slice by step fast.
+
+    Loading a full snapshot (mesh + field) via ResultLoader is not cheap, so the
+    slider below does not call it again per step: it re-reads just the `Ca` array
+    from the h5 file and re-indexes it through `_orig_idx`, the panel's point
+    indices into the *full* (pre-crop, pre-ECS-mask) mesh, which is invariant
+    across steps because this geometry does not deform over time.
+    """
+    loader = ResultLoader(path)
+    grid = loader.load_snapshot(step)
+    grid.point_data["ecs"] = loader.load_regions().point_data["ecs"]
+    grid.point_data["_orig_idx"] = np.arange(grid.n_points)
+    ecs_grid = grid.threshold(0.5, scalars="ecs")
+    return crop_to_synapse(ecs_grid, center, radius)
+
+
+def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS, step=-1):
+    """Show LOW/HIGH ECS-only snapshots side by side in linked pyvista views,
+    each cropped to a box around its own synapse center, with a slider to scrub
+    the recorded timepoints. Blocks until the window is closed, so the picker
+    below runs it in a subprocess rather than call it directly (a second GUI
+    event loop can't share the process with matplotlib's).
+
+    LOW/HIGH each get an opaque marker sphere at their own synapse center and a
+    translucent one at the other geometry's -- the two coordinates are close but
+    not identical (see module docstring), and this makes that offset visible
+    instead of quietly plotting one as a stand-in for the other.
+    """
+    sides = [(low_dir, low_center, high_center, "LOW"), (high_dir, high_center, low_center, "HIGH")]
+    with h5py.File(os.path.join(low_dir, "snapshot.h5")) as h5:
+        times = np.array(h5["data/time"])
+    if step < 0:
+        step += len(times)
+
+    plotter = pv.Plotter(shape=(1, 2))
+    panels = []
+    for i, (path, own_center, other_center, label) in enumerate(sides):
+        cropped = _load_ecs_panel(path, step, own_center, radius)
+        plotter.subplot(0, i)
+        # Semi-transparent: at this crop radius the synapse marker sphere is usually
+        # inside a fold of the ECS surface, and an opaque mesh would hide it.
+        actor = plotter.add_mesh(cropped, scalars=SPECIES_NAME, cmap="viridis", opacity=0.5)
+        plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=own_center), color="red")
+        plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=other_center),
+                         color="red", opacity=0.5)
+        title = plotter.add_text(f"{label}: {Path(path).name}", font_size=8)
+        panels.append((os.path.join(path, "snapshot.h5"), cropped, actor, title, label, path))
+
+    def set_step(value):
+        idx = int(round(value))
+        fields = []
+        for h5_path, cropped, actor, title, label, path in panels:
+            with h5py.File(h5_path) as h5:
+                field = np.array(h5[f"data/{SPECIES_NAME}/step_{idx:05d}"])
+            cropped.point_data[SPECIES_NAME] = field[cropped.point_data["_orig_idx"]]
+            title.SetText(TITLE_POSITION,
+                          f"{label}: {Path(path).name}\nt={times[idx]:.0f} ms")
+            fields.append(cropped.point_data[SPECIES_NAME])
+
+        # Shared color scale across both panels, so LOW and HIGH stay comparable
+        # instead of each panel re-normalizing to its own range.
+        combined = np.concatenate(fields)
+        scalar_range = (float(combined.min()), float(combined.max()))
+        for _, _, actor, _, _, _ in panels:
+            actor.mapper.scalar_range = scalar_range
+        plotter.render()
+
+    set_step(step)
+    plotter.subplot(0, 0)
+    plotter.add_slider_widget(set_step, [0, len(times) - 1], value=step,
+                              title="step", fmt="%.0f")
+    plotter.link_views()
+    plotter.show()
+
+
+def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse_idx):
+    """Click a scatter point to open that synapse's LOW/HIGH volumes in pyvista.
+
+    Spawns `explore()` in a subprocess (see there for why), passing each sweep's own
+    synapse center -- idx-matched but not identical, see module docstring. Also
+    prints the identifying info in case the pyvista window isn't wanted.
+    """
+    low_paths = dict(find_seed_dirs(LOW[0]))
+    high_paths = dict(find_seed_dirs(HIGH[0]))
+
+    def on_pick(event):
+        for i in event.ind:
+            seed, idx = int(pair_seeds[i]), int(pair_synapse_idx[i])
+            low_dir, high_dir = low_paths[seed], high_paths[seed]
+            print(f"\nseed={seed} synapse_idx={idx}  d_vfrac={vfrac[i]:.4f}  "
+                  f"peak_dCa={peaks[i]:.3f} mM  t={peak_times[i]:.0f} ms")
+            with h5py.File(os.path.join(low_dir, "snapshot.h5")) as h5:
+                low_center = find_synapse_centers(h5)[idx]
+            with h5py.File(os.path.join(high_dir, "snapshot.h5")) as h5:
+                high_center = find_synapse_centers(h5)[idx]
+            print(f"  LOW  center (um): ({low_center[0]:.2f}, {low_center[1]:.2f}, "
+                  f"{low_center[2]:.2f})  dir: {low_dir}")
+            print(f"  HIGH center (um): ({high_center[0]:.2f}, {high_center[1]:.2f}, "
+                  f"{high_center[2]:.2f})  dir: {high_dir}")
+            subprocess.Popen([sys.executable, __file__, "--explore", low_dir, high_dir,
+                              "--low-center", *(f"{c:.4f}" for c in low_center),
+                              "--high-center", *(f"{c:.4f}" for c in high_center)])
+
+    ax.figure.canvas.mpl_connect("pick_event", on_pick)
+
+
 def plot_peak_vs_vfrac(times, diffs, pair_seeds, pair_synapse_idx,
                        low_label, high_label, ax):
     peaks, peak_times = peak_differences(times, diffs)
@@ -194,11 +323,14 @@ def plot_peak_vs_vfrac(times, diffs, pair_seeds, pair_synapse_idx,
     if keep.sum() < 2:
         raise SystemExit("Not enough synapses with a local ECS fraction to plot.")
     vfrac, peaks, peak_times = vfrac[keep], peaks[keep], peak_times[keep]
+    pair_seeds, pair_synapse_idx = pair_seeds[keep], pair_synapse_idx[keep]
 
     color = plt.cm.tab10.colors[0]
     ax.axhline(0.0, color="black", linewidth=0.8, linestyle=":")
     ax.axvline(0.0, color="black", linewidth=0.8, linestyle=":")
-    ax.scatter(vfrac, peaks, s=8, alpha=0.3, color=color, edgecolors="none")
+    ax.scatter(vfrac, peaks, s=8, alpha=0.3, color=color, edgecolors="none",
+               picker=True, pickradius=5)
+    _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse_idx)
 
     # Binned median over quantile bins of the fraction (equal counts per bin).
     edges = np.nanquantile(vfrac, np.linspace(0, 1, N_BINS + 1))
@@ -260,6 +392,27 @@ def parse_args():
     return parser.parse_args()
 
 
+def parse_explore_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Open one synapse's LOW/HIGH volumes in linked pyvista views "
+                    "(normally launched by clicking a point in --plot vs-ecs).")
+    parser.add_argument("low_dir")
+    parser.add_argument("high_dir")
+    parser.add_argument("--low-center", type=float, nargs=3, required=True,
+                        metavar=("X", "Y", "Z"), help="Synapse center in low_dir, in um.")
+    parser.add_argument("--high-center", type=float, nargs=3, required=True,
+                        metavar=("X", "Y", "Z"), help="Synapse center in high_dir, in um.")
+    parser.add_argument("--radius", type=float, default=EXPLORE_RADIUS,
+                        help=f"Crop box half-width, in um (default: {EXPLORE_RADIUS:g}).")
+    parser.add_argument("--step", type=int, default=-1,
+                        help="Snapshot index to show (default: last).")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    args = parse_args()
-    main(args.plot, args.out or OUT_PATHS[args.plot], SHOW and not args.no_show)
+    if len(sys.argv) > 1 and sys.argv[1] == "--explore":
+        a = parse_explore_args(sys.argv[2:])
+        explore(a.low_dir, a.high_dir, a.low_center, a.high_center, a.radius, a.step)
+    else:
+        args = parse_args()
+        main(args.plot, args.out or OUT_PATHS[args.plot], SHOW and not args.no_show)
