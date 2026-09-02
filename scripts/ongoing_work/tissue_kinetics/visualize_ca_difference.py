@@ -21,15 +21,16 @@ anywhere (solver undershoot in the tightest synapses) are dropped outright. Two 
 * ``vs-ecs``: one point per synapse -- its peak difference (the signed d[Ca] at the
   time of largest |d[Ca]|) against how much local ECS that synapse GAINED between the
   two runs, d_vfrac = vfrac_HIGH - vfrac_LOW, where vfrac is the local ECS volume
-  fraction at radius RADIUS (``v_local_r<R> / v_sphere_box_r<R>`` from
-  ``<sweep>/spatial_metrics.csv``, written by evaluate_synapse_distribution_spatial.py;
-  both sweeps need that CSV with RADIUS among its --radii). A binned median over
-  deciles of d_vfrac is drawn on top.
+  fraction at radius RADIUS (``v_local_r<R> / v_sphere_box_r<R>`` from the pooled
+  ``<sweep>/spatial_metrics.csv`` written by running
+  evaluate_synapse_distribution_spatial.py on the sweep root with RADIUS among its
+  --radii; rows are matched to each ECS ratio via the ``group`` column). A binned
+  median over deciles of d_vfrac is drawn on top.
 """
 
 import argparse
+import multiprocessing
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -47,23 +48,34 @@ from visualize_by_regime import _vfrac
 
 EXPLORE_RADIUS = 3.0  # um, half-width of the pyvista crop box around a synapse center
 
-# ============ Configuration ============
-# (sweep dir, label). HIGH - LOW is the plotted difference; the suffix in each dir
-# name is int(100*(ecs_ratio+0.06)), i.e. ecs_ratio 0.04 -> "10", 0.19 -> "25".
-LOW = ("results/synapse_distribution_ecs_10_2026-06-17-142107", "10% ECS")
-HIGH = ("results/synapse_distribution_ecs_25_2026-06-17-142107", "25% ECS")
+# CLI defaults. The names below are rebound from the parsed arguments in __main__,
+# so every function can keep reading them as module globals.
 SPECIES_NAME = "Ca"
 CENTILE = 5                  # shaded band is CENTILE..(100-CENTILE)%
 SHOW_INDIVIDUAL = True       # overlay a faint subsample of per-synapse traces
 MAX_INDIVIDUAL = 400         # cap on how many individual traces to draw
 RADIUS = 0.4                 # um; selects the v_local_r<R>/v_sphere_box_r<R> columns
 N_BINS = 10                  # quantile bins for the binned median (vs-ecs)
-OUT_PATHS = {                # default output per --plot mode
-    "trace": "results/ca_difference_by_synapse.png",
-    "vs-ecs": "results/ca_difference_vs_ecs_volume.png",
+OUT_NAMES = {                # default output file per --plot mode, inside the sweep dir
+    "trace": "ca_difference_by_synapse.png",
+    "vs-ecs": "ca_difference_vs_ecs_volume.png",
 }
-SHOW = True
-# =======================================
+LOW = HIGH = None            # (dir, label); set from the sweep dir in __main__
+
+
+def find_ratio_dirs(sweep_root):
+    """The two ``ecs_ratio=*`` sublevels of `sweep_root` as (dir, label), low first.
+
+    The label converts the nominal ratio to the effective ECS percentage, +6% from
+    the cell-size scaling: ecs_ratio 0.04 -> "10% ECS", 0.19 -> "25% ECS".
+    """
+    subs = sorted(Path(sweep_root).glob("ecs_ratio=*"),
+                  key=lambda p: float(p.name.split("=")[1]))
+    if len(subs) != 2:
+        raise SystemExit(f"Expected exactly 2 ecs_ratio=* dirs under "
+                         f"'{sweep_root}', found {len(subs)}.")
+    return [(str(p), f"{100 * (float(p.name.split('=')[1]) + 0.06):.0f}% ECS")
+            for p in subs]
 
 
 def collect_differences(low_sweep, high_sweep):
@@ -166,19 +178,28 @@ def peak_differences(times, diffs):
     return diffs[t_idx, np.arange(diffs.shape[1])], times[t_idx]
 
 
-def load_vfrac(sweep, pair_seeds, pair_synapse_idx):
-    """Local ECS volume fraction at RADIUS for each (seed, synapse_idx) pair.
+def load_vfrac(ratio_dir, pair_seeds, pair_synapse_idx):
+    """Local ECS volume fraction at RADIUS for each (seed, synapse_idx) pair of one
+    ``ecs_ratio=*`` sublevel, read from the pooled CSV at the sweep root (written by
+    running evaluate_synapse_distribution_spatial.py on the root) via its ``group``
+    column.
 
     Missing pairs (seeds the spatial evaluation skipped or never covered) come back
     as NaN, so the caller can just drop them.
     """
-    csv_path = os.path.join(sweep, "spatial_metrics.csv")
+    root = os.path.dirname(ratio_dir)
+    csv_path = os.path.join(root, "spatial_metrics.csv")
     if not os.path.isfile(csv_path):
         raise SystemExit(
             f"Error: '{csv_path}' not found. Run\n"
-            f"  uv run python evaluate_synapse_distribution_spatial.py {sweep} "
+            f"  uv run python evaluate_synapse_distribution_spatial.py {root} "
             f"--radii {RADIUS:g}\nfirst.")
     df = pd.read_csv(csv_path)
+    group = os.path.basename(ratio_dir)
+    df = df[df["group"] == group]
+    if df.empty:
+        raise SystemExit(f"Error: no rows with group='{group}' in '{csv_path}'.")
+    df = df.copy()
     df["vfrac"] = _vfrac(df, RADIUS)
     lookup = df.set_index(["seed", "synapse_idx"])["vfrac"]
     lookup = lookup[~lookup.index.duplicated()]
@@ -219,12 +240,15 @@ def _load_ecs_panel(path, step, center, radius):
     return crop_to_synapse(ecs_grid, center, radius)
 
 
-def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS, step=-1):
+def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS,
+            step=-1, species=SPECIES_NAME):
     """Show LOW/HIGH ECS-only snapshots side by side in linked pyvista views,
     each cropped to a box around its own synapse center, with a slider to scrub
     the recorded timepoints. Blocks until the window is closed, so the picker
-    below runs it in a subprocess rather than call it directly (a second GUI
-    event loop can't share the process with matplotlib's).
+    below runs it in a spawned process rather than call it directly (a second GUI
+    event loop can't share the process with matplotlib's). `species` is a
+    parameter, not the module global, because the spawned child re-imports this
+    module and would only see the default.
 
     LOW/HIGH each get an opaque marker sphere at their own synapse center and a
     translucent one at the other geometry's -- the two coordinates are close but
@@ -244,7 +268,7 @@ def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS, s
         plotter.subplot(0, i)
         # Semi-transparent: at this crop radius the synapse marker sphere is usually
         # inside a fold of the ECS surface, and an opaque mesh would hide it.
-        actor = plotter.add_mesh(cropped, scalars=SPECIES_NAME, cmap="viridis", opacity=0.5)
+        actor = plotter.add_mesh(cropped, scalars=species, cmap="viridis", opacity=0.5)
         plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=own_center), color="red")
         plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=other_center),
                          color="red", opacity=0.5)
@@ -256,11 +280,11 @@ def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS, s
         fields = []
         for h5_path, cropped, actor, title, label, path in panels:
             with h5py.File(h5_path) as h5:
-                field = np.array(h5[f"data/{SPECIES_NAME}/step_{idx:05d}"])
-            cropped.point_data[SPECIES_NAME] = field[cropped.point_data["_orig_idx"]]
+                field = np.array(h5[f"data/{species}/step_{idx:05d}"])
+            cropped.point_data[species] = field[cropped.point_data["_orig_idx"]]
             title.SetText(TITLE_POSITION,
                           f"{label}: {Path(path).name}\nt={times[idx]:.0f} ms")
-            fields.append(cropped.point_data[SPECIES_NAME])
+            fields.append(cropped.point_data[species])
 
         # Shared color scale across both panels, so LOW and HIGH stay comparable
         # instead of each panel re-normalizing to its own range.
@@ -281,9 +305,11 @@ def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS, s
 def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse_idx):
     """Click a scatter point to open that synapse's LOW/HIGH volumes in pyvista.
 
-    Spawns `explore()` in a subprocess (see there for why), passing each sweep's own
-    synapse center -- idx-matched but not identical, see module docstring. Also
-    prints the identifying info in case the pyvista window isn't wanted.
+    Spawns `explore()` in a fresh process (see there for why; "spawn" rather than
+    fork, so the child doesn't inherit matplotlib's live GUI state), passing each
+    sweep's own synapse center -- idx-matched but not identical, see module
+    docstring. Also prints the identifying info in case the pyvista window isn't
+    wanted.
     """
     low_paths = dict(find_seed_dirs(LOW[0]))
     high_paths = dict(find_seed_dirs(HIGH[0]))
@@ -302,9 +328,9 @@ def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse
                   f"{low_center[2]:.2f})  dir: {low_dir}")
             print(f"  HIGH center (um): ({high_center[0]:.2f}, {high_center[1]:.2f}, "
                   f"{high_center[2]:.2f})  dir: {high_dir}")
-            subprocess.Popen([sys.executable, __file__, "--explore", low_dir, high_dir,
-                              "--low-center", *(f"{c:.4f}" for c in low_center),
-                              "--high-center", *(f"{c:.4f}" for c in high_center)])
+            multiprocessing.get_context("spawn").Process(
+                target=explore, args=(low_dir, high_dir, low_center, high_center),
+                kwargs={"species": SPECIES_NAME}).start()
 
     ax.figure.canvas.mpl_connect("pick_event", on_pick)
 
@@ -383,36 +409,41 @@ def main(plot_kind, out_path, show):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--plot", choices=list(OUT_PATHS), default="trace",
+    parser.add_argument("sweep",
+                        help="Sweep directory containing two ecs_ratio=* sublevels.")
+    parser.add_argument("--plot", choices=list(OUT_NAMES), default="trace",
                         help="Which analysis to plot (default: trace).")
     parser.add_argument("--out", default=None,
-                        help="Output PNG path (default: per-mode entry in OUT_PATHS).")
+                        help="Output PNG path (default: per-mode entry in OUT_NAMES, "
+                             "inside the sweep directory).")
     parser.add_argument("--no-show", action="store_true",
                         help="Save the figure without opening a window.")
+    parser.add_argument("--species", default=SPECIES_NAME,
+                        help=f"Species to compare (default: {SPECIES_NAME}).")
+    parser.add_argument("--centile", type=float, default=CENTILE,
+                        help=f"Shaded band is CENTILE..(100-CENTILE)%% "
+                             f"(default: {CENTILE}).")
+    parser.add_argument("--hide-individual", action="store_true",
+                        help="Don't overlay individual per-synapse traces.")
+    parser.add_argument("--max-individual", type=int, default=MAX_INDIVIDUAL,
+                        help=f"Cap on individual traces drawn (default: {MAX_INDIVIDUAL}).")
+    parser.add_argument("--radius", type=float, default=RADIUS,
+                        help=f"Local ECS fraction radius in um, selects the "
+                             f"v_local_r<R>/v_sphere_box_r<R> columns (default: {RADIUS:g}).")
+    parser.add_argument("--bins", type=int, default=N_BINS,
+                        help=f"Quantile bins for the binned median in vs-ecs "
+                             f"(default: {N_BINS}).")
     return parser.parse_args()
 
 
-def parse_explore_args(argv):
-    parser = argparse.ArgumentParser(
-        description="Open one synapse's LOW/HIGH volumes in linked pyvista views "
-                    "(normally launched by clicking a point in --plot vs-ecs).")
-    parser.add_argument("low_dir")
-    parser.add_argument("high_dir")
-    parser.add_argument("--low-center", type=float, nargs=3, required=True,
-                        metavar=("X", "Y", "Z"), help="Synapse center in low_dir, in um.")
-    parser.add_argument("--high-center", type=float, nargs=3, required=True,
-                        metavar=("X", "Y", "Z"), help="Synapse center in high_dir, in um.")
-    parser.add_argument("--radius", type=float, default=EXPLORE_RADIUS,
-                        help=f"Crop box half-width, in um (default: {EXPLORE_RADIUS:g}).")
-    parser.add_argument("--step", type=int, default=-1,
-                        help="Snapshot index to show (default: last).")
-    return parser.parse_args(argv)
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--explore":
-        a = parse_explore_args(sys.argv[2:])
-        explore(a.low_dir, a.high_dir, a.low_center, a.high_center, a.radius, a.step)
-    else:
-        args = parse_args()
-        main(args.plot, args.out or OUT_PATHS[args.plot], SHOW and not args.no_show)
+    args = parse_args()
+    LOW, HIGH = find_ratio_dirs(args.sweep)
+    SPECIES_NAME = args.species
+    CENTILE = args.centile
+    SHOW_INDIVIDUAL = not args.hide_individual
+    MAX_INDIVIDUAL = args.max_individual
+    RADIUS = args.radius
+    N_BINS = args.bins
+    main(args.plot, args.out or os.path.join(args.sweep, OUT_NAMES[args.plot]),
+         not args.no_show)
