@@ -206,9 +206,9 @@ class ResultLoader:
         :returns: The result loader instance for the found folder.
         """
         # Match both run-directory namings: bmbcsim.timestamped_directory writes
-        # "{timestamp}_{simulation_name}" (timestamp first, so runs sort
-        # chronologically), while archived results predating that use
-        # "{simulation_name}_{timestamp}". "(?:_.*)?" is the variant postfix.
+        # "{simulation_name}_{timestamp}" (name first, so runs of one simulation
+        # group together), while older results use "{timestamp}_{simulation_name}".
+        # "(?:_.*)?" is the variant postfix.
         name = re.escape(simulation_name)
         stamp = r"\d{4}-\d{2}-\d{2}-\d{6}"
         pattern = re.compile(rf"^(?:{stamp}_{name}(?:_.*)?|{name}(?:_.*)?_{stamp})$")

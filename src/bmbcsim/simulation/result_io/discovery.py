@@ -7,8 +7,8 @@ timestamp (see :func:`bmbcsim.config.expand_sweep`,
     results/buffer-capacity-sweep/
         ecm_kd=0.1-mM/
             ecs_ratio=0.04/
-                2026-07-26-150039_tissue_kinetics_seed0/    <- a run
-                2026-07-26-150039_tissue_kinetics_seed1/
+                tissue_kinetics_seed0_2026-07-26-150039/    <- a run
+                tissue_kinetics_seed1_2026-07-26-150039/
                 tissue_kinetics_seed0.config.yaml           <- written before dispatch
             ecs_ratio=0.19/
                 ...
@@ -105,7 +105,7 @@ def run_labels(run_dir: str | os.PathLike, root: str | os.PathLike) -> dict[str,
 
     Recovers a run's coordinates in the sweep grid whatever the number of axes::
 
-        >>> run_labels("sweep/ecm_kd=0.1-mM/ecs_ratio=0.04/<stamp>_sim_seed0", "sweep")
+        >>> run_labels("sweep/ecm_kd=0.1-mM/ecs_ratio=0.04/sim_seed0_<stamp>", "sweep")
         {'ecm_kd': '0.1-mM', 'ecs_ratio': '0.04'}
 
     Values are the filesystem-safe slugs the sweep wrote, so a unit-bearing value

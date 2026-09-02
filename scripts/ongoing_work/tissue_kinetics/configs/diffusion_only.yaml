@@ -2,7 +2,7 @@
 # the sweeps and mechanics.yaml are compared against. These are the Config defaults
 # spelled out (only the switches mechanics.yaml flips are repeated, so nothing else can
 # drift out of sync with ../simulation.py). Running it is the same as running
-# simulation.py with no --config-name, results/<timestamp>_tissue_kinetics.
+# simulation.py with no --config-name, results/tissue_kinetics_<timestamp>.
 # Run: uv run scripts/ongoing_work/tissue_kinetics/simulation.py --config-name diffusion_only
 defaults:
   - tissue_kinetics

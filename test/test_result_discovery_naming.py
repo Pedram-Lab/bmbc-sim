@@ -1,15 +1,17 @@
 """Run directories: how they are named, and how a run is found again.
 
-A run directory is ``<timestamp>_<simulation_name>[_<postfix>]``, the postfix
+A run directory is ``<simulation_name>[_<postfix>]_<timestamp>``, the postfix
 naming the variant (``sala_quick``, ``rusakov_post``). ``ResultLoader.find`` must
 therefore find a simulation whatever its postfix, must still let a caller pin one
 variant by full name, and must not stray into a *different* experiment whose name
 happens to start the same way. Every evaluation script locates its input this way,
 so getting it wrong silently plots nothing, or the wrong run.
 
-Results archived before the timestamp moved to the front have it last instead, and
-predate config dumping; they must keep working too.
+Results written while the timestamp led (``<timestamp>_<name>``) must keep
+working too.
 """
+import re
+
 import pytest
 import yaml
 
@@ -64,7 +66,7 @@ def test_find_does_not_cross_into_another_simulation(tmp_path, fake_loader):
 def test_timestamped_directory_never_reuses_a_directory(tmp_path):
     # Same name within the same second (parallel runs of two variants) must not
     # hand both runs the same directory to write snapshot.h5 into.
-    # Also: each name must stay findable, i.e. keep the <timestamp>_<name> shape.
+    # Also: each name must stay findable, i.e. keep the <name>_<timestamp> shape.
     dirs = [timestamped_directory(tmp_path, "sala") for _ in range(3)]
     assert len(set(dirs)) == 3 and all(d.is_dir() for d in dirs)
-    assert all(d.name.endswith("_sala") for d in dirs)
+    assert all(re.fullmatch(r"sala_\d{4}-\d{2}-\d{2}-\d{6}", d.name) for d in dirs)

@@ -6,7 +6,7 @@ defaults:
   - sala
   - _self_
 
-postfix: quick     # -> results/<timestamp>_sala_quick
+postfix: quick     # -> results/sala_quick_<timestamp>
 mesh_size: "8 um"
 end_time: "20 ms"
 record_interval: "5 ms"

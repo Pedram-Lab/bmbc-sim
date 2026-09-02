@@ -19,16 +19,19 @@ import yaml
 from bmbcsim import ResultLoader
 from bmbcsim.simulation.result_io import find_run_dirs
 
-# Where sweep.py's configs/kd_sweep.yaml puts its runs (timestamp prepended).
-SWEEP_GLOB = "*_sensor-kd-sweep"
+# Where sweep.py's configs/kd_sweep.yaml puts its runs (timestamp appended; the
+# glob also catches older runs that had it prepended).
+SWEEP_GLOB = "*sensor-kd-sweep*"
 DEFAULT_OUT = "results/sensor_parameter_sweep.zarr"
 KD_UNIT = u.mmol / u.L
 REGION = "cube:sphere"  # the sensor sphere
 
 
 def latest_kd_sweep(results_root="results"):
-    """Newest sweep tree written by sweep.py (timestamps sort chronologically)."""
-    candidates = sorted(Path(results_root).glob(SWEEP_GLOB))
+    """Newest sweep tree written by sweep.py (by mtime, so either naming order works)."""
+    candidates = sorted(
+        Path(results_root).glob(SWEEP_GLOB), key=lambda p: p.stat().st_mtime
+    )
     if not candidates:
         raise SystemExit(
             f"No {SWEEP_GLOB} directory under {results_root}; run sweep.py first, "

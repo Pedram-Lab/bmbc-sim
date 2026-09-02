@@ -1,6 +1,6 @@
 # Presynaptic calcium influx (Fig. 4, top row), the counterpart of post.yaml. This is
 # the Config default spelled out, so both modes are visible in configs/; running it is
-# the same as running simulation.py with no --config-name, results/<timestamp>_rusakov.
+# the same as running simulation.py with no --config-name, results/rusakov_<timestamp>.
 # Run: uv run scripts/literature_replications/rusakov_2001/simulation.py --config-name pre
 defaults:
   - rusakov

@@ -106,7 +106,7 @@ class SimulationConfig(ConfigGroup):
 
     simulation_name: str
     # Distinguishes variants of one simulation: the run directory is named
-    # "<timestamp>_<simulation_name>[_<postfix>]", so evaluation scripts can ask for
+    # "<simulation_name>[_<postfix>]_<timestamp>", so evaluation scripts can ask for
     # the latest run of a simulation *class* whatever its postfix (see
     # :meth:`ResultLoader.find`), or pin one variant by passing the full run name.
     postfix: str = ""
@@ -467,7 +467,7 @@ def run_sweep(
     :param seeds: ``n`` (-> ``range(n)``) or an explicit list of seeds.
     :param cluster: Dask cluster settings; defaults to a local cluster.
     :param result_root: Base output dir; defaults to ``base_config.result_root``. A
-        timestamp is prepended to its last component, as for a single run.
+        timestamp is appended to its last component, as for a single run.
     :returns: List of ``(job_labels, exception)`` for the runs that failed.
     """
     from dask.distributed import Client, as_completed
@@ -476,7 +476,7 @@ def run_sweep(
 
     cluster = cluster or ClusterConfig()
     # Stamp the sweep root, so that re-running a sweep collects its own tree instead of
-    # merging into the previous run's: results/<sweep> -> results/<timestamp>_<sweep>.
+    # merging into the previous run's: results/<sweep> -> results/<sweep>_<timestamp>.
     configured = Path(result_root) if result_root is not None else Path(base_config.result_root)
     root = timestamped_directory(configured.parent, configured.name)
     # Validate + materialize every job up front so a bad grid fails fast.

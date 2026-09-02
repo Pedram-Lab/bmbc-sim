@@ -33,9 +33,10 @@ def _install_heartbeat_shutdown_filter() -> None:
 
 
 def timestamped_directory(root: str | Path, name: str) -> Path:
-    """Create and return ``<root>/<timestamp>_<name>/`` to hold one run's output.
+    """Create and return ``<root>/<name>_<timestamp>/`` to hold one run's output.
 
-    The timestamp leads so that runs sort chronologically in a shared result root.
+    The name leads so that runs of one simulation group together in a shared result
+    root; the trailing timestamp keeps repeat runs distinct and sorted.
 
     :class:`bmbcsim.Simulation` takes a finished directory rather than inventing
     one, so a script can name its output directory up front and write everything
@@ -55,7 +56,7 @@ def timestamped_directory(root: str | Path, name: str) -> Path:
     :return: The created directory.
     """
     while True:
-        directory = Path(root) / f"{datetime.now():%Y-%m-%d-%H%M%S}_{name}"
+        directory = Path(root) / f"{name}_{datetime.now():%Y-%m-%d-%H%M%S}"
         try:
             directory.mkdir(parents=True)
             return directory

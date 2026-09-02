@@ -25,15 +25,18 @@ from bmbcsim.simulation.result_io import find_run_dirs
 
 from simulation import Config
 
-# Where sweep.py's configs/buffer_sweep.yaml puts its runs (timestamp prepended).
-SWEEP_GLOB = "*_buffer-competition-sweep"
+# Where sweep.py's configs/buffer_sweep.yaml puts its runs (timestamp appended; the
+# glob also catches older runs that had it prepended).
+SWEEP_GLOB = "*buffer-competition-sweep*"
 CONCENTRATION_UNIT = u.mmol / u.L
 COMPARTMENTS = ("top", "bottom")
 
 
 def latest_sweep(results_root="results"):
-    """Newest sweep tree written by sweep.py (timestamps sort chronologically)."""
-    candidates = sorted(Path(results_root).glob(SWEEP_GLOB))
+    """Newest sweep tree written by sweep.py (by mtime, so either naming order works)."""
+    candidates = sorted(
+        Path(results_root).glob(SWEEP_GLOB), key=lambda p: p.stat().st_mtime
+    )
     if not candidates:
         raise SystemExit(
             f"No {SWEEP_GLOB} directory under {results_root}; run sweep.py first, "
