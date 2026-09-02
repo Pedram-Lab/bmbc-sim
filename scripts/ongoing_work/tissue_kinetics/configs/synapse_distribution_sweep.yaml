@@ -15,5 +15,5 @@ cluster:
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
 sweep:
-  geometry.ecs_ratio: [0.19]    # was the --ecs flag; add values to compare ratios
-seeds: 100
+  geometry.ecs_ratio: [0.04, 0.19]    # was the --ecs flag; add values to compare ratios
+seeds: 10
