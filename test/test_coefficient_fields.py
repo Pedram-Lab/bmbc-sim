@@ -390,6 +390,25 @@ def test_peaks_field_exclude_predicate_honored(volume_region, fes):
     assert np.all(chosen[:, 0] <= 0.0)
 
 
+def test_peaks_field_in_plane_confines_z(volume_region, fes):
+    """in_plane=True places peaks near the centroid's z-plane."""
+    field = cf.LocalizedPeaks(
+        seed=42,
+        num_peaks=10,
+        peak_value=10.0 * mM,
+        background_value=0.1 * mM,
+        peak_width=1.0 * u.um,
+        in_plane=True,
+    )
+    field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    coords = np.array(volume_region.mesh.ngmesh.Coordinates())
+    chosen = coords[field.peak_node_indices]
+    # Sphere of radius 5, mesh size 1: peaks must sit within a mesh cell of
+    # the equatorial plane instead of spreading over the full sphere.
+    assert np.all(np.abs(chosen[:, 2] - coords[:, 2].mean()) <= 1.0)
+
+
 # Integration tests
 def test_nodal_noise_in_simulation(simple_mesh, tmp_path):
     """cf.NodalNoise works in a full simulation context."""

@@ -325,6 +325,9 @@ def run(cfg: Config) -> None:
         if n_syn == 0:
             continue
 
+        # in_plane: the box is thin in z, so full-sphere directions pile
+        # synapses onto the top/bottom faces; in-plane directions keep them
+        # near the mid-plane of the slab.
         synapse_distribution = cf.LocalizedPeaks(
             seed=int(rng.integers(0, 2**31)),
             num_peaks=n_syn,
@@ -333,6 +336,7 @@ def run(cfg: Config) -> None:
             peak_width=syn.synapse_diameter / 6.0,
             total=n_syn * q_per_synapse,
             exclude_predicate=exclude_outer_box,
+            in_plane=True,
         )
         synapse_flux = transport.ProportionalFlux(
             flux=synapse_distribution,

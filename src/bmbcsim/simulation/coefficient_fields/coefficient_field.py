@@ -308,6 +308,7 @@ class LocalizedPeaks(Coefficient):
         seed: int = 0,
         total: u.Quantity | None = None,
         exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
+        in_plane: bool = False,
     ):
         """Initialize a localized peaks field.
 
@@ -321,6 +322,9 @@ class LocalizedPeaks(Coefficient):
         :param exclude_predicate: Optional callable taking a ``(ndof, 3)``
             array of DOF coordinates and returning a boolean mask of DOFs to
             skip when selecting peak centers. ``None`` means no exclusions.
+        :param in_plane: If True, sample peak directions in the xy-plane
+            (z-component zero), confining peaks to the region's mid-plane
+            (z of the DOF centroid) instead of the full sphere of directions.
         """
         if not isinstance(seed, int):
             raise TypeError("Seed must be an integer")
@@ -332,6 +336,7 @@ class LocalizedPeaks(Coefficient):
         self._peak_node_indices: np.ndarray | None = None
         self._total = total
         self._exclude_predicate = exclude_predicate
+        self._in_plane = in_plane
         self.needs_area_normalization = (total is None)
 
     def to_coefficient_function(
@@ -352,7 +357,8 @@ class LocalizedPeaks(Coefficient):
         n_dofs = fes.ndof
 
         self._peak_node_indices = _select_directional_peak_dofs(
-            dof_coords, self._num_peaks, rng, self._exclude_predicate
+            dof_coords, self._num_peaks, rng, self._exclude_predicate,
+            in_plane=self._in_plane,
         )
         peak_centers = dof_coords[self._peak_node_indices]
 
@@ -422,12 +428,15 @@ def _select_directional_peak_dofs(
     num_peaks: int,
     rng: np.random.Generator,
     exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
+    in_plane: bool = False,
 ) -> np.ndarray:
     """Choose ``num_peaks`` DOF indices via centroid-relative random directions.
 
     For each of ``num_peaks`` random unit vectors drawn from ``rng``, pick the
     DOF with the largest cosine similarity (smallest angular distance) to that
     direction, computed in coordinates relative to the centroid of all DOFs.
+    With ``in_plane=True``, directions are sampled in the xy-plane, so the
+    chosen DOFs cluster around the centroid's z-plane.
     DOFs flagged by ``exclude_predicate`` and DOFs coincident with the centroid
     are skipped, and no DOF is chosen twice — collisions fall back to the
     next-best DOF for that direction.
@@ -457,6 +466,8 @@ def _select_directional_peak_dofs(
     rel_unit = rel / np.where(norms[:, None] > 0, norms[:, None], 1.0)
 
     directions = rng.standard_normal((actual_num_peaks, 3))
+    if in_plane:
+        directions[:, 2] = 0.0
     dir_norms = np.linalg.norm(directions, axis=1, keepdims=True)
     directions /= np.where(dir_norms > 0, dir_norms, 1.0)
 
