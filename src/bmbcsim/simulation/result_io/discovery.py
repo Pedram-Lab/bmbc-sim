@@ -4,12 +4,12 @@ A sweep writes one directory level per swept axis and stamps every run with a
 timestamp (see :func:`bmbcsim.config.expand_sweep`,
 :func:`bmbcsim.timestamped_directory`)::
 
-    results/buffer-capacity-sweep/
+    results/buffer-capacity-sweep_2026-07-26-150039/
+        sweep.config.yaml                       <- base config + grid, written at dispatch
         ecm_kd=0.1-mM/
             ecs_ratio=0.04/
                 tissue_kinetics_seed0_2026-07-26-150039/    <- a run
                 tissue_kinetics_seed1_2026-07-26-150039/
-                tissue_kinetics_seed0.config.yaml           <- written before dispatch
             ecs_ratio=0.19/
                 ...
         ecm_kd=0.3-mM/

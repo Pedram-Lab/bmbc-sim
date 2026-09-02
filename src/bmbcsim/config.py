@@ -457,9 +457,9 @@ def run_sweep(
     """Run ``sim_file``'s ``run`` over the Cartesian product of ``sweep`` x ``seeds``.
 
     Each combination becomes a validated config copy (fail-fast: bad combos raise
-    here, before any cluster is started) written to its own result subdirectory,
-    then dispatched to a Dask cluster. One crashing run is logged and skipped, not
-    allowed to abort the sweep.
+    here, before any cluster is started) dispatched to a Dask cluster; the full
+    sweep definition is written to ``sweep.config.yaml`` at the sweep root. One
+    crashing run is logged and skipped, not allowed to abort the sweep.
 
     :param sim_file: Path to the experiment ``simulation.py`` (exposes ``Config``/``run``).
     :param base_config: Config holding every non-swept parameter.
@@ -479,17 +479,28 @@ def run_sweep(
     # merging into the previous run's: results/<sweep> -> results/<sweep>_<timestamp>.
     configured = Path(result_root) if result_root is not None else Path(base_config.result_root)
     root = timestamped_directory(configured.parent, configured.name)
+    # Provenance: dask workers bypass Hydra's outputs/, so record the whole sweep
+    # (resolved base config + grid + seeds) once at its root. Each run still dumps
+    # its own fully resolved config.yaml; this file is what a run that crashed
+    # before doing so was launched from.
+    (root / "sweep.config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "base": base_config.model_dump(),
+                "sweep": {
+                    k: [v if isinstance(v, (bool, int, float, str)) else str(v) for v in vs]
+                    for k, vs in sweep.items()
+                },
+                "seeds": seeds if isinstance(seeds, int) else list(seeds),
+            },
+            sort_keys=False,
+        )
+    )
     # Validate + materialize every job up front so a bad grid fails fast.
     jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (labels, config_dict)
     for labels, cfg, subdir in expand_sweep(base_config, sweep, seeds, root):
-        cfg_dict = cfg.model_dump()
-        jobs.append((labels, cfg_dict))
+        jobs.append((labels, cfg.model_dump()))
         subdir.mkdir(parents=True, exist_ok=True)
-        # Provenance: dask workers bypass Hydra's outputs/, so record each
-        # resolved config next to where its results will land.
-        (subdir / f"{cfg.simulation_name}.config.yaml").write_text(
-            yaml.safe_dump(cfg_dict, sort_keys=False)
-        )
     n_seeds = seeds if isinstance(seeds, int) else len(seeds)
 
     print(
