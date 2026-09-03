@@ -107,7 +107,7 @@ def main():
     p.add_argument(
         "path",
         help="Seed result directory containing snapshot.h5 (e.g. "
-             "results/synapse_distribution_ecs_25_*/tissue_kinetics_seed0_*)",
+             "results/synapse-distribution-sweep_*/ecs_ratio=0.19/tissue_kinetics_seed0_*)",
     )
     p.add_argument(
         "--n", type=int, default=None,

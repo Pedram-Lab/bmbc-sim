@@ -41,6 +41,10 @@ from analysis import compute_local_ca
 from evaluate_synapse_distribution_spatial import find_seed_dirs
 
 # ============ Configuration ============
+# Default sweeps if none are given on the command line. A single sweep root with
+# ecs_ratio=* sublevels and one pooled CSV works just as well as several sweeps
+# with one CSV each: rows are keyed by (sweep, group, seed), where `group` is the
+# CSV's group column (a run's sublevel relative to the sweep root, "." for a leaf).
 SWEEP_DIRS = [
     "results/synapse_distribution_ecs_10_2026-05-29-174131",
     "results/synapse_distribution_ecs_25_2026-05-29-185441",
@@ -86,6 +90,8 @@ def load_metrics(sweep_dirs, csv_name):
                 f"Error: '{csv_path}' not found. Run "
                 f"evaluate_synapse_distribution_spatial.py on '{sweep}' first.")
         df = pd.read_csv(csv_path)
+        if "group" not in df.columns:  # per-leaf CSV from the pre-pooling evaluator
+            df["group"] = "."
         df["sweep_dir"] = sweep
         frames.append(df)
     return pd.concat(frames, ignore_index=True)
@@ -166,21 +172,30 @@ def plot_min_ca(df, ax):
 # time-trace mode: pooled local-Ca trace per regime
 # ---------------------------------------------------------------------------
 class TraceProvider:
-    """Lazily map (sweep, seed) -> local-Ca traces, caching per seed."""
+    """Lazily map (sweep, group, seed) -> local-Ca traces, caching per seed.
+
+    Seed indices recur under every sweep sublevel (seed 0 exists in each
+    ecs_ratio=*), so paths are keyed by (group, seed), with `group` computed
+    exactly like the evaluator's group column: the run's parent directory
+    relative to the sweep root, "." for a leaf run.
+    """
 
     def __init__(self):
-        self._seed_paths = {}   # sweep -> {seed_int: path}
-        self._traces = {}       # (sweep, seed) -> (times, local_ca)
+        self._seed_paths = {}   # sweep -> {(group, seed): path}
+        self._traces = {}       # (sweep, group, seed) -> (times, local_ca)
 
-    def _path(self, sweep, seed):
+    def _path(self, sweep, group, seed):
         if sweep not in self._seed_paths:
-            self._seed_paths[sweep] = dict(find_seed_dirs(sweep))
-        return self._seed_paths[sweep][seed]
+            self._seed_paths[sweep] = {
+                (os.path.relpath(os.path.dirname(path), sweep), s): path
+                for s, path in find_seed_dirs(sweep)
+            }
+        return self._seed_paths[sweep][(group, seed)]
 
-    def get(self, sweep, seed):
-        key = (sweep, seed)
+    def get(self, sweep, group, seed):
+        key = (sweep, group, seed)
         if key not in self._traces:
-            self._traces[key] = compute_local_ca(self._path(sweep, seed),
+            self._traces[key] = compute_local_ca(self._path(sweep, group, seed),
                                                   species=SPECIES_NAME)
         return self._traces[key]
 
@@ -188,13 +203,13 @@ class TraceProvider:
 def collect_regime_traces(df_regime, provider):
     """Pool local-Ca traces for the selected synapses into (n_times, n_synapses).
 
-    Groups by (sweep, seed) so compute_local_ca runs once per seed, then picks
-    the selected synapse columns. Returns (times, traces).
+    Groups by (sweep, group, seed) so compute_local_ca runs once per seed, then
+    picks the selected synapse columns. Returns (times, traces).
     """
     times_ref = None
     columns = []
-    for (sweep, seed), grp in df_regime.groupby(["sweep_dir", "seed"]):
-        times, local_ca = provider.get(sweep, int(seed))
+    for (sweep, group, seed), grp in df_regime.groupby(["sweep_dir", "group", "seed"]):
+        times, local_ca = provider.get(sweep, str(group), int(seed))
         if times_ref is None:
             times_ref = times
         elif len(times) != len(times_ref):
@@ -244,12 +259,12 @@ def plot_time_trace(df, ax):
 PLOTTERS = {"min-ca": plot_min_ca, "time-trace": plot_time_trace}
 
 
-def main(plot_kind, out_path, show):
-    df = load_metrics(SWEEP_DIRS, CSV_NAME)
+def main(sweeps, plot_kind, out_path, show):
+    df = load_metrics(sweeps, CSV_NAME)
     df["vfrac"] = _vfrac(df, RADIUS)
     n_valid = int(df["vfrac"].notna().sum())
     print(f"Loaded {len(df)} synapses ({n_valid} with finite r={RADIUS:g} fraction) "
-          f"from {len(SWEEP_DIRS)} sweeps")
+          f"from {len(sweeps)} sweep(s)")
 
     fig, ax = plt.subplots(figsize=(10, 6))
     PLOTTERS[plot_kind](df, ax)
@@ -267,6 +282,11 @@ def parse_args():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
+        "sweeps", nargs="*", default=SWEEP_DIRS,
+        help="Sweep directories, each holding a spatial_metrics.csv; one sweep "
+             "root with a pooled CSV covers all its sublevels "
+             f"(default: {SWEEP_DIRS}).")
+    parser.add_argument(
         "--plot", choices=list(PLOTTERS), default="min-ca",
         help="Which analysis to plot (default: min-ca).")
     parser.add_argument(
@@ -281,4 +301,4 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     out = args.out or OUT_PATHS[args.plot]
-    main(args.plot, out, SHOW and not args.no_show)
+    main(args.sweeps, args.plot, out, SHOW and not args.no_show)

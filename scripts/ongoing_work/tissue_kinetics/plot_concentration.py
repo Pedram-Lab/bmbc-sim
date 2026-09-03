@@ -14,12 +14,12 @@ samples, with a spread band. What counts as a sample is ``--metric``:
     ecs-points    Ca at every ECS mesh vertex                   (band: 5-95%, + median)
 
     # one curve per ECS fraction, labelled by the *measured* fraction
-    uv run .../plot_concentration.py results/<stamp>_ecs-ratio-sweep \
+    uv run .../plot_concentration.py results/ecs-ratio-sweep_<stamp> \
         --group-by ecs_ratio --actual-ecs
     # mean +/- SD across 100 seeds
-    uv run .../plot_concentration.py results/<stamp>_synapse-distribution-sweep
+    uv run .../plot_concentration.py results/synapse-distribution-sweep_<stamp>
     # any other sweep axis
-    uv run .../plot_concentration.py results/<stamp>_buffer-capacity-sweep --group-by ecm_kd
+    uv run .../plot_concentration.py results/buffer-capacity-sweep_<stamp> --group-by ecm_kd
 """
 import argparse
 from pathlib import Path

@@ -118,7 +118,13 @@ def _unique_path_labels(paths):
 
 
 def load_combined(paths):
-    """Read all CSVs, tag each with a unique `_source` label, concat.
+    """Read all CSVs, tag every row with a `_source` label, concat.
+
+    A pooled CSV (one written by running the evaluator on a whole sweep) carries a
+    ``group`` column with the sweep sublevel of each row (``ecs_ratio=0.04``, ...);
+    that is the source then, so --color-sources separates the sublevels instead of
+    painting the single file one color. Per-leaf CSVs (constant ``group``, or none)
+    are one source each, labelled by their path.
 
     Every CSV must contain ``min_ca`` and expose the same set of columns.
     Pooling files with mismatched columns (e.g. one written before and one
@@ -152,9 +158,14 @@ def load_combined(paths):
                 "All input CSVs must come from the same evaluator version; "
                 "re-run evaluate_synapse_distribution_spatial.py to regenerate "
                 "the stale file(s).")
-        df["_source"] = label
+        if "group" in df.columns and df["group"].nunique() > 1:
+            groups = df["group"].astype(str)
+            df["_source"] = groups if len(paths) == 1 else label + "/" + groups
+        else:
+            df["_source"] = label
         frames.append(df)
-    return pd.concat(frames, ignore_index=True), labels
+    combined = pd.concat(frames, ignore_index=True)
+    return combined, list(dict.fromkeys(combined["_source"]))
 
 
 def _source_colors(df):
@@ -348,7 +359,8 @@ def parse_args():
     p.add_argument("--threshold", type=float, default=0.0,
                    help="Threshold for min_ca; rows with min_ca below this value are dropped")
     p.add_argument("--color-sources", action="store_true",
-                   help="Color points by source CSV; otherwise all points are one color")
+                   help="Color points by source (a pooled CSV's group column, else "
+                        "the source CSV); otherwise all points are one color")
     p.add_argument("--show", action="store_true",
                    help="Show plots interactively after saving")
     return p.parse_args()
