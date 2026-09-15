@@ -41,7 +41,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bmbcsim.simulation.result_io import NON_RUN_DIRS, find_run_dirs
 from analysis import compute_local_ca
 
@@ -55,7 +54,7 @@ _RESERVED_DIRS = NON_RUN_DIRS
 METRICS = [
     # (csv/key name, axis label)
     ("t_95_depletion", "Time to 95%\ndepletion after\nstimulus (ms)"),
-    ("depletion", "Depletion\n[Ca] (mM)"),
+    ("depletion", "Minimum\n[Ca] (mM)"),
     ("t_95_replenishment", "Time to 95%\nreplenishment (ms)"),
 ]
 
