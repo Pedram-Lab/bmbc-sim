@@ -187,7 +187,7 @@ def create_cluster(
                 # Billing project ("#BSUB -P"). Janelia's LSF rejects jobs
                 # without one -- bsub exits 255 and dask-jobqueue discards its
                 # stderr, so the only symptom is every worker failing to start.
-                "project": "pedram",
+                "project": "scicompsoft",
                 "cores": 1,
                 "processes": 1,
                 "ncpus": n_threads_per_worker,
