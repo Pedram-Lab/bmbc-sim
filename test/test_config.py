@@ -155,6 +155,6 @@ def test_janelia_job_script_has_a_project_and_no_memory_directive(tmp_path):
     finally:
         cluster.close()
 
-    assert '#BSUB -P "pedram"' in script
+    assert '#BSUB -P "scicompsoft"' in script
     assert "#BSUB -M" not in script
     assert "#BSUB -n 4" in script  # slots are what actually reserve the memory
