@@ -86,6 +86,22 @@ def test_expand_sweep_dotted_keys_target_nested_groups():
     assert base.mech.ecs_ratio == 0.1
 
 
+def test_expand_sweep_zips_comma_joined_axes():
+    jobs = expand_sweep(
+        _Cfg(),
+        sweep={"ca, factor": [["1 mmol / L", 1.0], ["2 mmol / L", 4.0]], "rate": ["0.1 / ms", "0.2 / ms"]},
+        result_root="out",
+    )
+    assert len(jobs) == 4  # 2 pairs x 2 rates, not 2 x 2 x 2
+    labels, cfg, subdir = jobs[0]
+    assert (cfg.ca.value, cfg.factor) == (1.0, 1.0)
+    assert set(labels) == {"ca", "factor", "rate", "seed"}
+    # Zipped axes still get one directory level each.
+    assert str(subdir) == "out/ca=1-mmol-L/factor=1.0/rate=0.1-ms"
+    with pytest.raises(ValueError, match="zipped axis"):
+        expand_sweep(_Cfg(), sweep={"ca, factor": [["1 mmol / L"]]}, result_root="out")
+
+
 def test_expand_sweep_disambiguates_axes_sharing_a_leaf_name():
     class _TwoGroups(SimulationConfig):
         simulation_name: str = "demo"

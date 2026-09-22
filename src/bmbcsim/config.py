@@ -29,7 +29,7 @@ import inspect
 import re
 import sys
 from collections.abc import Callable
-from itertools import product
+from itertools import chain, product
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -414,12 +414,22 @@ def expand_sweep(
     dotted key when two axes share a leaf name (``buffer.kd`` / ``sensor.kd``),
     which would otherwise give both directory levels the same label. The
     cross-cutting fields ``result_root``/``simulation_name``/``seed`` stay top-level.
+
+    A comma-joined key (``"diffusion.diffusivity_ecs, ecm.enabled"``) zips its axes:
+    each value is a list with one entry per key, and the pairs are swept together
+    instead of crossed. They still get one ``<axis>=<value>`` directory level each.
     """
     seed_list = list(range(seeds)) if isinstance(seeds, int) else list(seeds)
     root = Path(result_root) if result_root is not None else Path(base_config.result_root)
     cls = type(base_config)
     base = base_config.model_dump()
-    keys = list(sweep)
+    # "a, b": [[a1, b1], ...] sweeps a and b together; a lone key keeps its values as-is
+    # (which may themselves be lists, for list-typed fields).
+    groups = [([k.strip() for k in key.split(",")], values) for key, values in sweep.items()]
+    for names, values in groups:
+        if len(names) > 1 and any(not isinstance(v, (list, tuple)) or len(v) != len(names) for v in values):
+            raise ValueError(f"zipped axis {names}: every value must be a list of {len(names)} entries")
+    keys = list(chain.from_iterable(names for names, _ in groups))
     has_seed = "seed" in cls.model_fields
     if not has_seed and len(seed_list) > 1:
         raise ValueError(f"{cls.__name__} has no 'seed' field but {len(seed_list)} seeds requested")
@@ -428,8 +438,9 @@ def expand_sweep(
     axis_name = {k: (leaf if leaves.count(leaf) == 1 else k) for k, leaf in zip(keys, leaves)}
 
     jobs: list[tuple[dict[str, Any], SimulationConfig, Path]] = []
-    for combo in product(*[sweep[k] for k in keys]):
-        combo_labels = dict(zip(keys, combo))
+    for combo in product(*[values for _, values in groups]):
+        flat = chain.from_iterable(v if len(names) > 1 else (v,) for (names, _), v in zip(groups, combo))
+        combo_labels = dict(zip(keys, flat))
         subdir = root / Path(*[f"{axis_name[k]}={_slug(v)}" for k, v in combo_labels.items()])
         for seed in seed_list:
             labels = {**combo_labels, **({"seed": seed} if has_seed else {})}
@@ -443,6 +454,15 @@ def expand_sweep(
             cfg = cls(**cfg_dict)  # revalidates (units, dims, typos)
             jobs.append((labels, cfg, subdir))
     return jobs
+
+
+def _yaml_safe(value: Any) -> Any:
+    """Scalars as-is, lists (zipped-axis tuples) element-wise, anything else (quantities) as str."""
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_yaml_safe(v) for v in value]
+    return str(value)
 
 
 def run_sweep(
@@ -488,8 +508,7 @@ def run_sweep(
             {
                 "base": base_config.model_dump(),
                 "sweep": {
-                    k: [v if isinstance(v, (bool, int, float, str)) else str(v) for v in vs]
-                    for k, vs in sweep.items()
+                    k: [_yaml_safe(v) for v in vs] for k, vs in sweep.items()
                 },
                 "seeds": seeds if isinstance(seeds, int) else list(seeds),
             },
