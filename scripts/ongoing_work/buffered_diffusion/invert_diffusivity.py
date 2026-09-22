@@ -1,33 +1,24 @@
 """Invert the buffered-diffusion forward model.
 
-``simulation.run(Config(scenario=..., diffusivity=D, ...))`` produces a front that
-``evaluate.py`` fits to an *effective* diffusivity D_eff(D). There
-is no closed form for D_eff here -- it's measured from the simulated front,
-not a rapid-buffering-approximation formula -- so we treat the pipeline as a
-black-box forward map and invert it with a bracketed line search:
-D_eff(D) only increases with D (more free diffusivity never slows the
-front), so ``scipy.optimize.brentq`` on ``residual(D) = D_eff(D) - target``
-converges reliably. Any of the buffered scenarios can be inverted (``--scenario``);
-buffering slows the front in all of them, uptake and release alike, so the
-bracketing below holds regardless.
+``simulation.run(Config(scenario=..., diffusivity=D, ...))`` builds a front.
+``evaluate.py`` fits it to an effective diffusivity D_eff(D). D_eff has no
+closed form; we measure it from the simulation. So we invert the pipeline as
+a black box, with a bracketed line search (``scipy.optimize.brentq`` on
+``D_eff(D) - target``). D_eff(D) rises with D, so the search always
+converges. Any buffered scenario works (``--scenario``): buffering slows the
+front the same way in all of them.
 
-Each evaluation of D_eff(D) is a full FEM simulation, so this is slow --
-expect on the order of ten simulation runs (bracket expansion plus
-bisection) per target.
+Each D_eff(D) evaluation is a full FEM run. Expect about ten runs per target.
 
-This is meant to calibrate ``scripts/ongoing_work/tissue_kinetics/simulation.py``:
-run it once with ``ecm.enabled=false`` (pure diffusion, diffusivity_ecs=
-TISSUE_DIFFUSIVITY_ECS) and once with ``ecm.enabled=true`` using the diffusivity
-this script returns, so the buffered run's *effective* ECS diffusivity
-matches the unbuffered baseline. Both configs are parametrized by (kf, Kd), so the
-buffer/reservoir parameters below transfer directly -- but check them against the
-tissue config you actually intend to calibrate, since they are constants here and
-that script's ECM group has since moved (its Config default is Kd = 10 mM, and the
-contraction sweeps run kf = 769.23 / (mM s)). Pinned explicitly here rather than
-left at ``simulation.py``'s own defaults: this script is the one calibrating
-against the tissue sim, so it -- not ``simulation.py`` -- is the ground truth for
-what "the tissue values" are, and must not drift if ``simulation.py``'s own
-defaults change for unrelated reasons.
+This calibrates ``scripts/ongoing_work/tissue_kinetics/simulation.py``. Run
+it once with ``ecm.enabled=false`` (diffusivity_ecs=TISSUE_DIFFUSIVITY_ECS),
+then once with ``ecm.enabled=true`` using the diffusivity this script
+returns. That matches the buffered run's effective ECS diffusivity to the
+unbuffered baseline. The (kf, Kd) constants below are pinned by hand, not
+read from ``simulation.py``'s defaults: this script is the ground truth for
+"the tissue values", and the tissue config has since drifted (its Kd default
+is now 10 mM; its contraction sweeps use kf = 769.23 / (mM s)). Check the
+constants against the tissue config you actually want to match.
 """
 import argparse
 
@@ -40,11 +31,10 @@ from bmbcsim.units import to_simulation_units
 from simulation import Config, run
 
 RESULT_ROOT = "results"
-# The tissue sim starts its ECS at ca_ecs with the ECM in equilibrium against it, and
-# its synapses are Ca sinks (transport ecs -> cell), so the disturbance that travels
-# through the ECS is a depletion wave off an equilibrated baseline: "replenishment".
-# The other scenarios invert the same way, but their result only transfers to a tissue
-# run that starts from the same buffer state and drives it in the same direction.
+# The tissue sim starts its ECS at ca_ecs, with the ECM at equilibrium. Its
+# synapses are Ca sinks, so the ECS sees a depletion wave off that baseline:
+# "replenishment". The other scenarios also invert, but only match a tissue
+# run that starts from the same buffer state and drains it the same way.
 DEFAULT_SCENARIO = "replenishment"
 
 # Mirrors scripts/ongoing_work/tissue_kinetics/simulation.py's defaults.
@@ -77,9 +67,9 @@ def measure_d_eff(diffusivity, *, scenario=DEFAULT_SCENARIO, result_root=RESULT_
     )
     run(cfg)
     evaluate.RESULT_ROOT = result_root
-    # The front is measured against the scenario's initial [Ca], not against 0: the
-    # equilibrated scenarios start at Kd, where a threshold on [Ca] itself finds no
-    # front at all and the fit below would fail.
+    # The front is measured against the scenario's initial [Ca], not 0.
+    # Equilibrated scenarios start at Kd; a plain [Ca] threshold would find
+    # no front there, and the fit below would fail.
     d_eff = evaluate.analyze_run(
         cfg.run_name, to_simulation_units(cfg.initial_ca)
     )["d_eff"]
@@ -104,9 +94,9 @@ def find_diffusivity(target_d_eff, *, scenario=DEFAULT_SCENARIO, result_root=RES
             print(f"  D={d:.4f} um^2/ms  ->  D_eff={cache[d]:.4f} um^2/ms")
         return cache[d] - target_d_eff
 
-    # Buffering only ever slows the front (D_eff(D) < D for any D), so
-    # target_d_eff itself is a safe lower bracket; expand the upper bracket
-    # until the residual turns positive.
+    # Buffering only slows the front (D_eff(D) < D for any D). So
+    # target_d_eff is a safe lower bracket. Expand the upper bracket until
+    # the residual turns positive.
     lo, hi = target_d_eff, target_d_eff * 2.0
     while residual(hi) < 0:
         hi *= 2.0
@@ -129,8 +119,8 @@ if __name__ == "__main__":
         help=f"target effective diffusivity, um^2/ms (default: {TISSUE_DIFFUSIVITY_ECS}, "
              "tissue_kinetics's no-ECM diffusivity_ecs)",
     )
-    # "nobuffer" is not offered: with no buffer to compensate for, D_eff == D and the
-    # inversion is the identity.
+    # "nobuffer" is not offered: with no buffer, D_eff == D, so inversion
+    # is the identity.
     parser.add_argument(
         "--scenario", default=DEFAULT_SCENARIO,
         choices=["depleted", "saturated", "replenishment"],

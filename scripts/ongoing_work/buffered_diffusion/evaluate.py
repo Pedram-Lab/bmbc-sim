@@ -1,34 +1,33 @@
 """Analyze the buffered-diffusion experiment.
 
-Loads every scenario ``simulation.py`` has results for (missing ones are
-skipped), samples [Ca] along the long (y) axis of the box at every recorded
-snapshot, tracks the half-maximum front position y_half(t), and fits y_half^2
-vs t to extract an effective diffusivity per scenario.
+Loads every scenario ``simulation.py`` has results for; skips missing ones.
+Samples [Ca] along the box's long (y) axis at each snapshot. Tracks the
+half-maximum front position y_half(t). Fits y_half^2 vs t to get an
+effective diffusivity per scenario.
 
 Ca crosses y = 0 as a constant flux. For constant-flux diffusion into a
-semi-infinite medium the *excess* over the initial concentration, normalized by
-its surface value, is self-similar in eta = y / (2*sqrt(D t)):
+semi-infinite medium, the excess over the initial concentration -- scaled by
+its surface value -- is self-similar in eta = y / (2*sqrt(D t)):
 
     S(y,t) / S(0,t) = exp(-eta^2) - sqrt(pi)*eta*erfc(eta),   S = |C - C_init|.
 
-The half-maximum front (S = 0.5*S(0,t)) therefore sits at a fixed eta_half, so
-y_half = 2*eta_half*sqrt(D t), i.e. y_half^2 = (4*eta_half^2) * D * t. Fitting
-the slope of y_half^2 vs t gives D_eff = slope / (4*eta_half^2). For the
-buffered (nonlinear) scenarios this is an *apparent* effective diffusivity -- a
-directly comparable measure of how fast the front advances.
+So the half-maximum front (S = 0.5*S(0,t)) sits at a fixed eta_half:
+y_half^2 = (4*eta_half^2) * D * t. The slope of y_half^2 vs t gives
+D_eff = slope / (4*eta_half^2). For the buffered (nonlinear) scenarios this
+is only an *apparent* diffusivity, but it lets us compare scenarios directly.
 
-Front-tracking the excess magnitude S rather than C itself is what makes the
-scenarios comparable: "saturated"/"replenishment" start from a uniform
-C_init = Kd, against which a threshold on C carries no information, and
-"replenishment" draws Ca *out*, so its excess is negative. S decreases
-monotonically away from the source in all four scenarios, and for C_init = 0
-with an influx it is just C, i.e. the criterion used before the scenarios
-existed. The single "nobuffer" run is a valid reference for all of them: pure
-diffusion is linear, so its excess profile is unaffected by a baseline offset and
-an efflux would only mirror its sign. Caveat: the buffer's differential capacity
-total*Kd/(C+Kd)^2 falls as
-C rises, so the front accelerates in "depleted"/"saturated" and decelerates in
-"replenishment" -- a single fitted slope averages over that curvature, and the
+We track the excess S, not C, so the scenarios are comparable.
+"saturated"/"replenishment" start at a uniform C_init = Kd, where a plain
+threshold on C carries no information; "replenishment" also draws Ca *out*,
+so its excess is negative. S decreases monotonically away from the source in
+all four scenarios. (For C_init = 0 with an influx, S is just C.) "nobuffer"
+is a valid reference for all scenarios: pure diffusion is linear, so a
+baseline offset does not change its excess profile, and an efflux only
+flips its sign.
+
+Caveat: the buffer's differential capacity, total*Kd/(C+Kd)^2, falls as C
+rises. So the front speeds up in "depleted"/"saturated" and slows down in
+"replenishment". A single fitted slope averages over that curve, so its
 value depends somewhat on the fit window.
 """
 import os
@@ -43,8 +42,8 @@ from bmbcsim import ResultLoader
 from bmbcsim.units import to_simulation_units
 from simulation import Config
 
-# Geometry constants, read off simulation.py's config defaults. The source face is
-# at y = 0, so distance from the source equals y.
+# Geometry constants, from simulation.py's config defaults. Source face is
+# at y = 0, so distance from source equals y.
 _DEFAULTS = Config()
 RESULT_ROOT = "results"
 BOX_LENGTH = to_simulation_units(_DEFAULTS.box.length_y, "length")  # um, long axis
@@ -93,12 +92,12 @@ def load_kymograph(simulation_name):
         simulation_name=simulation_name, results_root=RESULT_ROOT
     )
 
-    # Sample line down the long axis. The first point sits essentially on the
-    # source face (y ~ 0) so that cs = C(0,t): referencing the surface at an
-    # inset point would bias D_eff high by a few percent, since the half-max
-    # threshold 0.5*cs would then be taken against a value below the true C(0,t).
-    # Pass a list of [x, y, z] lists (ResultLoader.load_point_values wraps a
-    # bare 2-D ndarray incorrectly).
+    # Sample line along the long axis. The first point sits at y ~ 0 (the
+    # source face), so cs = C(0,t). A point set back from the surface would
+    # bias D_eff high: the half-max threshold 0.5*cs would then compare
+    # against a value below the true C(0,t).
+    # Pass a list of [x, y, z] lists: load_point_values wraps a bare 2-D
+    # ndarray incorrectly.
     y = np.linspace(0.05, BOX_LENGTH - 0.5, N_SAMPLE_POINTS)
     points = [[MID_X, float(yi), MID_Z] for yi in y]
     y_from_source = y  # source face is at y = 0
@@ -128,8 +127,8 @@ def half_max_position(y_from_source, profile, threshold):
 def track_front(times, y_from_source, ca, ca_init=0.0):
     """Return (S[t], y_half[t]): excess magnitude at the source, and front position.
 
-    The tracked signal is S = |C - ca_init|, not C: see the module docstring. For
-    ca_init = 0 and an influx it is C, so nothing changes for those scenarios.
+    S = |C - ca_init|, not C; see the module docstring. For ca_init = 0 with
+    an influx, S is just C, so nothing changes for those scenarios.
     """
     excess = np.abs(ca - ca_init)
     cs = excess[:, 0]  # excess at the source-most sample point
@@ -142,8 +141,8 @@ def track_front(times, y_from_source, ca, ca_init=0.0):
 
 def fit_effective_diffusivity(times, y_half):
     """Fit y_half^2 vs t over the established-front window; return (D_eff, mask)."""
-    # Constant-flux diffusion is self-similar for all t>0; restrict the fit to
-    # where the front is resolved (> 3 um past the first sample) and has not yet
+    # Constant-flux diffusion is self-similar for all t>0. Fit only where
+    # the front is resolved (> 3 um past the first sample) and has not yet
     # reached the far wall (< 0.6 * box length).
     mask = np.isfinite(y_half) & (y_half > 3.0) & (y_half < 0.6 * BOX_LENGTH)
     if mask.sum() < 2:
@@ -154,11 +153,11 @@ def fit_effective_diffusivity(times, y_half):
 
 def analyze_run(simulation_name, ca_init=0.0):
     """Load a run and front-track it. Returns a dict with times, y, ca, cs,
-    y_half, d_eff, mask, loader -- everything main()'s report/CSV/plot code needs,
-    and what other scripts need to pull the fitted diffusivity back out.
+    y_half, d_eff, mask, loader: everything main() needs, and what other
+    scripts use to read the fitted diffusivity back out.
 
-    :param ca_init: The run's uniform initial [Ca] (mM), i.e. ``Config.initial_ca``;
-        the front is tracked on the excess over it.
+    :param ca_init: The run's uniform initial [Ca] (mM), i.e. ``Config.initial_ca``.
+        The front is tracked on the excess over it.
     """
     loader, times, y, ca = load_kymograph(simulation_name)
     cs, y_half = track_front(times, y, ca, ca_init)
@@ -172,8 +171,8 @@ def main():
 
     results = {}
     for scenario in SCENARIOS:
-        # The initial [Ca] the front is measured against is the scenario's, not a
-        # property of the recorded data; take it from the same config that ran it.
+        # The front is measured against the scenario's initial [Ca], not the
+        # recorded data. Take it from the same config that ran the scenario.
         ca_init = to_simulation_units(Config(scenario=scenario).initial_ca)
         try:
             results[scenario] = analyze_run(f"buffered_diffusion_{scenario}", ca_init)
@@ -211,8 +210,8 @@ def main():
     # --- Figure -----------------------------------------------------
     fig, (ax_prof, ax_fit) = plt.subplots(1, 2, figsize=(13, 5))
 
-    # (a) concentration profiles at a few snapshot times (raw [Ca], so that the
-    # scenarios' different baselines and flux directions are visible)
+    # (a) concentration profiles at a few snapshot times (raw [Ca]: shows
+    # each scenario's baseline and flux direction)
     snapshot_times = [100.0, 300.0, 600.0, 1000.0]  # ms
     for scenario, r in results.items():
         for tt in snapshot_times:
@@ -225,8 +224,8 @@ def main():
     ax_prof.set_xlabel("distance from source (um)")
     ax_prof.set_ylabel("[Ca] (mM)")
     ax_prof.set_title("Concentration profiles along the box")
-    # Upper right: the far end of the box sits at the baseline, so nothing is plotted
-    # there, while the upper left is where the saturated profiles peak.
+    # Upper right: the far end of the box sits at baseline, so nothing
+    # plots there. Upper left is where the saturated profiles peak.
     ax_prof.legend(fontsize=7, ncol=len(results), loc="upper right")
     ax_prof.grid(alpha=0.3)
 
@@ -250,9 +249,8 @@ def main():
 
     fig.suptitle("Buffering slows Ca$^{2+}$ diffusion through an elongated box")
     fig.tight_layout()
-    # The comparison lives with a buffered run: those are the ones being
-    # characterized. Only one run's plots/ is asked for, so the others are not
-    # created empty.
+    # The comparison belongs with a buffered run: that is what is being
+    # characterized. Only one run's plots/ gets it; the rest stay empty.
     owner = next((s for s in results if s != BASELINE), BASELINE)
     fig_path = os.path.join(results[owner]["loader"].plot_dir, "buffered_diffusion.png")
     fig.savefig(fig_path, dpi=150)

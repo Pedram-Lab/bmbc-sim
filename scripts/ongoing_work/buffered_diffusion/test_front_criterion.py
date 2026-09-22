@@ -1,11 +1,11 @@
 """Check that evaluate.py's front criterion is scenario-independent.
 
-Feeds analytic constant-flux profiles -- the same self-similar shape, but placed
-on each scenario's baseline and flux direction -- through ``track_front`` and
-``fit_effective_diffusivity``, and asserts they all recover the diffusivity that
-built them. Without the |C - C_init| generalization, the offset scenarios return
-NaN (nothing below 0.5*C(0,t)) and the reversed one returns NaN too (the profile
-increases with y).
+Builds analytic constant-flux profiles: the same shape, placed on each
+scenario's baseline and flux direction. Runs them through ``track_front``
+and ``fit_effective_diffusivity``; each must recover the diffusivity used to
+build it. Without the |C - C_init| generalization, offset scenarios return
+NaN (nothing drops below 0.5*C(0,t)), and the reversed scenario also returns
+NaN (its profile rises with y instead).
 
     uv run scripts/ongoing_work/buffered_diffusion/test_front_criterion.py
 """
@@ -47,9 +47,9 @@ def main():
         assert abs(d_eff - D) < 0.01 * D, f"{scenario}: D_eff={d_eff:.4f}, expected {D}"
         print(f"  {scenario:>14}: D_eff = {d_eff:.4f} um^2/ms (built with {D})")
 
-    # Same underlying profile in every scenario, so baseline and flux direction must
-    # drop out of both tracked quantities -- in particular the reversed scenario has
-    # to report a positive excess amplitude, not a negative one.
+    # Same underlying profile in every scenario. Baseline and flux direction
+    # must drop out of both tracked quantities: the reversed scenario must
+    # report a positive excess amplitude, not a negative one.
     for scenario, (cs, y_half) in tracked.items():
         assert np.allclose(cs, tracked[evaluate.BASELINE][0]), f"{scenario}: excess differs"
         assert np.allclose(y_half, tracked[evaluate.BASELINE][1]), f"{scenario}: front differs"

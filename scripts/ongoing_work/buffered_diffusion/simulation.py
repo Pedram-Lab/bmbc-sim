@@ -1,11 +1,11 @@
 """Buffered diffusion in an elongated box.
 
-Ca2+ crosses one end face of a long, thin box and diffuses down the long (y)
-axis. ``scenario`` selects which of four variants of that experiment to run,
-using the Ca + ECM <-> ECM_Ca chemistry from
-``scripts/ongoing_work/tissue_kinetics/simulation.py`` for the buffer. Comparing
-them shows how buffering slows the apparent speed of diffusion, and that it
-slows uptake and release differently.
+Ca2+ enters one end of a long, thin box and diffuses along the long (y) axis.
+``scenario`` picks one of four variants of this experiment. Each variant uses
+the same Ca + ECM <-> ECM_Ca buffer chemistry as
+``scripts/ongoing_work/tissue_kinetics/simulation.py``. Comparing the variants
+shows how the buffer slows diffusion, and that it slows uptake and release by
+different amounts.
 
 Run the scenarios, then compare them with ``evaluate.py``:
 
@@ -14,15 +14,14 @@ Run the scenarios, then compare them with ``evaluate.py``:
     uv run scripts/ongoing_work/buffered_diffusion/simulation.py scenario=saturated
     uv run scripts/ongoing_work/buffered_diffusion/simulation.py scenario=replenishment
 
-(equivalently ``--config-name <scenario>``, which is what
-``scripts/run_all_simulations.sh`` uses).
+(Or use ``--config-name <scenario>``. ``scripts/run_all_simulations.sh`` does this.)
 
-The box mesh is built directly with netgen.occ (the same approach
-``bmbcsim.geometry.create_box_geometry`` uses internally). We do not use
-``create_box_geometry`` itself because its single-compartment output uses the
-material name "box:top", which the single-region assembly path cannot resolve
-(it looks up "top"); building our own mesh with the colon-free material "box"
-avoids that and lets us name the source/far end faces explicitly.
+The box mesh is built directly with netgen.occ, the same way
+``bmbcsim.geometry.create_box_geometry`` builds it. We do not call
+``create_box_geometry`` itself: its output names the one compartment
+"box:top", and the single-region assembly path looks up "top", so it cannot
+resolve that name. Our own mesh uses the colon-free material name "box"
+instead, and also lets us name the source and far end faces directly.
 """
 from typing import Literal
 
@@ -53,9 +52,9 @@ class Box(ConfigGroup):
 
 
 class Buffer(ConfigGroup):
-    """Immobile ECM buffer, present in every scenario but "nobuffer". kf and total
-    match the tissue sim; Kd matches the Ca reservoir so the buffer is
-    half-saturated near the source."""
+    """Immobile ECM buffer. Present in every scenario except "nobuffer". kf and
+    total match the tissue sim. Kd matches the Ca reservoir, so the buffer
+    starts half-saturated near the source."""
 
     ecm_total: Quantity("mM") = "2.0 mM"
     ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
@@ -71,26 +70,26 @@ class Config(SimulationConfig):
     """Full config for the buffered-diffusion experiment."""
 
     simulation_name: str = "buffered_diffusion"
-    # The experiment's only variant, and its run-name postfix:
-    #   nobuffer      -- no buffer; Ca starts at 0 and flows in. The free-diffusion
-    #                    reference evaluate.py measures the others against.
-    #   depleted      -- buffer present and fully unbound; Ca starts at 0 and flows in.
-    #   saturated     -- buffer in equilibrium with Ca at its Kd (so half-bound);
+    # The experiment's only variant. Also sets the run-name postfix.
+    #   nobuffer      -- no buffer. Ca starts at 0 and flows in. This is the
+    #                    free-diffusion reference for the other scenarios.
+    #   depleted      -- buffer present, fully unbound. Ca starts at 0 and flows in.
+    #   saturated     -- buffer at equilibrium with Ca at its Kd (half-bound).
     #                    Ca flows in on top of that baseline.
-    #   replenishment -- as saturated, but the flux is exactly reversed: Ca is drawn
-    #                    out of the source face and the buffer releases Ca to refill it.
+    #   replenishment -- like saturated, but the flux runs the other way. Ca
+    #                    leaves the source face; the buffer releases Ca to refill it.
     scenario: Literal["nobuffer", "depleted", "saturated", "replenishment"] = "nobuffer"
     box: Box = Box()
     buffer: Buffer = Buffer()
     ca_source: Quantity("mM") = "1.3 mM"
     diffusivity: Quantity("um2 / ms") = "0.7 um2 / ms"
-    # Constant Ca flux across the source face (out of the box for "replenishment", in
-    # for every other scenario). A concentration-independent flux
-    # (GeneralFlux) is used rather than a fixed-concentration reservoir because
-    # membrane transport is integrated explicitly (fem_details.transport_step),
-    # so a stiff Robin/Passive reservoir would be numerically unstable. If None,
-    # the density is derived so the no-buffer surface concentration reaches
-    # ~ca_source by end_time: q = ca_source * sqrt(pi*D) / (2*sqrt(end_time)).
+    # Constant Ca flux across the source face. Flux leaves the box for
+    # "replenishment"; it enters for every other scenario. We use a
+    # concentration-independent flux (GeneralFlux), not a fixed-concentration
+    # reservoir: membrane transport is integrated explicitly, so a stiff
+    # Robin/Passive reservoir would be unstable. If this is None, we derive
+    # the density so the no-buffer surface concentration reaches ~ca_source
+    # by end_time: q = ca_source * sqrt(pi*D) / (2*sqrt(end_time)).
     source_flux_density: Quantity("mM um / ms") | None = None
     # Timing (mirrors the tissue sim)
     end_time: Quantity("s") = "1.0 s"
@@ -104,8 +103,8 @@ class Config(SimulationConfig):
 
     @property
     def initial_ca(self) -> u.Quantity:
-        """Uniform initial [Ca]. The scenarios that start in buffer equilibrium sit at
-        the buffer's Kd (half-bound); the others start empty."""
+        """Uniform initial [Ca]. Scenarios that start at buffer equilibrium use the
+        buffer's Kd (half-bound). The others start empty."""
         equilibrated = self.scenario in ("saturated", "replenishment")
         return self.buffer.kd if equilibrated else 0.0 * u.mmol / u.L
 
@@ -115,10 +114,10 @@ class Config(SimulationConfig):
 
 
 def make_box_mesh(box: Box) -> ngs.Mesh:
-    """Build an elongated box mesh, source face at y=0, far face at y=Ly.
+    """Build an elongated box mesh. Source face is at y=0; far face is at y=Ly.
 
-    One compartment "box"; exterior faces named "source" (y=0), "far" (y=Ly)
-    and "side" (the four long faces).
+    One compartment, named "box". Exterior faces are named "source" (y=0),
+    "far" (y=Ly), and "side" (the four long faces).
     """
     lx = to_simulation_units(box.width_x, "length")
     ly = to_simulation_units(box.length_y, "length")
@@ -145,8 +144,8 @@ def run(cfg: Config) -> None:
 
     source_flux_density = cfg.source_flux_density
     if source_flux_density is None:
-        # Surface concentration of constant-flux diffusion: C(0,t) = 2 q sqrt(t)
-        # / sqrt(pi D). Choose q so C(0, end_time) ~ ca_source.
+        # Surface concentration for constant-flux diffusion:
+        # C(0,t) = 2 q sqrt(t) / sqrt(pi D). Pick q so C(0, end_time) ~ ca_source.
         source_flux_density = (
             cfg.ca_source * np.sqrt(np.pi * cfg.diffusivity) / (2 * np.sqrt(cfg.end_time))
         ).to((u.mmol / u.L) * u.um / u.ms)
@@ -154,15 +153,15 @@ def run(cfg: Config) -> None:
           f"{' (drawn out)' if efflux else ''}")
 
     if efflux:
-        # GeneralFlux is concentration-independent, so too strong an efflux keeps
-        # drawing Ca out after the source face is empty, driving [Ca] negative. The
-        # worst case is the same drawdown with no buffer to replenish it:
-        # C(0,t) = initial_ca - 2 q sqrt(t) / sqrt(pi D).
+        # GeneralFlux does not depend on concentration. A too-strong efflux keeps
+        # pulling Ca out after the source face is empty, and [Ca] goes negative.
+        # Worst case, with no buffer to refill it: C(0,t) = initial_ca -
+        # 2 q sqrt(t) / sqrt(pi D).
         drawdown = (
             2 * source_flux_density * np.sqrt(cfg.end_time) / np.sqrt(np.pi * cfg.diffusivity)
         ).to(u.mmol / u.L)
-        # The derived default reaches ca_source == kd == initial_ca exactly at
-        # end_time, i.e. touches zero at the last step; hence the float slack.
+        # The default flux reaches zero exactly at end_time (ca_source == kd
+        # == initial_ca). The float slack below allows for that.
         assert drawdown <= 1.000001 * initial_ca, (
             f"efflux would draw the source face down by {drawdown:.4g} from its initial "
             f"{initial_ca:.4g}, i.e. below zero: lower source_flux_density or end_time"
@@ -191,10 +190,10 @@ def run(cfg: Config) -> None:
     print(f"  Initial [Ca]: {initial_ca:.4g}")
 
     if cfg.has_buffer:
-        # The buffer starts in equilibrium with initial_ca, i.e. Langmuir-bound:
-        # ECM_Ca = ecm_total * Ca / (Ca + Kd). "depleted" (Ca = 0) therefore starts
-        # fully unbound, "saturated"/"replenishment" (Ca = Kd) half-bound.
-        # No add_diffusion -> immobile buffer.
+        # The buffer starts in equilibrium with initial_ca (Langmuir binding):
+        # ECM_Ca = ecm_total * Ca / (Ca + Kd). So "depleted" (Ca = 0) starts fully
+        # unbound; "saturated"/"replenishment" (Ca = Kd) start half-bound.
+        # No add_diffusion call: the buffer does not move.
         bound = buffer_cfg.ecm_total * initial_ca / (initial_ca + buffer_cfg.kd)
         print(
             f"  Buffer: total={buffer_cfg.ecm_total}, kf={buffer_cfg.ecm_kf}, "
