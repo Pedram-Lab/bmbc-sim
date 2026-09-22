@@ -23,7 +23,11 @@ matches the unbuffered baseline. Both configs are parametrized by (kf, Kd), so t
 buffer/reservoir parameters below transfer directly -- but check them against the
 tissue config you actually intend to calibrate, since they are constants here and
 that script's ECM group has since moved (its Config default is Kd = 10 mM, and the
-contraction sweeps run kf = 769.23 / (mM s)).
+contraction sweeps run kf = 769.23 / (mM s)). Pinned explicitly here rather than
+left at ``simulation.py``'s own defaults: this script is the one calibrating
+against the tissue sim, so it -- not ``simulation.py`` -- is the ground truth for
+what "the tissue values" are, and must not drift if ``simulation.py``'s own
+defaults change for unrelated reasons.
 """
 import argparse
 
@@ -46,8 +50,8 @@ DEFAULT_SCENARIO = "replenishment"
 # Mirrors scripts/ongoing_work/tissue_kinetics/simulation.py's defaults.
 TISSUE_DIFFUSIVITY_ECS = 0.7  # um^2/ms, the "diffusion only" baseline to match
 TISSUE_CA_ECS = "1.3 mM"
-TISSUE_ECM_TOTAL = "2.0 mM"
-TISSUE_KD = "1.3 mM"
+TISSUE_ECM_TOTAL = "1.3 mM"
+TISSUE_KD = "1.0 mM"
 TISSUE_ECM_KF = "10.0 / (mM s)"
 
 
