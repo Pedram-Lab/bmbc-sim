@@ -53,8 +53,8 @@ class Box(ConfigGroup):
 
 class Buffer(ConfigGroup):
     """Immobile ECM buffer. Present in every scenario except "nobuffer". kf and
-    total match the tissue sim. Kd matches the Ca reservoir, so the buffer
-    starts half-saturated near the source."""
+    total match the tissue sim. Its bound fraction at equilibrium follows from
+    Kd and whatever [Ca] it equilibrates against."""
 
     ecm_total: Quantity("mM") = "2.0 mM"
     ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
@@ -74,7 +74,7 @@ class Config(SimulationConfig):
     #   nobuffer      -- no buffer. Ca starts at 0 and flows in. This is the
     #                    free-diffusion reference for the other scenarios.
     #   depleted      -- buffer present, fully unbound. Ca starts at 0 and flows in.
-    #   saturated     -- buffer at equilibrium with Ca at its Kd (half-bound).
+    #   saturated     -- buffer at equilibrium with Ca at ca_source.
     #                    Ca flows in on top of that baseline.
     #   replenishment -- like saturated, but the flux runs the other way. Ca
     #                    leaves the source face; the buffer releases Ca to refill it.
@@ -103,10 +103,11 @@ class Config(SimulationConfig):
 
     @property
     def initial_ca(self) -> u.Quantity:
-        """Uniform initial [Ca]. Scenarios that start at buffer equilibrium use the
-        buffer's Kd (half-bound). The others start empty."""
+        """Uniform initial [Ca]. Scenarios that start at buffer equilibrium use
+        ca_source (the buffer's bound fraction then follows from its own Kd).
+        The others start empty."""
         equilibrated = self.scenario in ("saturated", "replenishment")
-        return self.buffer.kd if equilibrated else 0.0 * u.mmol / u.L
+        return self.ca_source if equilibrated else 0.0 * u.mmol / u.L
 
     def derived_postfix(self) -> str:
         """The scenario *is* the variant: evaluate.py compares the runs."""
@@ -145,9 +146,12 @@ def run(cfg: Config) -> None:
     source_flux_density = cfg.source_flux_density
     if source_flux_density is None:
         # Surface concentration for constant-flux diffusion:
-        # C(0,t) = 2 q sqrt(t) / sqrt(pi D). Pick q so C(0, end_time) ~ ca_source.
+        # C(0,t) = 2 q sqrt(t) / sqrt(pi D). Influx aims for ca_source by
+        # end_time. Efflux instead drains initial_ca (what's actually there),
+        # so it reaches zero at end_time instead of going negative.
+        target = initial_ca if efflux else cfg.ca_source
         source_flux_density = (
-            cfg.ca_source * np.sqrt(np.pi * cfg.diffusivity) / (2 * np.sqrt(cfg.end_time))
+            target * np.sqrt(np.pi * cfg.diffusivity) / (2 * np.sqrt(cfg.end_time))
         ).to((u.mmol / u.L) * u.um / u.ms)
     print(f"  Source flux density: {source_flux_density:.4g}"
           f"{' (drawn out)' if efflux else ''}")
@@ -156,12 +160,11 @@ def run(cfg: Config) -> None:
         # GeneralFlux does not depend on concentration. A too-strong efflux keeps
         # pulling Ca out after the source face is empty, and [Ca] goes negative.
         # Worst case, with no buffer to refill it: C(0,t) = initial_ca -
-        # 2 q sqrt(t) / sqrt(pi D).
+        # 2 q sqrt(t) / sqrt(pi D). The default flux above can't trip this; it
+        # only fires for an explicit source_flux_density override.
         drawdown = (
             2 * source_flux_density * np.sqrt(cfg.end_time) / np.sqrt(np.pi * cfg.diffusivity)
         ).to(u.mmol / u.L)
-        # The default flux reaches zero exactly at end_time (ca_source == kd
-        # == initial_ca). The float slack below allows for that.
         assert drawdown <= 1.000001 * initial_ca, (
             f"efflux would draw the source face down by {drawdown:.4g} from its initial "
             f"{initial_ca:.4g}, i.e. below zero: lower source_flux_density or end_time"
@@ -197,7 +200,7 @@ def run(cfg: Config) -> None:
         bound = buffer_cfg.ecm_total * initial_ca / (initial_ca + buffer_cfg.kd)
         print(
             f"  Buffer: total={buffer_cfg.ecm_total}, kf={buffer_cfg.ecm_kf}, "
-            f"kr={buffer_cfg.ecm_kr:.4g}, Kd={buffer_cfg.kd} (matches reservoir), "
+            f"kr={buffer_cfg.ecm_kr:.4g}, Kd={buffer_cfg.kd}, "
             f"initially bound={bound:.4g}"
         )
 
