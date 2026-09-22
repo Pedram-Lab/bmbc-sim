@@ -64,7 +64,7 @@ class Synapse(ConfigGroup):
     i_channel: Quantity("pA") = "0.5 pA"
     tau1: Quantity("ms") = "10 ms"
     tau2: Quantity("ms") = "3 ms"
-    pulse_times: list[Quantity("ms")] = ["300 ms", "310 ms", "320 ms", "330 ms", "340 ms"]
+    pulse_times: list[Quantity("ms")] = ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
 
 
 class ECM(ConfigGroup):
@@ -108,7 +108,7 @@ class Config(SimulationConfig):
     # Random seed for synapse distribution (also the sweep replicate index)
     seed: int = 42
     # Timing
-    end_time: Quantity("s") = "1.0 s"
+    end_time: Quantity("s") = "0.5 s"
     time_step: Quantity("s") = "1.0 ms"
     record_interval_factor: int = 10
     # Subsystems
