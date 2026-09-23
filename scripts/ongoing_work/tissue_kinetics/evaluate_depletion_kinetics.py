@@ -2,8 +2,10 @@
 
 For every parameter value in a sweep directory we pool the local-ECS Ca traces
 of all synapses (aggregating over any ECS-ratio sub-levels and over all seeds)
-and reduce each trace to three metrics. Each trace starts at the baseline C0 and
-dips to a minimum C_min after the stimulus at T0:
+and reduce each trace to three metrics. Each trace starts at the baseline C0
+(the run's ``diffusion.ca_ecs``) and dips to a minimum C_min after the stimulus
+at T0 (the run's first ``synapse.pulse_times`` entry); both are read from the
+run's dumped ``config.yaml``:
 
   * t_95_depletion     - time (ms, relative to the stimulus T0) to reach 95% of
                          the depletion depth on the way down, i.e. the first
@@ -14,7 +16,7 @@ dips to a minimum C_min after the stimulus at T0:
                          C_min + 0.95*(C0 - C_min).
 
 The two time metrics are read off directly as level crossings (linearly
-interpolated between the dt = 10 ms samples) rather than from a parametric fit:
+interpolated between the recorded samples) rather than from a parametric fit:
 the depletion onset bottoms out within ~2-3 samples, which makes exponential
 time constants poorly identifiable, whereas the 95% crossing times are
 well-conditioned and track the swept parameter monotonically.
@@ -40,14 +42,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 
 from bmbcsim.simulation.result_io import NON_RUN_DIRS, find_run_dirs
 from analysis import compute_local_ca
+from simulation import Config
 
-# ============ Fixed depletion-protocol constants ============
-C0 = 1.3      # baseline Ca (mM); the recovery asymptote
-T0 = 300.0    # stimulus onset (ms); traces are flat at C0 before this
-# ============================================================
+
+def protocol(result_path):
+    """(C0, T0) of a run: baseline Ca (mM) and stimulus onset (ms) from its config.yaml."""
+    with open(os.path.join(result_path, "config.yaml"), encoding="utf-8") as f:
+        cfg = Config.model_validate(yaml.safe_load(f))
+    c0 = float(cfg.diffusion.ca_ecs.to("mM").value)
+    t0 = float(min(t.to("ms").value for t in cfg.synapse.pulse_times))
+    return c0, t0
 
 _RESERVED_DIRS = NON_RUN_DIRS
 
@@ -151,27 +159,31 @@ def _crossing_time(t, c, i_start, level, descending):
     return np.nan
 
 
-def trace_metrics(times, ca):
+def trace_metrics(times, ca, c0, t0):
     """Reduce one synapse trace to (t_95_depletion, depletion, t_95_replenishment).
 
-    `t_95_depletion` is the time (ms, relative to the stimulus T0) of the first
+    `t_95_depletion` is the time (ms, relative to the stimulus `t0`) of the first
     crossing of 95% of the depletion depth on the way down; `depletion` is the Ca
     value (mM) at the minimum; `t_95_replenishment` is the time (ms, relative to
-    the minimum) of the first crossing of 95% recovery toward C0 on the way up.
+    the minimum) of the first crossing of 95% recovery toward the baseline `c0`.
     Returns NaN for a time metric whose level is never reached within the window.
     """
-    mask = times >= T0
+    mask = times >= t0
     tt, cc = times[mask], ca[mask]
     i = int(np.argmin(cc))
     t_min, c_min = _parabola_min(tt, cc, i)
-    drop = C0 - c_min
+    # A flat bottom followed by a sharp rise makes the parabola overshoot the data
+    # (by up to ~40%), which puts the 95% level below every sample; never go deeper
+    # than the sampled minimum.
+    c_min = max(c_min, float(cc[i]))
+    drop = c0 - c_min
     if drop <= 0:
         return np.nan, c_min, np.nan
 
-    # Depletion: first downward crossing of the 95%-of-depth level (from T0).
-    level_dep = C0 - 0.95 * drop
+    # Depletion: first downward crossing of the 95%-of-depth level (from t0).
+    level_dep = c0 - 0.95 * drop
     t_dep = _crossing_time(tt, cc, 0, level_dep, descending=True)
-    t_95_depletion = t_dep - T0 if np.isfinite(t_dep) else np.nan
+    t_95_depletion = t_dep - t0 if np.isfinite(t_dep) else np.nan
 
     # Replenishment: first upward crossing of the 95%-recovered level (from min).
     level_rep = c_min + 0.95 * drop
@@ -187,10 +199,11 @@ def trace_metrics(times, ca):
 
 def process_seed(result_path):
     """Return per-synapse metric rows for one seed result directory."""
+    c0, t0 = protocol(result_path)
     times, local_ca = compute_local_ca(result_path)
     rows = []
     for s in range(local_ca.shape[1]):
-        t_dep, depletion, t_rep = trace_metrics(times, local_ca[:, s])
+        t_dep, depletion, t_rep = trace_metrics(times, local_ca[:, s], c0, t0)
         rows.append((s, t_dep, depletion, t_rep))
     return rows
 
@@ -239,7 +252,7 @@ def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses):
     fig.align_ylabels(axes)
     fig.subplots_adjust(hspace=0.0, left=0.13, right=0.98, top=0.94,
                         bottom=0.2 if rot == 90 else 0.14)
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
