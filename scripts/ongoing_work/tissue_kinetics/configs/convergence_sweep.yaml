@@ -1,0 +1,40 @@
+# Space/time convergence test on a small crop of the tissue_kinetics setup.
+#
+# Spatial levels come from uniform ngs.Mesh.Refine() passes on the same base mesh
+# (h halves, 8x elements per level: 20k / 163k / 1.3M); changing mesh_size would not,
+# because h is set by the cell-surface triangulation, not maxh. Time levels halve the
+# step; record_interval_factor is zipped with it so snapshots fall at the same times
+# (every 10 ms) on every level. The sink is the whole membrane of the center cell
+# (synapse.uniform_cell), so it does not move with the mesh like LocalizedPeaks does.
+# The crop is 6x6 um: 5x5 pinches the ECS into two disconnected regions.
+#
+# Full 3x3 product, with and without the ECM buffer: 18 runs. The finest run takes
+# ~6 s/step -> ~3.5 h for 2000 steps; the rest is cheaper by 8x per level.
+#
+# Run:      uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name convergence_sweep
+# Evaluate: uv run scripts/ongoing_work/tissue_kinetics/evaluate_convergence.py results/convergence-sweep_<stamp>
+defaults:
+  - cluster: local
+  - _self_
+
+result_root: results/convergence-sweep
+
+cluster:
+  n_workers: 18
+
+base:
+  geometry:
+    box_size_x: 6.0
+    box_size_y: 6.0
+  synapse:
+    uniform_cell: true
+    n_synapses: 36   # 400 * (6x6)/(20x20): same areal density as the production box
+
+sweep:
+  geometry.n_refine: [0, 1, 2]
+  "time_step, record_interval_factor":
+    - ["1.0 ms", 10]
+    - ["0.5 ms", 20]
+    - ["0.25 ms", 40]
+  ecm.enabled: [false, true]
+seeds: [42]

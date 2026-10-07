@@ -41,6 +41,10 @@ class Geometry(ConfigGroup):
     box_size_y: float = 20.0
     box_size_z: float = 1.0
     mesh_size: float = 5.0
+    # Uniform ``ngs.Mesh.Refine()`` passes after meshing: each halves h (8x elements)
+    # on the *same* geometry, which maxh cannot guarantee once the cell-surface
+    # triangulation dominates h. For convergence tests.
+    n_refine: int = 0
 
 
 class Diffusion(ConfigGroup):
@@ -65,6 +69,10 @@ class Synapse(ConfigGroup):
     tau1: Quantity("ms") = "10 ms"
     tau2: Quantity("ms") = "3 ms"
     pulse_times: list[Quantity("ms")] = ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
+    # Convergence-test mode: no synapse patches; instead the whole membrane of the
+    # cell nearest the box center absorbs the total active-synapse flux uniformly,
+    # so the sink does not move with the mesh the way LocalizedPeaks DOF picks do.
+    uniform_cell: bool = False
 
 
 class ECM(ConfigGroup):
@@ -223,7 +231,10 @@ def run(cfg: Config) -> None:
         cell_names=cell_names,
         cell_bnd_names=bnd_names,
     )
-    print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices")
+    for _ in range(geom.n_refine):
+        tissue_mesh.Refine()
+    print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices "
+          f"(n_refine={geom.n_refine})")
 
     # ECS must be a single connected region (to_ngs_mesh names a disconnected one
     # "ecs:region_0", "ecs:region_1", ...). Fail fast: it's unphysical, and the
@@ -320,6 +331,20 @@ def run(cfg: Config) -> None:
     # Skip membrane DOFs that lie on the outer simulation box: synapses there
     # would straddle the simulation boundary rather than the cell membrane.
     exclude_outer_box = _on_outer_box(min_box, max_box)
+
+    if syn.uniform_cell:
+        centroids = np.array([cell.points.mean(axis=0) for cell in geometry.cells])
+        i_center = int(np.argmin(np.linalg.norm(centroids - 0.5 * (min_box + max_box), axis=1)))
+        print(f"  Uniform sink on cell_{i_center} (whole membrane, "
+              f"{membranes[i_center].area:.2f} um^2)")
+        uniform_flux = transport.ProportionalFlux(
+            flux=synapses_per_cell.sum() * q_per_synapse,
+            saturation=diff.ca_ecs,
+            depletion=diff.depletion,
+            temporal=nmdar_waveform,
+        )
+        membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
+        synapses_per_cell[:] = 0  # skip the patch loop below
 
     for n_syn, membrane, cell in zip(synapses_per_cell, membranes, cells):
         if n_syn == 0:
