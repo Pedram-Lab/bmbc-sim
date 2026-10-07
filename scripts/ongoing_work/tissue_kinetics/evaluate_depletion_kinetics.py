@@ -7,19 +7,30 @@ and reduce each trace to three metrics. Each trace starts at the baseline C0
 at T0 (the run's first ``synapse.pulse_times`` entry); both are read from the
 run's dumped ``config.yaml``:
 
-  * t_95_depletion     - time (ms, relative to the stimulus T0) to reach 95% of
-                         the depletion depth on the way down, i.e. the first
-                         crossing of C0 - 0.95*(C0 - C_min).
-  * depletion          - the Ca value (mM) at the minimum (the depletion depth).
-  * t_95_replenishment - time (ms, relative to the minimum) to recover 95% of the
-                         way back to C0 on the way up, i.e. the first crossing of
-                         C_min + 0.95*(C0 - C_min).
+  * depletion          - the Ca value (mM) at the minimum (the depletion depth),
+                         always shown in the middle panel.
 
-The two time metrics are read off directly as level crossings (linearly
-interpolated between the recorded samples) rather than from a parametric fit:
-the depletion onset bottoms out within ~2-3 samples, which makes exponential
-time constants poorly identifiable, whereas the 95% crossing times are
-well-conditioned and track the swept parameter monotonically.
+plus one depletion-side and one replenishment-side kinetics metric selected with
+``--metric`` (all four families are always written to the CSV; the switch only
+picks the plotted pair). Depletion metrics are measured from T0 to the minimum,
+replenishment metrics from the minimum onwards:
+
+  time (default)   t_95_*: time (ms) to the first crossing of 95% of the depth,
+                   i.e. C0 - 0.95*(C0 - C_min) on the way down and
+                   C_min + 0.95*(C0 - C_min) on the way up, linearly interpolated
+                   between samples. Depth-independent, so best for comparing the
+                   *shape* of the transient across parameters.
+  mean-rate        *_rate: 0.95*(C0 - C_min) / t_95_* (mM/ms), the mean slope over
+                   those intervals. Mixes depth and speed.
+  max-rate         max_*_rate: steepest finite-difference slope |dC/dt| (mM/ms)
+                   within the interval. Well resolved on the recovery (6-7 samples),
+                   but the drop bottoms out within 2-3 samples so the depletion value
+                   is dominated by the recording interval.
+  time-constant    tau_*: tau (ms) of a one-parameter exponential fit with the
+                   asymptotes pinned to the data, C_min + (C0 - C_min) exp(-(t-T0)/tau)
+                   on the way down and C0 - (C0 - C_min) exp(-(t-t_min)/tau) on the
+                   way up. The recovery is close to exponential; the stimulus-driven
+                   drop is not, so tau_depletion is a rough summary only.
 
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
 of the sweep root (excluding processed-data/ and plots/), and every simulation run
@@ -27,8 +38,8 @@ found anywhere beneath it is pooled -- so with more than one swept axis, the out
 axis is the parameter and the inner ones are pooled into it.
 
 Output, per sweep: a stacked 3-panel box plot at
-``<sweep>/plots/depletion_kinetics.png`` and a tidy per-synapse CSV at
-``<sweep>/processed-data/depletion_kinetics.csv``.
+``<sweep>/plots/depletion_kinetics[_<metric>].png`` (no suffix for ``time``) and a
+tidy per-synapse CSV with all metrics at ``<sweep>/processed-data/depletion_kinetics.csv``.
 """
 
 import argparse
@@ -43,6 +54,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from scipy.optimize import curve_fit
 
 from bmbcsim.simulation.result_io import NON_RUN_DIRS, find_run_dirs
 from analysis import compute_local_ca
@@ -59,12 +71,31 @@ def protocol(result_path):
 
 _RESERVED_DIRS = NON_RUN_DIRS
 
-METRICS = [
-    # (csv/key name, axis label)
-    ("t_95_depletion", "Time to 95%\ndepletion after\nstimulus (ms)"),
-    ("depletion", "Minimum\n[Ca] (mM)"),
-    ("t_95_replenishment", "Time to 95%\nreplenishment (ms)"),
-]
+# csv/key name -> axis label, in CSV column order
+LABELS = {
+    "t_95_depletion": "Time to 95%\ndepletion after\nstimulus (ms)",
+    "depletion_rate": "Mean depletion\nrate (mM/ms)",
+    "max_depletion_rate": "Max depletion\nrate (mM/ms)",
+    "tau_depletion": "Depletion time\nconstant (ms)",
+    "depletion": "Minimum\n[Ca] (mM)",
+    "t_95_replenishment": "Time to 95%\nreplenishment (ms)",
+    "replenishment_rate": "Mean replenishment\nrate (mM/ms)",
+    "max_replenishment_rate": "Max replenishment\nrate (mM/ms)",
+    "tau_replenishment": "Replenishment time\nconstant (ms)",
+}
+# --metric family -> (depletion-side key, replenishment-side key) plotted around "depletion"
+FAMILIES = {
+    "time": ("t_95_depletion", "t_95_replenishment"),
+    "mean-rate": ("depletion_rate", "replenishment_rate"),
+    "max-rate": ("max_depletion_rate", "max_replenishment_rate"),
+    "time-constant": ("tau_depletion", "tau_replenishment"),
+}
+
+
+def panels(metric):
+    """[(key, axis label), ...] for the three plotted panels of one metric family."""
+    dep, rep = FAMILIES[metric]
+    return [(k, LABELS[k]) for k in (dep, "depletion", rep)]
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +190,37 @@ def _crossing_time(t, c, i_start, level, descending):
     return np.nan
 
 
+def _max_slope(t, c):
+    """Steepest finite-difference |dC/dt| over the samples; NaN with fewer than two."""
+    return float(np.max(np.abs(np.diff(c) / np.diff(t)))) if len(t) > 1 else np.nan
+
+
+def _tau_fit(t, c, t_origin, c_start, c_end):
+    """tau of c(t) = c_end + (c_start - c_end) * exp(-(t - t_origin) / tau); NaN if unfittable."""
+    if len(t) < 3 or c_start == c_end:
+        return np.nan
+
+    def model(x, tau):
+        return c_end + (c_start - c_end) * np.exp(-(x - t_origin) / tau)
+
+    try:
+        (tau,), _ = curve_fit(model, t, c, p0=[max(t[-1] - t_origin, 1.0) / 3], bounds=(1e-6, np.inf))
+    except RuntimeError:
+        return np.nan
+    return float(tau)
+
+
 def trace_metrics(times, ca, c0, t0):
-    """Reduce one synapse trace to (t_95_depletion, depletion, t_95_replenishment).
+    """Reduce one synapse trace to a dict of the LABELS keys.
 
     `t_95_depletion` is the time (ms, relative to the stimulus `t0`) of the first
     crossing of 95% of the depletion depth on the way down; `depletion` is the Ca
     value (mM) at the minimum; `t_95_replenishment` is the time (ms, relative to
     the minimum) of the first crossing of 95% recovery toward the baseline `c0`.
-    Returns NaN for a time metric whose level is never reached within the window.
+    The mean rates are 0.95*(c0 - c_min) / t over those intervals, the max rates the
+    steepest sampled slope within them, and the time constants one-parameter
+    exponential fits (see the module docstring). Returns NaN for a time/rate metric
+    whose level is never reached within the window.
     """
     mask = times >= t0
     tt, cc = times[mask], ca[mask]
@@ -178,7 +232,7 @@ def trace_metrics(times, ca, c0, t0):
     c_min = max(c_min, float(cc[i]))
     drop = c0 - c_min
     if drop <= 0:
-        return np.nan, c_min, np.nan
+        return dict.fromkeys(LABELS, np.nan) | {"depletion": c_min}
 
     # Depletion: first downward crossing of the 95%-of-depth level (from t0).
     level_dep = c0 - 0.95 * drop
@@ -190,7 +244,19 @@ def trace_metrics(times, ca, c0, t0):
     t_rep = _crossing_time(tt, cc, i, level_rep, descending=False)
     t_95_replenishment = t_rep - t_min if np.isfinite(t_rep) else np.nan
 
-    return t_95_depletion, c_min, t_95_replenishment
+    # Sampled segments on the way down (t0 .. min) and up (min ..) for slopes and fits.
+    down, up = slice(0, i + 1), slice(i, None)
+    return {
+        "t_95_depletion": t_95_depletion,
+        "depletion_rate": 0.95 * drop / t_95_depletion,
+        "max_depletion_rate": _max_slope(tt[down], cc[down]),
+        "tau_depletion": _tau_fit(tt[down], cc[down], t0, c0, cc[i]),
+        "depletion": c_min,
+        "t_95_replenishment": t_95_replenishment,
+        "replenishment_rate": 0.95 * drop / t_95_replenishment,
+        "max_replenishment_rate": _max_slope(tt[up], cc[up]),
+        "tau_replenishment": _tau_fit(tt[up], cc[up], tt[i], cc[i], c0),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -201,27 +267,21 @@ def process_seed(result_path):
     """Return per-synapse metric rows for one seed result directory."""
     c0, t0 = protocol(result_path)
     times, local_ca = compute_local_ca(result_path)
-    rows = []
-    for s in range(local_ca.shape[1]):
-        t_dep, depletion, t_rep = trace_metrics(times, local_ca[:, s], c0, t0)
-        rows.append((s, t_dep, depletion, t_rep))
-    return rows
+    return [trace_metrics(times, local_ca[:, s], c0, t0) for s in range(local_ca.shape[1])]
 
 
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
 
-def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses):
-    """Stacked box plots: one panel per metric, one box per parameter."""
+def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses, metrics):
+    """Stacked box plots: one panel per (key, label) in `metrics`, one box per parameter."""
     n = len(param_labels)
     fig_w = max(7.0, 0.55 * n + 2.5)
-    fig, axes = plt.subplots(
-        len(METRICS), 1, sharex=True, figsize=(fig_w, 8.0)
-    )
+    fig, axes = plt.subplots(len(metrics), 1, sharex=True, figsize=(fig_w, 8.0))
     positions = np.arange(n) + 1
 
-    for ax, (key, ylabel) in zip(axes, METRICS):
+    for ax, (key, ylabel) in zip(axes, metrics):
         series = [data[label][key] for label in param_labels]
         series = [arr[np.isfinite(arr)] for arr in series]
         bp = ax.boxplot(
@@ -264,10 +324,13 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("sweeps", nargs="+", help="One or more sweep directories")
+    p.add_argument("--metric", choices=FAMILIES, default="time",
+                   help="Kinetics metric family to plot around the minimum-[Ca] panel "
+                        "(the CSV always holds all of them). Default: %(default)s")
     return p.parse_args()
 
 
-def run_sweep(sweep_dir):
+def run_sweep(sweep_dir, metric):
     sweep_dir = os.path.abspath(sweep_dir)
     sweep_name = os.path.basename(sweep_dir.rstrip("/"))
     params = discover_parameters(sweep_dir)
@@ -279,7 +342,7 @@ def run_sweep(sweep_dir):
 
     # tidy rows for CSV, plus arrays for plotting
     csv_rows = []
-    collected = {label: {key: [] for key, _ in METRICS} for label, _ in params}
+    collected = {label: {key: [] for key in LABELS} for label, _ in params}
     for label, seed_dirs in params:
         for sd in seed_dirs:
             try:
@@ -287,11 +350,10 @@ def run_sweep(sweep_dir):
             except Exception as e:
                 print(f"    {label}/{os.path.basename(sd)}: skipped ({type(e).__name__}: {e})")
                 continue
-            for syn, t_dep, depletion, t_rep in rows:
-                csv_rows.append((label, os.path.basename(sd), syn, t_dep, depletion, t_rep))
-                collected[label]["t_95_depletion"].append(t_dep)
-                collected[label]["depletion"].append(depletion)
-                collected[label]["t_95_replenishment"].append(t_rep)
+            for syn, m in enumerate(rows):
+                csv_rows.append((label, os.path.basename(sd), syn, *(m[k] for k in LABELS)))
+                for k in LABELS:
+                    collected[label][k].append(m[k])
 
     data = {
         label: {key: np.asarray(vals, dtype=float) for key, vals in metrics.items()}
@@ -307,13 +369,12 @@ def run_sweep(sweep_dir):
     csv_path = os.path.join(processed_dir, "depletion_kinetics.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["parameter", "seed_dir", "synapse_idx",
-                    "t_95_depletion_after_stim_ms", "depletion_mM",
-                    "t_95_replenishment_ms"])
+        w.writerow(["parameter", "seed_dir", "synapse_idx", *LABELS])
         w.writerows(csv_rows)
 
-    plot_path = os.path.join(plots_dir, "depletion_kinetics.png")
-    plot_sweep(sweep_name, param_labels, data, plot_path, n_synapses)
+    suffix = "" if metric == "time" else f"_{metric}"
+    plot_path = os.path.join(plots_dir, f"depletion_kinetics{suffix}.png")
+    plot_sweep(sweep_name, param_labels, data, plot_path, n_synapses, panels(metric))
     print(f"  Wrote {csv_path}")
     print(f"  Wrote {plot_path}")
 
@@ -322,7 +383,7 @@ def main():
     args = parse_args()
     for sweep_dir in args.sweeps:
         print(f"==> {sweep_dir}")
-        run_sweep(sweep_dir)
+        run_sweep(sweep_dir, args.metric)
 
 
 if __name__ == "__main__":

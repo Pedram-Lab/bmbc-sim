@@ -240,45 +240,45 @@ def _load_ecs_panel(path, step, center, radius):
     return crop_to_synapse(ecs_grid, center, radius)
 
 
-def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS,
-            step=-1, species=SPECIES_NAME):
-    """Show LOW/HIGH ECS-only snapshots side by side in linked pyvista views,
-    each cropped to a box around its own synapse center, with a slider to scrub
-    the recorded timepoints. Blocks until the window is closed, so the picker
-    below runs it in a spawned process rather than call it directly (a second GUI
-    event loop can't share the process with matplotlib's). `species` is a
-    parameter, not the module global, because the spawned child re-imports this
-    module and would only see the default.
+def explore(panels, radius=EXPLORE_RADIUS, step=-1, species=SPECIES_NAME):
+    """Show ECS-only snapshots side by side in linked pyvista views, one per
+    ``(run_dir, center, other_center, label)`` in `panels`, each cropped to a box
+    around its own synapse center, with a slider to scrub the recorded timepoints.
+    Blocks until the window is closed, so the picker below runs it in a spawned
+    process rather than call it directly (a second GUI event loop can't share the
+    process with matplotlib's). `species` is a parameter, not the module global,
+    because the spawned child re-imports this module and would only see the default.
 
-    LOW/HIGH each get an opaque marker sphere at their own synapse center and a
-    translucent one at the other geometry's -- the two coordinates are close but
-    not identical (see module docstring), and this makes that offset visible
-    instead of quietly plotting one as a stand-in for the other.
+    Each panel gets an opaque marker sphere at its own synapse center and, if
+    `other_center` is not None, a translucent one at the other geometry's -- for
+    LOW/HIGH the two coordinates are close but not identical (see module docstring),
+    and this makes that offset visible instead of quietly plotting one as a stand-in
+    for the other.
     """
-    sides = [(low_dir, low_center, high_center, "LOW"), (high_dir, high_center, low_center, "HIGH")]
-    with h5py.File(os.path.join(low_dir, "snapshot.h5")) as h5:
+    with h5py.File(os.path.join(panels[0][0], "snapshot.h5")) as h5:
         times = np.array(h5["data/time"])
     if step < 0:
         step += len(times)
 
-    plotter = pv.Plotter(shape=(1, 2))
-    panels = []
-    for i, (path, own_center, other_center, label) in enumerate(sides):
+    plotter = pv.Plotter(shape=(1, len(panels)))
+    views = []
+    for i, (path, own_center, other_center, label) in enumerate(panels):
         cropped = _load_ecs_panel(path, step, own_center, radius)
         plotter.subplot(0, i)
         # Semi-transparent: at this crop radius the synapse marker sphere is usually
         # inside a fold of the ECS surface, and an opaque mesh would hide it.
         actor = plotter.add_mesh(cropped, scalars=species, cmap="viridis", opacity=0.5)
         plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=own_center), color="red")
-        plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=other_center),
-                         color="red", opacity=0.5)
+        if other_center is not None:
+            plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=other_center),
+                             color="red", opacity=0.5)
         title = plotter.add_text(f"{label}: {Path(path).name}", font_size=8)
-        panels.append((os.path.join(path, "snapshot.h5"), cropped, actor, title, label, path))
+        views.append((os.path.join(path, "snapshot.h5"), cropped, actor, title, label, path))
 
     def set_step(value):
         idx = int(round(value))
         fields = []
-        for h5_path, cropped, actor, title, label, path in panels:
+        for h5_path, cropped, actor, title, label, path in views:
             with h5py.File(h5_path) as h5:
                 field = np.array(h5[f"data/{species}/step_{idx:05d}"])
             cropped.point_data[species] = field[cropped.point_data["_orig_idx"]]
@@ -290,7 +290,7 @@ def explore(low_dir, high_dir, low_center, high_center, radius=EXPLORE_RADIUS,
         # instead of each panel re-normalizing to its own range.
         combined = np.concatenate(fields)
         scalar_range = (float(combined.min()), float(combined.max()))
-        for _, _, actor, _, _, _ in panels:
+        for _, _, actor, _, _, _ in views:
             actor.mapper.scalar_range = scalar_range
         plotter.render()
 
@@ -329,7 +329,9 @@ def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse
             print(f"  HIGH center (um): ({high_center[0]:.2f}, {high_center[1]:.2f}, "
                   f"{high_center[2]:.2f})  dir: {high_dir}")
             multiprocessing.get_context("spawn").Process(
-                target=explore, args=(low_dir, high_dir, low_center, high_center),
+                target=explore,
+                args=([(low_dir, low_center, high_center, "LOW"),
+                       (high_dir, high_center, low_center, "HIGH")],),
                 kwargs={"species": SPECIES_NAME}).start()
 
     ax.figure.canvas.mpl_connect("pick_event", on_pick)

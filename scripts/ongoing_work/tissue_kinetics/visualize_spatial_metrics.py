@@ -7,10 +7,13 @@ Loads a spatial_metrics.csv (from evaluate_synapse_distribution_spatial.py) and:
      loadings + per-PC and cumulative R^2 of min_ca regressed on the PCs.
 
 Saves two PNGs next to the CSV (--out-dir to override) and prints the numbers.
+``--explore`` makes every scatter point clickable: a click prints the row and opens
+the run's ECS around that synapse in pyvista (visualize_ca_difference.explore).
 """
 
 import argparse
 import math
+import multiprocessing
 import os
 import re
 
@@ -158,6 +161,7 @@ def load_combined(paths):
                 "All input CSVs must come from the same evaluator version; "
                 "re-run evaluate_synapse_distribution_spatial.py to regenerate "
                 "the stale file(s).")
+        df["_csv_dir"] = os.path.dirname(os.path.abspath(path))  # for --explore
         if "group" in df.columns and df["group"].nunique() > 1:
             groups = df["group"].astype(str)
             df["_source"] = groups if len(paths) == 1 else label + "/" + groups
@@ -174,6 +178,44 @@ def _source_colors(df):
     return sources, {s: cmap(i % 10) for i, s in enumerate(sources)}
 
 
+def _scatter(ax, x, y, rows, **kw):
+    """Scatter of the `rows` of (x, y) that remembers them, for the --explore picker."""
+    artist = ax.scatter(x[rows], y[rows], alpha=0.35, s=14, picker=True, pickradius=5, **kw)
+    artist.rows = rows
+
+
+def _scatter_by_source(ax, df, x, y, color_sources):
+    if not color_sources:
+        _scatter(ax, x, y, np.arange(len(df)))
+        return None, None
+    sources, color_map = _source_colors(df)
+    for s in sources:
+        _scatter(ax, x, y, np.flatnonzero(df["_source"].values == s), color=color_map[s])
+    return sources, color_map
+
+
+def _on_pick(event, df):
+    """Click a scatter point: print its row and open the run's ECS around that
+    synapse in pyvista (visualize_ca_difference.explore, spawned so its event loop
+    doesn't fight matplotlib's)."""
+    from evaluate_synapse_distribution_spatial import find_seed_dirs
+    from visualize_ca_difference import explore
+
+    rows = getattr(event.artist, "rows", None)
+    if rows is None:
+        return
+    for i in event.ind:
+        row = df.iloc[rows[i]]
+        run_dirs = dict(find_seed_dirs(os.path.join(row["_csv_dir"], row.get("group", "."))))
+        run_dir = run_dirs[int(row["seed"])]
+        center = tuple(float(row[k]) for k in "xyz")
+        print(f"\n{row['_source']} seed={row['seed']} synapse_idx={row['synapse_idx']}  "
+              f"min_ca={row['min_ca']:.3f} mM  center (um): "
+              f"({center[0]:.2f}, {center[1]:.2f}, {center[2]:.2f})  dir: {run_dir}")
+        multiprocessing.get_context("spawn").Process(
+            target=explore, args=([(run_dir, center, None, str(row["_source"]))],)).start()
+
+
 def plot_scatter_grid(df, predictors, out_path, color_sources=False):
     n = len(predictors)
     ncols = 3
@@ -182,16 +224,9 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
                              squeeze=False)
     axes = axes.flatten()
     y = df["min_ca"].values
-    if color_sources:
-        sources, color_map = _source_colors(df)
     for ax, col in zip(axes, predictors):
         x = df[col].values
-        if color_sources:
-            for s in sources:
-                m = (df["_source"] == s).values
-                ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
-        else:
-            ax.scatter(x, y, alpha=0.35, s=14)
+        sources, color_map = _scatter_by_source(ax, df, x, y, color_sources)
         fit = fit_saturating(x, y)
         if fit is not None:
             xx = np.linspace(x.min(), x.max(), 128)
@@ -310,13 +345,7 @@ def plot_pca(pca, df, out_path, color_sources=False):
     ax = axes[1, 0]
     x = pca["pcs"][:, 0]
     y = df["min_ca"].to_numpy()
-    if color_sources:
-        sources, color_map = _source_colors(df)
-        for s in sources:
-            m = (df["_source"] == s).values
-            ax.scatter(x[m], y[m], alpha=0.35, s=14, color=color_map[s])
-    else:
-        ax.scatter(x, y, alpha=0.35, s=14)
+    sources, color_map = _scatter_by_source(ax, df, x, y, color_sources)
     fit = fit_saturating(x, y)
     if fit is not None:
         xx = np.linspace(x.min(), x.max(), 128)
@@ -363,6 +392,10 @@ def parse_args():
                         "the source CSV); otherwise all points are one color")
     p.add_argument("--show", action="store_true",
                    help="Show plots interactively after saving")
+    p.add_argument("--explore", action="store_true",
+                   help="Implies --show; clicking a scatter point opens a pyvista "
+                        "zoom-in of the ECS around that synapse (needs the runs "
+                        "next to the CSV, as laid out by the evaluator)")
     return p.parse_args()
 
 
@@ -394,8 +427,8 @@ def main():
     scatter_path = os.path.join(out_dir, "scatter_min_ca.png")
     pca_path = os.path.join(out_dir, "pca_min_ca.png")
 
-    plot_scatter_grid(df, predictors, scatter_path,
-                      color_sources=args.color_sources)
+    figs = [plot_scatter_grid(df, predictors, scatter_path,
+                              color_sources=args.color_sources)]
     print(f"Wrote {scatter_path}")
 
     print()
@@ -423,10 +456,13 @@ def main():
     for k in range(len(predictors)):
         print(f"  PC{k + 1:>2d}  {pca['per_pc_r2'][k]:16.4f}  {pca['cumulative_r2'][k]:16.4f}")
 
-    plot_pca(pca, df, pca_path, color_sources=args.color_sources)
+    figs.append(plot_pca(pca, df, pca_path, color_sources=args.color_sources))
     print(f"\nWrote {pca_path}")
 
-    if args.show:
+    if args.explore:
+        for fig in figs:
+            fig.canvas.mpl_connect("pick_event", lambda event: _on_pick(event, df))
+    if args.show or args.explore:
         plt.show()
 
 
