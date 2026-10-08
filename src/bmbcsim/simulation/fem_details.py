@@ -516,10 +516,6 @@ class MechanicSolver:
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
-        # Deformation of the previous step, frozen during the Newton solve so the
-        # growth field below does not move with the iterate.
-        self._u_prev = ngs.GridFunction(self._fes)
-        self._u_prev.vec[:] = 0
         characteristic_length = np.ptp(mesh.ngmesh.Coordinates()) / np.sqrt(3)
 
         # Build per-region Lamé parameters from elastic properties
@@ -564,23 +560,28 @@ class MechanicSolver:
         # `_load_factor` interpolates J_g from 1 to its target so :meth:`step` can
         # reach a large swell incrementally; it stays at 1 for a full-load solve.
         self._load_factor = ngs.Parameter(1.0)
-        # The driver is the amount of species per *reference* volume, c * J. The
-        # concentration itself is per current volume and is diluted by the very
-        # swelling it drives (adjust_concentrations), so comparing it against a
-        # fixed baseline is a positive feedback loop: swelling -> dilution ->
-        # "depletion" -> more swelling, with loop gain k * c_eq * transmission.
-        # Above gain 1 the undeformed state is unstable and the ECS locks into a
-        # swollen state (J = k * c_eq * T) that no chemistry can undo. Per
-        # reference volume the driver only changes through reaction and
-        # diffusion, as the model intends.
-        j_prev = ngs.Det(ngs.Id(mesh.dim) + ngs.Grad(self._u_prev))
+        # The driver is the amount of species per *reference* volume: the
+        # concentration times the nodal volume ratio V / V_ref that
+        # :meth:`adjust_concentrations` divides it by. The concentration alone is
+        # per current volume and is diluted by the very swelling it drives, so
+        # comparing it against a fixed baseline is a positive feedback loop:
+        # swelling -> dilution -> "depletion" -> more swelling, with loop gain
+        # k * c_eq * transmission. Above gain 1 the undeformed state is unstable
+        # and the ECS locks into a swollen state (J = k * c_eq * T) that no
+        # chemistry can undo. The same molecules pull the same whatever space
+        # they occupy; only reaction and transport change the driver. Using the
+        # nodal ratio (not det F of an element) makes the product exactly the
+        # quantity the dilution conserves, also on slivers whose J differs from
+        # their patch.
+        self._volume_ratio = ngs.GridFunction(concentration_fes)
+        self._volume_ratio.vec[:] = 1.0
         swelling = {}
         for i, compartment in enumerate(compartments):
             driving = compartment.coefficients.driving_species
             if driving is not None:
                 species, strength, baseline = driving
-                concentration = concentrations[species].components[i]
-                target = 1 + self._load_factor * strength * (concentration * j_prev - baseline)
+                amount = concentrations[species].components[i] * self._volume_ratio.components[i]
+                target = 1 + self._load_factor * strength * (amount - baseline)
                 # J_g <= 0 is not a volume; unclamped it yields NaN rather than
                 # any diagnosable failure.
                 target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
@@ -633,6 +634,7 @@ class MechanicSolver:
         self._patch_mass.Assemble()
 
         self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
+        self._ref_mass = self._prev_mass.copy()
 
     def step(self, max_newton=50, atol=1e-12, rtol=1e-8):
         """Solve for elastic equilibrium under the current swelling.
@@ -647,7 +649,6 @@ class MechanicSolver:
         # `self.deformation`, so integrating over an already-deformed mesh would
         # compound the two and leave a nonzero residual floor.
         self._mesh.UnsetDeformation()
-        self._u_prev.vec.data = self.deformation.vec
         self._load_factor.Set(1.0)
 
         # Two convergence criteria; each covers where the other fails.
@@ -800,6 +801,7 @@ class MechanicSolver:
         # Compute the volume ratio (old / new) for scaling and store current mass
         volume_ratio = self._prev_mass / curr_mass
         self._prev_mass = curr_mass.copy()
+        self._volume_ratio.vec.FV().NumPy()[:] = curr_mass / self._ref_mass
 
         # Scale all concentration fields
         for concentration in concentrations.values():
