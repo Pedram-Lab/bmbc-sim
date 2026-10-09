@@ -46,7 +46,7 @@ from bmbcsim.simulation.result_io import ResultLoader
 from evaluate_synapse_distribution_spatial import find_seed_dirs
 from visualize_by_regime import _vfrac
 
-EXPLORE_RADIUS = 3.0  # um, half-width of the pyvista crop box around a synapse center
+EXPLORE_RADIUS = 3.0  # um, half-width of the crop box / ortho views around a synapse center
 
 # CLI defaults. The names below are rebound from the parsed arguments in __main__,
 # so every function can keep reading them as module globals.
@@ -61,6 +61,7 @@ OUT_NAMES = {                # default output file per --plot mode, inside the s
     "vs-ecs": "ca_difference_vs_ecs_volume.png",
 }
 LOW = HIGH = None            # (dir, label); set from the sweep dir in __main__
+SAVE_EXPLORE = None          # dir; clicking also writes the explore view as HTML there
 
 
 def find_ratio_dirs(sweep_root):
@@ -207,24 +208,33 @@ def load_vfrac(ratio_dir, pair_seeds, pair_synapse_idx):
         [pair_seeds, pair_synapse_idx])).to_numpy()
 
 
-MARKER_RADIUS = 0.15  # um, synapse-location sphere
-TITLE_POSITION = 2  # CornerAnnotation index for the default "upper_left" add_text position
+MARKER_RADIUS = 0.15  # um, synapse-location disc
+# (horizontal, vertical, normal) coordinate index of each orthogonal view
+VIEWS = {"xy": (0, 1, 2), "yz": (2, 1, 0), "xz": (0, 2, 1)}
 
 
-def crop_to_synapse(grid, center, radius):
-    """Restrict a snapshot grid to a box of half-width `radius` around `center`.
+def crop_to_synapse(grid, center, radius, mesh_bounds=None):
+    """Restrict a snapshot grid to the box of half-width `radius` around `center`,
+    clamped to `mesh_bounds` in z only (default: the grid's own; pass the full mesh's
+    when `grid` is already ECS-only). The tissue slab is ~1 um thin in z, so the crop
+    is a flat tile rather than a cube; x and y are NOT clamped so the xy view stays a
+    square of the same size wherever the synapse sits. Returns the cropped grid and
+    the bounds (xmin, xmax, ymin, ymax, zmin, zmax), which the ortho views use as limits.
 
     `crinkle=True` keeps whole original cells instead of cutting through them at
     the box face -- a plain clip interpolates new points at the cut, which have
     no entry in `_orig_idx` and would corrupt the fast per-step field swap below.
     """
-    cx, cy, cz = center
-    bounds = (cx - radius, cx + radius, cy - radius, cy + radius, cz - radius, cz + radius)
-    return grid.clip_box(bounds, invert=False, crinkle=True)
+    mesh_bounds = grid.bounds if mesh_bounds is None else mesh_bounds
+    lo, hi = np.asarray(center) - radius, np.asarray(center) + radius
+    lo[2], hi[2] = max(lo[2], mesh_bounds[4]), min(hi[2], mesh_bounds[5])
+    bounds = tuple(np.column_stack([lo, hi]).ravel())
+    return grid.clip_box(bounds, invert=False, crinkle=True), bounds
 
 
 def _load_ecs_panel(path, step, center, radius):
-    """ECS-only, cropped snapshot grid, plus what's needed to re-slice by step fast.
+    """(ECS-only crop, full crop, bounds) of a snapshot around `center`. The full crop
+    (cells + ECS) only serves as a gray backdrop; the ECS crop carries the field.
 
     Loading a full snapshot (mesh + field) via ResultLoader is not cheap, so the
     slider below does not call it again per step: it re-reads just the `Ca` array
@@ -237,78 +247,147 @@ def _load_ecs_panel(path, step, center, radius):
     grid.point_data["ecs"] = loader.load_regions().point_data["ecs"]
     grid.point_data["_orig_idx"] = np.arange(grid.n_points)
     ecs_grid = grid.threshold(0.5, scalars="ecs")
-    return crop_to_synapse(ecs_grid, center, radius)
+    ecs_crop, bounds = crop_to_synapse(ecs_grid, center, radius, mesh_bounds=grid.bounds)
+    return ecs_crop, crop_to_synapse(grid, center, radius)[0], bounds
 
 
-def explore(panels, radius=EXPLORE_RADIUS, step=-1, species=SPECIES_NAME):
-    """Show ECS-only snapshots side by side in linked pyvista views, one per
-    ``(run_dir, center, other_center, label)`` in `panels`, each cropped to a box
-    around its own synapse center, with a slider to scrub the recorded timepoints.
-    Blocks until the window is closed, so the picker below runs it in a spawned
-    process rather than call it directly (a second GUI event loop can't share the
-    process with matplotlib's). `species` is a parameter, not the module global,
-    because the spawned child re-imports this module and would only see the default.
+def _ortho_slices(grid, center, species=None):
+    """Planar cuts of `grid` through `center`, one per VIEWS entry, as
+    (horizontal, vertical, triangles, point values of `species` or None) in the view's
+    in-plane coordinates. The cut geometry is step-invariant (see _load_ecs_panel),
+    only the values change."""
+    out = {}
+    for name, (h, v, n) in VIEWS.items():
+        slc = grid.slice(normal=np.eye(3)[n], origin=center).triangulate()
+        tris = slc.faces.reshape(-1, 4)[:, 1:] if slc.n_cells else np.zeros((0, 3), int)
+        vals = slc.point_data[species] if species else None
+        out[name] = (slc.points[:, h], slc.points[:, v], tris, vals)
+    return out
 
-    Each panel gets an opaque marker sphere at its own synapse center and, if
-    `other_center` is not None, a translucent one at the other geometry's -- for
-    LOW/HIGH the two coordinates are close but not identical (see module docstring),
-    and this makes that offset visible instead of quietly plotting one as a stand-in
-    for the other.
+
+def _field_range(h5_path, species, orig_idx):
+    """(min, max) of `species` over the cropped points across ALL recorded steps,
+    so the color scale does not jump while scrubbing time."""
+    with h5py.File(h5_path) as h5:
+        n = len(h5["data/time"])
+        vals = np.stack([h5[f"data/{species}/step_{s:05d}"][()][orig_idx] for s in range(n)])
+    return float(vals.min()), float(vals.max())
+
+
+def explore(panels, radius=EXPLORE_RADIUS, step=-1, species=SPECIES_NAME, save=None):
+    """Show three orthogonal ECS cuts exactly through the synapse center, one
+    block per ``(run_dir, center, other_center, label)`` in `panels`: xy in the
+    middle, yz to its left (sharing y) and xz below it (sharing x); a single
+    colorbar on the right with one range over all panels AND all time steps, and
+    a slider to scrub the recorded timepoints. Blocks until the window is closed,
+    so the picker below runs it in a spawned process rather than call it directly
+    (a second GUI event loop can't share the process with matplotlib's). `species`
+    is a parameter, not the module global, because the spawned child re-imports
+    this module and would only see the default.
+
+    Each view marks its own synapse center with an opaque red disc and, if
+    `other_center` is not None, the other geometry's with a translucent one --
+    for LOW/HIGH the two coordinates are close but not identical (see module
+    docstring), and this makes that offset visible instead of quietly plotting
+    one as a stand-in for the other.
+
+    `save`: optional path of a self-contained HTML page (matplotlib's HTML writer:
+    every step as an embedded PNG frame with play/pause and a frame slider) written
+    before the window opens.
     """
+    from matplotlib.animation import FuncAnimation, HTMLWriter
+    from matplotlib.collections import PolyCollection
+    from matplotlib.colors import Normalize
+    from matplotlib.widgets import Slider
+
     with h5py.File(os.path.join(panels[0][0], "snapshot.h5")) as h5:
         times = np.array(h5["data/time"])
     if step < 0:
         step += len(times)
 
-    plotter = pv.Plotter(shape=(1, len(panels)))
+    loaded = [(os.path.join(path, "snapshot.h5"), *_load_ecs_panel(path, step, own, radius))
+              for path, own, _, _ in panels]
+    # Each view is sized by its real extent (dx, dy, dz of the clamped crop box, taken
+    # from the first panel), so the thin z direction shows up as thin strips:
+    # per panel [yz, xy] over [empty, xz], then one colorbar column and a slider row.
+    b = loaded[0][3]
+    dx, dy, dz = b[1] - b[0], b[3] - b[2], b[5] - b[4]
+    n = len(panels)
+    fig = plt.figure(figsize=(6 * n * (dx + dz) / dx + 1, 6.5 * (dy + dz) / dy))
+    gs = fig.add_gridspec(3, 2 * n + 1, width_ratios=[dz, dx] * n + [0.08 * dx],
+                          height_ratios=[dy, dz, 0.08 * dy], wspace=0.3, hspace=0.3)
+    cbar_ax = fig.add_subplot(gs[:2, -1])
+    slider_ax = fig.add_subplot(gs[2, : 2 * n])
+
     views = []
-    for i, (path, own_center, other_center, label) in enumerate(panels):
-        cropped = _load_ecs_panel(path, step, own_center, radius)
-        plotter.subplot(0, i)
-        # Semi-transparent: at this crop radius the synapse marker sphere is usually
-        # inside a fold of the ECS surface, and an opaque mesh would hide it.
-        actor = plotter.add_mesh(cropped, scalars=species, cmap="viridis", opacity=0.5)
-        plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=own_center), color="red")
-        if other_center is not None:
-            plotter.add_mesh(pv.Sphere(radius=MARKER_RADIUS, center=other_center),
-                             color="red", opacity=0.5)
-        title = plotter.add_text(f"{label}: {Path(path).name}", font_size=8)
-        views.append((os.path.join(path, "snapshot.h5"), cropped, actor, title, label, path))
+    vmin, vmax = np.inf, -np.inf
+    for i, ((path, own_center, other_center, label), (h5_path, cropped, full, bounds)) in enumerate(
+            zip(panels, loaded)):
+        lo, hi = _field_range(h5_path, species, cropped.point_data["_orig_idx"])
+        vmin, vmax = min(vmin, lo), max(vmax, hi)
+        ax_xy = fig.add_subplot(gs[0, 2 * i + 1])
+        axes = {"xy": ax_xy,
+                "yz": fig.add_subplot(gs[0, 2 * i], sharey=ax_xy),
+                "xz": fig.add_subplot(gs[1, 2 * i + 1], sharex=ax_xy)}
+        ax_xy.set_title(f"{label}: {Path(path).name}", fontsize=8)
+        colls = {}
+        backdrop = _ortho_slices(full, own_center)
+        for name, (hx, hy, tris, vals) in _ortho_slices(cropped, own_center, species).items():
+            ax, (h, v, _) = axes[name], VIEWS[name]
+            # cells (and ECS) in gray underneath; the ECS field paints over its part
+            bx, by, btris, _ = backdrop[name]
+            ax.add_collection(PolyCollection(np.dstack([bx[btris], by[btris]]),
+                                             facecolor="lightgray", edgecolor="lightgray", linewidth=0.3))
+            if len(tris):
+                colls[name] = ax.tripcolor(hx, hy, tris, vals, shading="gouraud", cmap="viridis")
+            ax.add_patch(plt.Circle((own_center[h], own_center[v]), MARKER_RADIUS, color="red"))
+            if other_center is not None:
+                ax.add_patch(plt.Circle((other_center[h], other_center[v]), MARKER_RADIUS,
+                                        color="red", alpha=0.5))
+            ax.set_xlim(bounds[2 * h], bounds[2 * h + 1])
+            ax.set_ylim(bounds[2 * v], bounds[2 * v + 1])
+            ax.set_aspect("equal")
+            ax.set_xlabel(f"{'xyz'[h]} (um)")
+            ax.set_ylabel(f"{'xyz'[v]} (um)")
+        views.append((h5_path, cropped, own_center, colls))
+
+    norm = Normalize(vmin, vmax)
+    for _, _, _, colls in views:
+        for coll in colls.values():
+            coll.set_norm(norm)
+    fig.colorbar(next(iter(views[0][3].values())), cax=cbar_ax, label=f"{species} (mM)")
 
     def set_step(value):
         idx = int(round(value))
-        fields = []
-        for h5_path, cropped, actor, title, label, path in views:
+        for h5_path, cropped, center, colls in views:
             with h5py.File(h5_path) as h5:
                 field = np.array(h5[f"data/{species}/step_{idx:05d}"])
             cropped.point_data[species] = field[cropped.point_data["_orig_idx"]]
-            title.SetText(TITLE_POSITION,
-                          f"{label}: {Path(path).name}\nt={times[idx]:.0f} ms")
-            fields.append(cropped.point_data[species])
+            for name, (_, _, _, vals) in _ortho_slices(cropped, center, species).items():
+                if name in colls:
+                    colls[name].set_array(vals)
+        fig.suptitle(f"t = {times[idx]:.0f} ms")
+        fig.canvas.draw_idle()
 
-        # Shared color scale across both panels, so LOW and HIGH stay comparable
-        # instead of each panel re-normalizing to its own range.
-        combined = np.concatenate(fields)
-        scalar_range = (float(combined.min()), float(combined.max()))
-        for _, _, actor, _, _, _ in views:
-            actor.mapper.scalar_range = scalar_range
-        plotter.render()
-
+    if save:
+        slider_ax.set_visible(False)  # the HTML page brings its own controls
+        FuncAnimation(fig, set_step, frames=len(times)).save(
+            save, writer=HTMLWriter(fps=10, embed_frames=True))
+        print(f"Wrote {save}")
+        slider_ax.set_visible(True)
     set_step(step)
-    plotter.subplot(0, 0)
-    plotter.add_slider_widget(set_step, [0, len(times) - 1], value=step,
-                              title="step", fmt="%.0f")
-    plotter.link_views()
-    plotter.show()
+    slider = Slider(slider_ax, "step", 0, len(times) - 1, valinit=step, valstep=1)
+    slider.on_changed(set_step)
+    plt.show()
 
 
 def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse_idx):
-    """Click a scatter point to open that synapse's LOW/HIGH volumes in pyvista.
+    """Click a scatter point to open ortho views of that synapse's LOW/HIGH runs.
 
     Spawns `explore()` in a fresh process (see there for why; "spawn" rather than
     fork, so the child doesn't inherit matplotlib's live GUI state), passing each
     sweep's own synapse center -- idx-matched but not identical, see module
-    docstring. Also prints the identifying info in case the pyvista window isn't
+    docstring. Also prints the identifying info in case the explore window isn't
     wanted.
     """
     low_paths = dict(find_seed_dirs(LOW[0]))
@@ -328,11 +407,13 @@ def _connect_point_picker(ax, vfrac, peaks, peak_times, pair_seeds, pair_synapse
                   f"{low_center[2]:.2f})  dir: {low_dir}")
             print(f"  HIGH center (um): ({high_center[0]:.2f}, {high_center[1]:.2f}, "
                   f"{high_center[2]:.2f})  dir: {high_dir}")
+            save = (os.path.join(SAVE_EXPLORE, f"explore_seed{seed}_synapse{idx}.html")
+                    if SAVE_EXPLORE else None)
             multiprocessing.get_context("spawn").Process(
                 target=explore,
                 args=([(low_dir, low_center, high_center, "LOW"),
                        (high_dir, high_center, low_center, "HIGH")],),
-                kwargs={"species": SPECIES_NAME}).start()
+                kwargs={"species": SPECIES_NAME, "save": save}).start()
 
     ax.figure.canvas.mpl_connect("pick_event", on_pick)
 
@@ -435,6 +516,9 @@ def parse_args():
     parser.add_argument("--bins", type=int, default=N_BINS,
                         help=f"Quantile bins for the binned median in vs-ecs "
                              f"(default: {N_BINS}).")
+    parser.add_argument("--save-explore", default=None, metavar="DIR",
+                        help="vs-ecs only: clicking a point also writes the explore view "
+                             "as a self-contained HTML animation into DIR.")
     return parser.parse_args()
 
 
@@ -447,5 +531,8 @@ if __name__ == "__main__":
     MAX_INDIVIDUAL = args.max_individual
     RADIUS = args.radius
     N_BINS = args.bins
+    SAVE_EXPLORE = args.save_explore
+    if SAVE_EXPLORE:
+        os.makedirs(SAVE_EXPLORE, exist_ok=True)
     main(args.plot, args.out or os.path.join(args.sweep, OUT_NAMES[args.plot]),
          not args.no_show)

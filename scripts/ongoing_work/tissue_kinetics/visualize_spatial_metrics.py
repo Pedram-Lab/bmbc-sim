@@ -8,7 +8,7 @@ Loads a spatial_metrics.csv (from evaluate_synapse_distribution_spatial.py) and:
 
 Saves two PNGs next to the CSV (--out-dir to override) and prints the numbers.
 ``--explore`` makes every scatter point clickable: a click prints the row and opens
-the run's ECS around that synapse in pyvista (visualize_ca_difference.explore).
+orthogonal cuts of the run's ECS through that synapse (visualize_ca_difference.explore).
 """
 
 import argparse
@@ -194,10 +194,10 @@ def _scatter_by_source(ax, df, x, y, color_sources):
     return sources, color_map
 
 
-def _on_pick(event, df):
-    """Click a scatter point: print its row and open the run's ECS around that
-    synapse in pyvista (visualize_ca_difference.explore, spawned so its event loop
-    doesn't fight matplotlib's)."""
+def _on_pick(event, df, save_dir=None):
+    """Click a scatter point: print its row and open orthogonal cuts of the run's
+    ECS through that synapse (visualize_ca_difference.explore, spawned so its
+    event loop doesn't fight matplotlib's)."""
     from evaluate_synapse_distribution_spatial import find_seed_dirs
     from visualize_ca_difference import explore
 
@@ -212,8 +212,11 @@ def _on_pick(event, df):
         print(f"\n{row['_source']} seed={row['seed']} synapse_idx={row['synapse_idx']}  "
               f"min_ca={row['min_ca']:.3f} mM  center (um): "
               f"({center[0]:.2f}, {center[1]:.2f}, {center[2]:.2f})  dir: {run_dir}")
+        save = (os.path.join(save_dir, f"explore_{row['_source']}_seed{row['seed']}_"
+                                       f"synapse{row['synapse_idx']}.html") if save_dir else None)
         multiprocessing.get_context("spawn").Process(
-            target=explore, args=([(run_dir, center, None, str(row["_source"]))],)).start()
+            target=explore, args=([(run_dir, center, None, str(row["_source"]))],),
+            kwargs={"save": save}).start()
 
 
 def plot_scatter_grid(df, predictors, out_path, color_sources=False):
@@ -393,9 +396,12 @@ def parse_args():
     p.add_argument("--show", action="store_true",
                    help="Show plots interactively after saving")
     p.add_argument("--explore", action="store_true",
-                   help="Implies --show; clicking a scatter point opens a pyvista "
+                   help="Implies --show; clicking a scatter point opens an ortho-view "
                         "zoom-in of the ECS around that synapse (needs the runs "
                         "next to the CSV, as laid out by the evaluator)")
+    p.add_argument("--save-explore", default=None, metavar="DIR",
+                   help="Implies --explore; clicking also writes the explore view as a "
+                        "self-contained HTML animation into DIR")
     return p.parse_args()
 
 
@@ -459,10 +465,13 @@ def main():
     figs.append(plot_pca(pca, df, pca_path, color_sources=args.color_sources))
     print(f"\nWrote {pca_path}")
 
-    if args.explore:
+    if args.save_explore:
+        os.makedirs(args.save_explore, exist_ok=True)
+    if args.explore or args.save_explore:
         for fig in figs:
-            fig.canvas.mpl_connect("pick_event", lambda event: _on_pick(event, df))
-    if args.show or args.explore:
+            fig.canvas.mpl_connect(
+                "pick_event", lambda event: _on_pick(event, df, args.save_explore))
+    if args.show or args.explore or args.save_explore:
         plt.show()
 
 
