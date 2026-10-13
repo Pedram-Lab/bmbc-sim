@@ -16,6 +16,8 @@ from bmbcsim.simulation.coefficient_fields.coefficient_field import (
     NodalNoise,
     SmoothNoise,
     LocalizedPeaks,
+    GaussianPeaks,
+    select_directional_points,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "NodalNoise",
     "SmoothNoise",
     "LocalizedPeaks",
+    "GaussianPeaks",
+    "select_directional_points",
 ]
