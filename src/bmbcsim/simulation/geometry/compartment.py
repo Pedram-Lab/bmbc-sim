@@ -224,8 +224,11 @@ class Compartment:
 
         The coupling strength is the *fractional change of stress-free volume*
         per unit concentration: the material's preferred volume ratio is
-        ``J_g = 1 + coupling_strength * (c - baseline)``. A value of 0.3 /mM
+        ``J_g = 1 + coupling_strength * (c_ref - baseline)``. A value of 0.3 /mM
         means 1 mM above baseline makes the material want to be 30% larger.
+        ``c_ref = c * J`` is the amount per *reference* (undeformed) volume, so
+        the dilution a deformation causes does not itself drive further
+        deformation; only reaction and transport change the driver.
 
         This is a swelling model, not a pressure model. The deformation that
         results is whatever equilibrium the surrounding stiffness allows, so a
