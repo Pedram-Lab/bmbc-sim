@@ -218,7 +218,7 @@ class Compartment:
             self,
             species: S,
             coupling_strength: u.Quantity,
-            baseline: u.Quantity = 0.0 * u.mmol / u.L,
+            baseline: u.Quantity | cf.Coefficient = 0.0 * u.mmol / u.L,
     ) -> None:
         """Set the species whose concentration drives mechanical deformation.
 
@@ -241,14 +241,17 @@ class Compartment:
             concentration (e.g., ``0.3 / mM``). Dimensionless per concentration.
         :param baseline: Baseline concentration at which no deformation occurs (default: 0).
             Concentrations below baseline cause contraction; above baseline cause swelling.
+            A :class:`~bmbcsim.simulation.coefficient_fields.Coefficient` gives a
+            spatially varying baseline, e.g. the species' own initial condition.
         :raises ValueError: If a driving species is already defined for this compartment.
         """
         if self.coefficients.driving_species is not None:
             raise ValueError(f"Driving species already defined for compartment '{self.name}'")
 
         strength = to_simulation_units(coupling_strength, None)
-        baseline_value = to_simulation_units(baseline, 'molar concentration')
-        self.coefficients.driving_species = (species, strength, baseline_value)
+        if not isinstance(baseline, cf.Coefficient):
+            baseline = cf.Constant(baseline)
+        self.coefficients.driving_species = (species, strength, baseline)
 
 
     def add_reaction(
@@ -317,4 +320,4 @@ class SimulationDetails:
     permittivity: C | None = field(default=None)
     porosity: float | None = field(default=None)
     elasticity: tuple[float, float] | None = field(default=None)  # (E, nu)
-    driving_species: tuple[S, float, float] | None = field(default=None)  # (species, strength, baseline)
+    driving_species: tuple[S, float, C] | None = field(default=None)  # (species, strength, baseline)

@@ -13,6 +13,7 @@ from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from bmbcsim.units import to_simulation_units
+import bmbcsim.simulation.coefficient_fields as cf
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
 from bmbcsim.simulation.fem_details import (
     DiffusionSolver,
@@ -299,6 +300,14 @@ class Simulation:
             if coefficients.permittivity is not None:
                 coefficients.permittivity = \
                     coefficients.permittivity.to_coefficient_function(volume_region, fes, 'permittivity')
+
+            if coefficients.driving_species is not None:
+                species, strength, baseline = coefficients.driving_species
+                if isinstance(baseline, cf.Coefficient):
+                    coefficients.driving_species = (
+                        species, strength,
+                        baseline.to_coefficient_function(volume_region, fes, 'molar concentration'),
+                    )
 
         # Finalize transport coefficients that use spatial fields
         for membrane in self.simulation_geometry.membranes.values():
