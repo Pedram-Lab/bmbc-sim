@@ -71,7 +71,7 @@ class Synapse(ConfigGroup):
     pulse_times: list[Quantity("ms")] = ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
     # Convergence-test mode: no synapse patches; instead the whole membrane of the
     # cell nearest the box center absorbs the total active-synapse flux uniformly,
-    # so the sink does not move with the mesh the way LocalizedPeaks DOF picks do.
+    # so the sink does not move with the mesh the way snapped synapse centers do.
     uniform_cell: bool = False
 
 
@@ -79,7 +79,13 @@ class ECM(ConfigGroup):
     """Extracellular-matrix Ca2+ buffer (Ca + ECM <-> ECM_Ca)."""
 
     enabled: bool = False
+    # Mean ECM concentration over the ECS; the total amount is the same whether
+    # the buffer is uniform or localized.
     ecm_total: Quantity("mM") = "2.0 mM"
+    # None: uniform buffer. Otherwise the buffer is a sum of Gaussians (this
+    # standard deviation) centered on the synapses, confined to the ECS, scaled
+    # so its ECS mean is ecm_total. Keep it at a few mesh edge lengths.
+    local_width: Quantity("um") | None = None
     # Parametrized by (kf, Kd) rather than (kf, kr): the on-rate kf is a property of
     # the molecules, while Kd = kr / kf is the affinity the buffer sweeps scan, so kr
     # is the one to derive. Defaults are unchanged (kr = 100 / s = 0.1 / ms).
@@ -128,15 +134,20 @@ class Config(SimulationConfig):
 
 
 def _on_outer_box(min_box, max_box, eps_rel=1e-6):
-    """Return a predicate flagging DOFs on any of the 6 simulation-box faces."""
+    """Return a predicate flagging points on or outside the simulation box."""
     eps = eps_rel * float(np.max(np.subtract(max_box, min_box)))
 
     def predicate(coords):
-        on_min = np.isclose(coords, min_box, atol=eps)
-        on_max = np.isclose(coords, max_box, atol=eps)
-        return (on_min | on_max).any(axis=1)
+        return ((coords <= min_box + eps) | (coords >= max_box - eps)).any(axis=1)
 
     return predicate
+
+
+def _boundary_vertices(mesh: ngs.Mesh, name: str) -> np.ndarray:
+    """Coordinates of the mesh vertices on the named boundary, shape (n, 3)."""
+    coords = np.array(mesh.ngmesh.Coordinates())
+    idx = {v.nr for el in mesh.Boundaries(name).Elements() for v in el.vertices}
+    return coords[sorted(idx)]
 
 
 def run(cfg: Config) -> None:
@@ -187,8 +198,8 @@ def run(cfg: Config) -> None:
     # Cropping at reference_ecs_ratio (not the run's ecs_ratio) keeps the kept set,
     # its numbering and synapse seeding identical across ratios, so (seed,
     # synapse_idx) is the same synapse everywhere; step 1e then scales to the
-    # run's ecs_ratio. shrink_cells/LocalizedPeaks are both centroid-radial, so
-    # only cell size (hence ECS volume) changes. Cropping shrunk (vs full-size)
+    # run's ecs_ratio. shrink_cells and the synapse direction pick are both
+    # centroid-radial, so only cell size (hence ECS volume) changes. Cropping shrunk (vs full-size)
     # cells also avoids over-packing the box and pinching the ECS apart.
     geometry = geometry.shrink_cells(1 - geom.reference_ecs_ratio, jitter=0.0)
 
@@ -284,32 +295,10 @@ def run(cfg: Config) -> None:
     for cell in cells:
         cell.initialize_species(ca, 0.0 * u.mmol / u.L)
 
-    if with_ecm:
-        ecm_k = (ecm_cfg.ecm_kf / ecm_cfg.ecm_kr).decompose()
-        ecm_ca_equilibrium = ecm_k * diff.ca_ecs * ecm_cfg.ecm_total / (1 + ecm_k * diff.ca_ecs)
-
-        ecm = sim.add_species("ECM")
-        ecm_ca = sim.add_species("ECM_Ca")
-        ecs.initialize_species(ecm, ecm_cfg.ecm_total - ecm_ca_equilibrium)
-        ecs.initialize_species(ecm_ca, ecm_ca_equilibrium)
-
-        if with_mechanics:
-            ecs.add_driving_species(
-                ecm_ca, -mech.ecm_ca_condensation, baseline=ecm_ca_equilibrium
-            )
-
-    # --- Diffusion and reactions ---
+    # --- Diffusion ---
     ecs.add_diffusion(ca, diff.diffusivity_ecs)
     for cell in cells:
         cell.add_diffusion(ca, diff.diffusivity_cyto)
-
-    if with_ecm:
-        ecs.add_reaction(
-            reactants=[ca, ecm],
-            products=[ecm_ca],
-            k_f=ecm_cfg.ecm_kf,
-            k_r=ecm_cfg.ecm_kr,
-        )
 
     # --- Ca2+ sink at distributed synapse patches ---
     # Q = N * I / (2 F)  (factor 2 for Ca2+)
@@ -328,9 +317,12 @@ def run(cfg: Config) -> None:
         dts = [t - t_pulse for t_pulse in syn.pulse_times if t >= t_pulse]
         return sum(math.exp(-dt / syn.tau1) - math.exp(-dt / syn.tau2) for dt in dts)
 
-    # Skip membrane DOFs that lie on the outer simulation box: synapses there
+    # Skip membrane points on or outside the simulation box: synapses there
     # would straddle the simulation boundary rather than the cell membrane.
     exclude_outer_box = _on_outer_box(min_box, max_box)
+
+    if syn.uniform_cell and ecm_cfg.local_width is not None:
+        raise ValueError("ecm.local_width needs synapse patches; unset synapse.uniform_cell")
 
     if syn.uniform_cell:
         centroids = np.array([cell.points.mean(axis=0) for cell in geometry.cells])
@@ -346,22 +338,39 @@ def run(cfg: Config) -> None:
         membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
         synapses_per_cell[:] = 0  # skip the patch loop below
 
-    for n_syn, membrane, cell in zip(synapses_per_cell, membranes, cells):
+    # Synapse centers are picked on the *geometry* vertices of each cell (not the
+    # mesh), so they are exactly ecs_ratio-invariant (shrink_cells is centroid-
+    # radial, and so is the direction pick), then snapped to the nearest membrane
+    # mesh vertex so the narrow flux Gaussian sits on a DOF. The snapped centers
+    # are what the flux and the local ECM buffer use, and what gets saved.
+    # in_plane: the box is thin in z, so full-sphere directions pile synapses
+    # onto the top/bottom faces; in-plane directions keep them near the
+    # mid-plane of the slab.
+    synapse_centers = {}  # cell index -> (n_syn, 3) snapped centers
+    max_snap = 0.0
+    for i, (n_syn, cell) in enumerate(zip(synapses_per_cell, geometry.cells)):
         if n_syn == 0:
             continue
+        picked = cf.select_directional_points(
+            cell.points, n_syn, rng, exclude_outer_box, in_plane=True
+        )
+        vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
+        dists = np.linalg.norm(vertices[None, :, :] - cell.points[picked][:, None, :], axis=2)
+        nearest = dists.argmin(axis=1)
+        max_snap = max(max_snap, float(dists[np.arange(len(picked)), nearest].max()))
+        synapse_centers[i] = vertices[nearest]
+    all_centers = (np.concatenate(list(synapse_centers.values()))
+                   if synapse_centers else np.empty((0, 3)))
+    np.save(result_dir / "synapse_centers.npy", all_centers)
+    print(f"  Synapse centers snapped to membrane vertices, max shift {max_snap:.3f} um "
+          f"-> {result_dir / 'synapse_centers.npy'}")
 
-        # in_plane: the box is thin in z, so full-sphere directions pile
-        # synapses onto the top/bottom faces; in-plane directions keep them
-        # near the mid-plane of the slab.
-        synapse_distribution = cf.LocalizedPeaks(
-            seed=int(rng.integers(0, 2**31)),
-            num_peaks=n_syn,
-            peak_value=q_per_synapse,
-            background_value=0.0 * u.mol / u.s,
+    for i, centers in synapse_centers.items():
+        synapse_distribution = cf.GaussianPeaks(
+            centers,
             peak_width=syn.synapse_diameter / 6.0,
-            total=n_syn * q_per_synapse,
-            exclude_predicate=exclude_outer_box,
-            in_plane=True,
+            peak_value=q_per_synapse,
+            total=len(centers) * q_per_synapse,
         )
         synapse_flux = transport.ProportionalFlux(
             flux=synapse_distribution,
@@ -369,7 +378,39 @@ def run(cfg: Config) -> None:
             depletion=diff.depletion,
             temporal=nmdar_waveform,
         )
-        membrane.add_transport(ca, synapse_flux, ecs, cell)
+        membranes[i].add_transport(ca, synapse_flux, ecs, cells[i])
+
+    # --- ECM buffer (uniform, or Gaussians on the synapse centers) ---
+    if with_ecm:
+        ecm_k = (ecm_cfg.ecm_kf / ecm_cfg.ecm_kr).decompose()
+        ecm_ca_equilibrium = ecm_k * diff.ca_ecs * ecm_cfg.ecm_total / (1 + ecm_k * diff.ca_ecs)
+        ecm_init, ecm_ca_init = ecm_cfg.ecm_total - ecm_ca_equilibrium, ecm_ca_equilibrium
+
+        if ecm_cfg.local_width is not None:
+            # Same shape for ECM and ECM_Ca (Ca is uniform at t=0, so the bound
+            # fraction is too); `total` fixes the ECS mean to the uniform value.
+            def localized(mean_conc):
+                return cf.GaussianPeaks(
+                    all_centers,
+                    peak_width=ecm_cfg.local_width,
+                    peak_value=mean_conc,
+                    total=mean_conc * ecs.volume * u.um**3,
+                )
+            ecm_init, ecm_ca_init = localized(ecm_init), localized(ecm_ca_init)
+
+        ecm = sim.add_species("ECM")
+        ecm_ca = sim.add_species("ECM_Ca")
+        ecs.initialize_species(ecm, ecm_init)
+        ecs.initialize_species(ecm_ca, ecm_ca_init)
+        ecs.add_reaction(
+            reactants=[ca, ecm],
+            products=[ecm_ca],
+            k_f=ecm_cfg.ecm_kf,
+            k_r=ecm_cfg.ecm_kr,
+        )
+        if with_mechanics:
+            # Baseline = initial ECM_Ca field, so a localized buffer is stress-free at t=0.
+            ecs.add_driving_species(ecm_ca, -mech.ecm_ca_condensation, baseline=ecm_ca_init)
 
     # --- Robin BC: transport from external reservoir into ECS ---
     for bnd in ["top", "bottom", "left", "right", "front", "back"]:
