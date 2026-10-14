@@ -64,9 +64,27 @@ def effects_table(sub, tg):
     return pd.DataFrame(rows).sort_values(["synapse", "dose", "scenario", "sigma"])
 
 
+def local_gain(df, scenarios=("all", "half")):
+    """Per target, dose and local scenario: effect(local) - effect(uniform) on the SAME synapse.
+
+    This is the contrast the claim is about; comparing buffered with unbuffered
+    *synapses* would confound placement with synapse identity.
+    """
+    key = ["seed", "stimulus", "ecm_kf", "ecm_kd", "ecm_total", "synapse"]
+    # The Step 3 sweeps repeat the core grid point (kf 1e5, Kd 1): keep one copy of each run.
+    uni = df[df.scenario == "uniform"].drop_duplicates(key).set_index(key)
+    loc = df[df.scenario.isin(scenarios) & df.target_class.notna()].drop_duplicates(
+        key + ["scenario", "local_width"]).copy()
+    idx = pd.MultiIndex.from_frame(loc[key])
+    for m in VERDICT_METRICS:
+        loc[f"gain_{m}"] = loc[f"effect_{m}"].to_numpy() - uni[f"effect_{m}"].reindex(idx).to_numpy()
+    return loc
+
+
 def verdict(df, axis, tg):
-    """Half-buffered: buffered minus unbuffered targets; uniform: max |effect| over targets."""
-    rows = []
+    """Local gain (half - uniform, same synapse) on buffered vs unbuffered targets, and the
+    uniform effect itself, against the threshold. Claim holds where the buffered gain
+    exceeds the threshold while the uniform effect does not."""
     sub = df[df.scenario.isin(["uniform", "half"]) & (df.local_width.fillna(1.0) == 1.0)
              & df.synapse.isin([s for s, _ in tg])]
     if axis == "stimulus":
@@ -74,21 +92,22 @@ def verdict(df, axis, tg):
     else:
         fixed = "ecm_kd" if axis == "ecm_kf" else "ecm_kf"
         sub = sub[(sub.stimulus == STIM0) & (sub[fixed] == (KD0 if axis == "ecm_kf" else KF0))]
-    for (val, dose), g in sub.groupby([axis, "ecm_total"]):
-        half, uni = g[g.scenario == "half"], g[g.scenario == "uniform"]
-        if half.empty or uni.empty:
-            continue
+    g = local_gain(sub, ("half",))
+    rows = []
+    for (val, dose), gg in g.groupby([axis, "ecm_total"]):
+        uni = sub[(sub.scenario == "uniform") & (sub[axis] == val) & (sub.ecm_total == dose)]
         row = {axis: val, "dose": dose}
         for m in VERDICT_METRICS:
-            thr = g[f"thr_{m}"].iloc[0]
-            diff = half[half.buffered][f"effect_{m}"].mean() - half[~half.buffered][f"effect_{m}"].mean()
+            thr = gg[f"thr_{m}"].iloc[0]
+            gb, gu = gg[gg.buffered][f"gain_{m}"].mean(), gg[~gg.buffered][f"gain_{m}"].mean()
             u = uni[f"effect_{m}"].abs().max()
-            row[f"{m}: local diff"] = diff
+            row[f"{m}: gain buffered"] = gb
+            row[f"{m}: gain unbuffered"] = gu
             row[f"{m}: uniform max"] = u
             if not thr > 0:
                 row[f"{m}: verdict"] = "n/a (threshold 0)"
                 continue
-            row[f"{m}: verdict"] = ("local>thr" if abs(diff) > thr else "local<thr") + ", " + \
+            row[f"{m}: verdict"] = ("gain>thr" if abs(gb) > thr else "gain<thr") + ", " + \
                                    ("uniform>thr" if u > thr else "uniform<thr")
         rows.append(row)
     return pd.DataFrame(rows)
@@ -125,6 +144,42 @@ def main():
         ["scenario", sub.local_width.fillna(0), "ecm_total"]).ecm_peak.first().rename(
         "peak buffer conc. (mM)").reset_index()
     eff = effects_table(sub, tg)
+    g = local_gain(sub)
+    gain_tab = g[["synapse", "target_class", "scenario", "local_width", "ecm_total", "buffered"]].copy()
+    for m in VERDICT_METRICS:
+        gain_tab[f"gain {m}"] = g[f"gain_{m}"]
+        gain_tab[f"{m} sig"] = np.where(sig(g[f"gain_{m}"], g[f"thr_{m}"]), "*", "")
+    gain_tab = gain_tab.sort_values(["synapse", "ecm_total", "scenario", "local_width"])
+    top = g[(g.ecm_total == g.ecm_total.max()) & g.buffered]
+    uni_top = sub[(sub.scenario == "uniform") & (sub.ecm_total == sub.ecm_total.max())
+                  & sub.target_class.notna()]
+    thr_u, thr_d = sub.thr_uptake_cum.iloc[0], sub.thr_peak_deficit.iloc[0]
+    ratio = (top.effect_uptake_cum / uni_top.set_index("synapse").effect_uptake_cum.reindex(top.synapse).to_numpy())
+    conclusions = f"""
+<h2>Conclusions</h2>
+<ul>
+<li>At the largest dose ({g.ecm_total.max():g} mM, ECS mean) the uniform buffer changes the cumulative uptake of the
+four evaluation synapses by {uni_top.effect_uptake_cum.min():.2f} to {uni_top.effect_uptake_cum.max():.2f} amol
+(threshold {thr_u:.2f} amol): {int(sig(uni_top.effect_uptake_cum, thr_u).sum())} of 4 cross it. Peak-deficit changes are
+{uni_top.effect_peak_deficit.min():.3f} to {uni_top.effect_peak_deficit.max():.3f} mM (threshold {thr_d:.2f} mM).</li>
+<li>Putting the same amount on the synapse multiplies its uptake effect by {ratio.min():.2f} to {ratio.max():.2f}
+(all placements and widths, buffered targets, largest dose); the local gain over uniform is
+{top.gain_uptake_cum.min():.2f} to {top.gain_uptake_cum.max():.2f} amol, i.e. {int(sig(top.gain_uptake_cum, thr_u).sum())} of
+{len(top)} buffered target cases exceed the threshold. Below 3 mM no placement produces a significant effect or gain.</li>
+<li>The equivalent uniform dose is only about 1-2x the actual dose although the buffer concentration at the synapse is
+3-27x higher: the synapse draws Ca from a region several um wide, so buffer concentrated within sigma &lt;= 1 um
+contributes little beyond its share of the total. Most of the effect is global (the buffer props up the whole ECS),
+and unbuffered synapses in the half-buffered runs still receive a large part of the uniform effect.</li>
+<li>Robustness: the ordering does not change with k_on (effects saturate above ~1e2 /(mM s), the buffer is inert
+below ~1 /(mM s)), with K_d (largest effect at K_d near the resting Ca, inert at 0.01 mM), or with a single-pulse
+stimulus. The buffered-minus-uniform gain never exceeds the threshold in Step 3; the uniform effect itself exceeds it
+only at 10 mM.</li>
+<li>Floor-based metrics are uninformative: no synapse reaches the 0.47 mM floor with this stimulus. Recovery t1/2 is
+quantized by the 2 ms record interval, so its 2-4 ms IQR is resolution, not biology.</li>
+<li><b>Verdict.</b> Within this model and design the claim is not supported: concentrating a matched amount of buffer at
+a synapse does not make a significant difference where the uniform buffer makes none. Placement changes the effect
+by a factor of about two at most; the total amount and the synapse's own geometry dominate.</li>
+</ul>"""
     eq_path = os.path.join(args.plots, "equivalent_dose.csv")
     eq = pd.read_csv(eq_path) if os.path.exists(eq_path) else pd.DataFrame()
 
@@ -152,6 +207,7 @@ initialized at equilibrium with 1.3 mM Ca; dt = 0.5 ms, records every 2 ms, one 
 the ECS mean concentration, identical across placements: uniform, Gaussians (sigma) on every active synapse,
 or on half of them (<code>ecm.local_target</code>). Effects are per-synapse differences to the no-buffer
 reference; the significance threshold is the IQR of the metric across the reference run's synapses.</p>
+{conclusions}
 <h2>Runs</h2>{table(inventory)}
 <h2>Evaluation synapses</h2>
 <p>Picked on the reference run by local ECS volume fraction within a geodesic radius of 1 um
@@ -167,6 +223,9 @@ for the verdict; it is reported but not flagged.</p>
 <p>Peak total buffer concentration in the ECS at t=0 (the dilution the local placement buys):</p>{table(peaks)}
 {img(os.path.join(args.plots, 'dose_response.png'))}
 <p>Effects of the verdict metrics per evaluation synapse (* = |effect| &gt; IQR):</p>{table(eff)}
+<p>Local gain = effect with the local buffer minus effect with the uniform buffer, on the same
+synapse at the same dose (* = |gain| &gt; IQR). Filled/True = this synapse carries buffer in that run:</p>
+{table(gain_tab)}
 <h2>Step 2: equivalent uniform dose and confinement</h2>
 <p>N_eq is the uniform dose whose effect on the same synapse matches the local-buffer effect
 (log-interpolated along the uniform dose-response; blank where outside the sampled range).
@@ -176,9 +235,10 @@ The comparison line is the buffer concentration actually present at the synapse 
 no buffer, vs their distance to the nearest buffered one.</p>
 {img(os.path.join(args.plots, 'confinement.png'))}{table(conf_tab)}
 <h2>Step 3: robustness</h2>
-<p>Verdict per parameter value and dose (sigma = 1 um): <i>local diff</i> = mean effect over the two
-buffered evaluation synapses minus the two unbuffered ones in the half-buffered run; <i>uniform max</i>
-= largest |effect| over the four in the uniform run. The claim holds where local &gt; thr and uniform &lt; thr.</p>
+<p>Verdict per parameter value and dose (sigma = 1 um): <i>gain</i> = effect in the half-buffered run minus
+effect in the uniform run on the same synapse, averaged over the two buffered and the two unbuffered evaluation
+synapses; <i>uniform max</i> = largest |effect| over the four in the uniform run. The claim holds where the
+buffered gain &gt; thr and uniform &lt; thr.</p>
 """)
     for axis, title, fig in (("ecm_kf", "On-rate k_on (1/(mM s)), K_d = 1 mM", "robustness_ecm_kf.png"),
                              ("ecm_kd", "Affinity K_d (mM), k_on = 1e5 /(mM s)", "robustness_ecm_kd.png"),
