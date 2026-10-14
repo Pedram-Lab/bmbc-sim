@@ -86,6 +86,10 @@ class ECM(ConfigGroup):
     # standard deviation) centered on the synapses, confined to the ECS, scaled
     # so its ECS mean is ecm_total. Keep it at a few mesh edge lengths.
     local_width: Quantity("um") | None = None
+    # Indices into synapse_centers.npy (all active synapses, cell order) that get
+    # the localized buffer; None = all of them. ecm_total is unchanged, so fewer
+    # targets means more buffer per target.
+    local_target: list[int] | None = None
     # Parametrized by (kf, Kd) rather than (kf, kr): the on-rate kf is a property of
     # the molecules, while Kd = kr / kf is the affinity the buffer sweeps scan, so kr
     # is the one to derive. Defaults are unchanged (kr = 100 / s = 0.1 / ms).
@@ -387,11 +391,24 @@ def run(cfg: Config) -> None:
         ecm_init, ecm_ca_init = ecm_cfg.ecm_total - ecm_ca_equilibrium, ecm_ca_equilibrium
 
         if ecm_cfg.local_width is not None:
+            buffer_centers = all_centers
+            if ecm_cfg.local_target is not None:
+                idx = np.asarray(ecm_cfg.local_target, dtype=int)
+                if idx.size == 0 or idx.min() < 0 or idx.max() >= len(all_centers) \
+                        or len(np.unique(idx)) != len(idx):
+                    raise ValueError(
+                        f"ecm.local_target must be distinct indices in "
+                        f"[0, {len(all_centers)}), got {ecm_cfg.local_target}"
+                    )
+                buffer_centers = all_centers[idx]
+            print(f"  Localized ECM on {len(buffer_centers)}/{len(all_centers)} synapses, "
+                  f"sigma {ecm_cfg.local_width}")
+
             # Same shape for ECM and ECM_Ca (Ca is uniform at t=0, so the bound
             # fraction is too); `total` fixes the ECS mean to the uniform value.
             def localized(mean_conc):
                 return cf.GaussianPeaks(
-                    all_centers,
+                    buffer_centers,
                     peak_width=ecm_cfg.local_width,
                     peak_value=mean_conc,
                     total=mean_conc * ecs.volume * u.um**3,

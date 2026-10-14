@@ -41,7 +41,7 @@ from scipy.spatial import cKDTree
 from bmbcsim.meshing.netgen_vtk import pyvista_volume_to_netgen
 from bmbcsim.simulation.result_io import find_run_dirs, run_seed
 from bmbcsim.utils import create_cluster
-from analysis import compute_local_ca, find_synapse_centers
+from analysis import compute_local_ca, load_synapse_centers
 
 DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
 # Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat globally
@@ -358,7 +358,7 @@ def process_seed(result_path, radii, heat_m, eps_rel=1e-6):
         points = h5["mesh/points"][:].astype(np.float64)
         connectivity = h5["mesh/connectivity"][:].astype(np.int64)
         ecs_indicator = h5["compartments/ecs"][:]
-        synapse_centers = find_synapse_centers(h5)
+        synapse_centers = load_synapse_centers(result_path, h5)
 
     if len(synapse_centers) == 0:
         return []

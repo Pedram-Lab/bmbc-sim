@@ -1,0 +1,20 @@
+# No-buffer reference for the dose-response study (dose_response_*.yaml): the
+# per-synapse baseline every buffered run is compared against, plus the same for
+# the sub-saturating single-pulse stimulus. Also the run the evaluation synapses
+# are picked from (select_targets.py).
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name dose_response_reference cluster=local
+defaults:
+  - cluster: local
+  - _self_
+
+result_root: results/dose-response-reference
+
+base:
+  time_step: "0.5 ms"
+  record_interval_factor: 4   # 2 ms records
+
+sweep:
+  synapse.pulse_times:
+    - ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
+    - ["100 ms"]
+seeds: 1
