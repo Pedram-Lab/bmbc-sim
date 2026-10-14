@@ -7,7 +7,7 @@ defaults:
   - _self_
 
 cluster:
-  n_workers: 24   # 4 threads each on the 72-core box, runs use ~1 core on average; LSF is not reachable from here
+  n_workers: 8   # runs in flight at any time (user preference; the box has 72 cores); LSF is not reachable from here
 
 base:
   time_step: "0.5 ms"
