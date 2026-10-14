@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 cluster:
-  n_workers: 16   # 4 threads each on the 72-core box; LSF is not reachable from here
+  n_workers: 24   # 4 threads each on the 72-core box, runs use ~1 core on average; LSF is not reachable from here
 
 base:
   time_step: "0.5 ms"
@@ -27,6 +27,6 @@ sweep:
     - [null, null]           # uniform
     - ["0.5 um", null]       # all synapses buffered
     - ["1 um", null]
-    - ["0.5 um", LOCAL_TARGET_PLACEHOLDER]
-    - ["1 um", LOCAL_TARGET_PLACEHOLDER]
+    - ["0.5 um", [0, 1, 2, 3, 7, 9, 11, 14, 16, 20, 21, 25, 26, 27, 28, 30, 32, 34, 36, 38, 43, 44, 45, 47, 48, 50, 55, 56, 58, 59]]
+    - ["1 um", [0, 1, 2, 3, 7, 9, 11, 14, 16, 20, 21, 25, 26, 27, 28, 30, 32, 34, 36, 38, 43, 44, 45, 47, 48, 50, 55, 56, 58, 59]]
 seeds: 1
