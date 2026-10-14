@@ -43,7 +43,9 @@ def table(df, fmt="{:.3g}"):
 
 
 def sig(effect, thr):
-    return np.abs(effect) > thr
+    """|effect| > threshold; a zero/NaN threshold (metric constant across the reference,
+    e.g. no synapse ever reaches the floor) cannot classify anything -> False."""
+    return (np.abs(effect) > thr) & (thr > 0)
 
 
 def effects_table(sub, tg):
@@ -83,6 +85,9 @@ def verdict(df, axis, tg):
             u = uni[f"effect_{m}"].abs().max()
             row[f"{m}: local diff"] = diff
             row[f"{m}: uniform max"] = u
+            if not thr > 0:
+                row[f"{m}: verdict"] = "n/a (threshold 0)"
+                continue
             row[f"{m}: verdict"] = ("local>thr" if abs(diff) > thr else "local<thr") + ", " + \
                                    ("uniform>thr" if u > thr else "uniform<thr")
         rows.append(row)
@@ -154,7 +159,9 @@ reference; the significance threshold is the IQR of the metric across the refere
 their cell, pairwise &ge; 5 um apart. The buffered half ({len(tj['buffered_half'])} of {tj['n_synapses']}
 active synapses) contains exactly one of each.</p>{table(tgt)}
 <h2>Reference baseline and thresholds</h2>
-<p>Metric distributions across all synapses of the 5-pulse reference run; the IQR is the threshold.</p>
+<p>Metric distributions across all synapses of the 5-pulse reference run; the IQR is the threshold.
+A zero IQR (floor metrics when no synapse reaches the depletion floor) makes that metric unusable
+for the verdict; it is reported but not flagged.</p>
 {table(baseline)}<p>Thresholds per stimulus:</p>{table(thr)}
 <h2>Step 1: dose-response</h2>
 <p>Peak total buffer concentration in the ECS at t=0 (the dilution the local placement buys):</p>{table(peaks)}
