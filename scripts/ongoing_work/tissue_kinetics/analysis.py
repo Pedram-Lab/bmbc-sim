@@ -137,6 +137,20 @@ def load_synapse_centers(result_path, h5):
     return find_synapse_centers(h5)
 
 
+def synapse_cells(h5, centers):
+    """Index of the cell each synapse center sits on, and how many synapses that cell has."""
+    points = h5["mesh/points"][:]
+    names = [n for n in h5["compartments"] if n.startswith("cell_")]
+    cell_of_point = np.full(len(points), -1)
+    for name in names:
+        cell_of_point[h5[f"compartments/{name}"][:] > 0.5] = int(name.split("_")[1])
+    is_cell = cell_of_point >= 0
+    _, nearest = cKDTree(points[is_cell]).query(centers)
+    cells = cell_of_point[is_cell][nearest]
+    n_in_cell = dict(zip(*np.unique(cells, return_counts=True)))
+    return cells, np.array([n_in_cell[c] for c in cells])
+
+
 def compute_local_ca(result_path, species=SPECIES_NAME):
     """Compute per-synapse local ECS Ca concentration time series.
 
