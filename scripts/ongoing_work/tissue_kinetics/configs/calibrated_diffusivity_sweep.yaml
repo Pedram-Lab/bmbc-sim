@@ -15,15 +15,17 @@
 # invert_diffusivity.py script.
 # Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name calibrated_diffusivity_sweep
 defaults:
-  - cluster: local    # override on the CLI with cluster=janelia
+  - cluster: janelia    # override on the CLI with cluster=local
   - _self_              # this file's own values win over the group above
 
 result_root: results/calibrated-diffusivity-sweep
 
-# Local: 12 simulations at a time in separate processes (80 runs total); don't start
-# all 80 meshers at once. With cluster=janelia drop n_workers to submit one LSF job per run.
+# LSF: one simulation per job, 4 cores each, all 80 submitted at once (LSF decides how
+# many run at a time). Add "n_workers: 20" to cap the jobs in flight instead.
 cluster:
-  n_workers: 12
+  n_threads_per_worker: 4
+  extra:
+    walltime: "04:00"
 
 # Non-swept parameters; unlisted fields fall back to the Config defaults in
 # ../simulation.py. ecm.enabled is set by the zipped axis below; the buffer's

@@ -13,13 +13,14 @@ result_root: results/buffer-kinetics-sweep
 base:
   ecm:
     enabled: true
-    ecm_total: "1.3 mM"
+    ecm_total: "10.0 mM"
     ecm_kd: "1.0 mM"   # fixed
 
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
 sweep:
   # kr = ecm_kf * Kd = 1 / s ... 1e6 / s, the decades the old driver swept.
-  ecm.ecm_kf: ["1e-2 / (mM s)", "3e-2 / (mM s)", "1e-1 / (mM s)", "3e-1 / (mM s)", "1e0 / (mM s)", "3e0 / (mM s)", "1e1 / (mM s)", "3e1 / (mM s)", "1e2 / (mM s)"]
+  ecm.ecm_kf: ["1e0 / (mM s)", "1e1 / (mM s)", "1e2 / (mM s)", "1e3 / (mM s)",
+               "1e4 / (mM s)", "1e5 / (mM s)", "1e6 / (mM s)"]
   geometry.ecs_ratio: [0.04, 0.19]
 seeds: 10
