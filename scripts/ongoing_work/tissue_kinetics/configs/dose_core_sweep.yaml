@@ -12,8 +12,6 @@ cluster:
   n_workers: 8   # runs in flight at any time (user preference; the box has 72 cores); LSF is not reachable from here
 
 base:
-  time_step: "0.5 ms"
-  record_interval_factor: 4   # 2 ms records
   ecm:
     enabled: true
     ecm_kd: "1 mM"

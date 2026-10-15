@@ -9,10 +9,6 @@ defaults:
 
 result_root: results/dose-response-reference
 
-base:
-  time_step: "0.5 ms"
-  record_interval_factor: 4   # 2 ms records
-
 sweep:
   synapse.pulse_times:
     - ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]

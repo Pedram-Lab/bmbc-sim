@@ -29,7 +29,13 @@ DEVIATIONS = [
     "Step 3 runs the uniform and half-buffered scenarios only.",
     "Steps 4/5 (solitary synapse) use a sparse stimulus (one active synapse per run) that the "
     "original plan did not foresee; the four evaluation synapses are the active ones, doses "
-    "0.3 and 1 mM (ECS mean), one off-target neighbour per synapse, one seed.",
+    "0.3 and 1 mM (ECS mean), one off-target neighbour per synapse, one seed. Their threshold "
+    "is the IQR across only the four solitary references, so it is a weak criterion; the "
+    "effect relative to the synapse's own uptake (% ref) and to the uniform placement "
+    "(on/uniform) are the informative numbers.",
+    "Two single_buffer_sweep runs (synapse 39, 1 mM, sigma 1 um on-target and off-target) were "
+    "cut off by a disk-full reboot on 2026-10-15 and rerun unchanged into a second "
+    "results/single-buffer_* directory (originals in results/_failed/).",
 ]
 
 

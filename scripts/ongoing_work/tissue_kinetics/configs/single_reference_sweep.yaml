@@ -14,10 +14,6 @@ cluster:
 
 result_root: results/single-reference
 
-base:
-  time_step: "0.5 ms"
-  record_interval_factor: 4   # 2 ms records
-
 sweep:
   synapse.active: [[28], [49], [3], [39]]
 seeds: 1

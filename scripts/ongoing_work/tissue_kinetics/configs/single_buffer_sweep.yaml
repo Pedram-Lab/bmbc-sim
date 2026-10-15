@@ -16,8 +16,6 @@ cluster:
 result_root: results/single-buffer
 
 base:
-  time_step: "0.5 ms"
-  record_interval_factor: 4   # 2 ms records
   ecm:
     enabled: true
     ecm_kd: "1 mM"

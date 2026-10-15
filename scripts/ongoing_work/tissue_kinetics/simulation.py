@@ -131,8 +131,8 @@ class Config(SimulationConfig):
     seed: int = 42
     # Timing
     end_time: Quantity("s") = "0.5 s"
-    time_step: Quantity("s") = "1.0 ms"
-    record_interval_factor: int = 10
+    time_step: Quantity("s") = "0.5 ms"   # 1 ms under-resolves the synapse peaks (depletion biased low)
+    record_interval_factor: int = 4       # 2 ms records
     # Subsystems
     geometry: Geometry = Geometry()
     diffusion: Diffusion = Diffusion()
