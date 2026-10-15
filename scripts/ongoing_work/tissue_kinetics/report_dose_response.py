@@ -27,6 +27,9 @@ DEVIATIONS = [
     "No mesh refinement; dt = 0.5 ms, records every 2 ms.",
     "Sub-saturating stimulus = a single pulse (not a reduced single-channel current).",
     "Step 3 runs the uniform and half-buffered scenarios only.",
+    "Steps 4/5 (solitary synapse) use a sparse stimulus (one active synapse per run) that the "
+    "original plan did not foresee; the four evaluation synapses are the active ones, doses "
+    "0.3 and 1 mM (ECS mean), one off-target neighbour per synapse, one seed.",
 ]
 
 
@@ -131,6 +134,87 @@ def verdict(df, axis, tg):
     return pd.DataFrame(rows)
 
 
+def solitary_verdict(df):
+    """Solitary-synapse runs: per active target, dose and sigma, the effect at the active
+    synapse with the buffer uniform / on it / on a neighbour, the two contrasts of the claim
+    (on - uniform, on - off) against the reference IQR, and the shielding of the silent
+    neighbours within 3 um (mean change of their peak deficit)."""
+    sol = df[(df.active != "all") & (df.scenario != "reference")]
+    sol = sol[(sol.ecm_kf == KF0) & (sol.ecm_kd == KD0)]
+    rows = []
+    for (a, dose), g in sol.groupby(["active", "ecm_total"]):
+        act = g[g.is_active]
+        uni = act[act.scenario == "uniform"]
+        if uni.empty:
+            continue
+        for width, gw in act[act.scenario == "on"].groupby("local_width"):
+            off = act[(act.scenario == "off") & (act.local_width == width)]
+            row = dict(active=int(a), target=gw.target_class.iloc[0], dose=dose, sigma=width,
+                       conc_on=gw.ecm_at_synapse.iloc[0])
+            for m in ("uptake_cum", "peak_deficit"):
+                thr = gw[f"thr_{m}"].iloc[0]
+                e_on, e_u = gw[f"effect_{m}"].iloc[0], uni[f"effect_{m}"].iloc[0]
+                e_off = off[f"effect_{m}"].iloc[0] if len(off) else np.nan
+                row[f"{m}: uniform"] = e_u
+                row[f"{m}: on"] = e_on
+                row[f"{m}: off"] = e_off
+                row[f"{m}: on-uniform"] = f"{e_on - e_u:.3g}{'*' if sig(e_on - e_u, thr) else ''}"
+                row[f"{m}: on-off"] = f"{e_on - e_off:.3g}{'*' if sig(e_on - e_off, thr) else ''}"
+                row[f"{m}: thr"] = thr
+            near = g[~g.is_active & (g.d_active <= 3)]
+            for scen in ("uniform", "on", "off"):
+                n = near[(near.scenario == scen) & ((near.local_width == width) | (scen == "uniform"))]
+                row[f"shield {scen}"] = n.effect_peak_deficit.mean()
+            row["n_silent<=3um"] = int(near[near.scenario == "uniform"].shape[0])
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def solitary_section(df, plots):
+    v = solitary_verdict(df)
+    if v.empty:
+        return "", ""
+    fp_path = os.path.join(plots, "footprint.csv")
+    fp = pd.read_csv(fp_path).drop(columns="run", errors="ignore") if os.path.exists(fp_path) else pd.DataFrame()
+    eq_path = os.path.join(plots, "single_equivalent_dose.csv")
+    eq = pd.read_csv(eq_path) if os.path.exists(eq_path) else pd.DataFrame()
+    top = v[(v.dose == v.dose.max()) & (v.sigma != 1.0)] if (v.sigma != 1.0).any() else v[v.dose == v.dose.max()]
+    ratio_u = top["uptake_cum: on"] / top["uptake_cum: uniform"]
+    n_sig_u = sum("*" in x for x in top["uptake_cum: on-uniform"])
+    n_sig_o = sum("*" in x for x in top["uptake_cum: on-off"])
+    n_sig_du = sum("*" in x for x in top["peak_deficit: on-uniform"])
+    shield = top[["shield uniform", "shield on", "shield off"]]
+    conclusion = f"""
+<li><b>Solitary synapse (steps 4/5).</b> With one active synapse per run the depletion footprint is local
+({fp.sigma_1e.min():.1f}-{fp.sigma_1e.max():.1f} um 1/e radius, solitary peak deficit {fp.peak_deficit.min():.2f}-{fp.peak_deficit.max():.2f} mM) and the
+buffer width was matched to it. At {top.dose.max():g} mM the on-target buffer changes the active synapse's uptake by
+{ratio_u.min():.1f}-{ratio_u.max():.1f}x the uniform effect ({n_sig_u} of {len(top)} on-uniform contrasts and {n_sig_o} of {len(top)} on-off
+contrasts exceed the threshold for uptake; {n_sig_du} of {len(top)} for the peak deficit). Shielding of the silent
+neighbours within 3 um (mean change of their peak deficit): uniform {shield['shield uniform'].mean():+.3f}, on-target
+{shield['shield on'].mean():+.3f}, off-target {shield['shield off'].mean():+.3f} mM.</li>""" if len(fp) else ""
+    html = f"""
+<h2>Step 4/5: solitary synapse, catchment-matched buffer, neighbour shielding</h2>
+<p>With all 60 synapses firing the ECS is depleted by 0.3-0.5 mM everywhere (pool effect), so there is no local
+catchment to match the buffer to. Here one evaluation synapse carries flux per run (<code>synapse.active</code>);
+the others are placed but silent, so their Ca reports crosstalk. The footprint of the solitary synapse in the
+no-buffer run sets the buffer width sigma; the same total amount is then placed uniformly, on the active synapse
+(on-target) or on a silent neighbour ~2-3.5 um away (off-target). The threshold is the IQR of the metric across the
+four solitary references.</p>
+<p>Footprint (ring-averaged deficit at the time of the active synapse's minimum; far = outermost ring):</p>
+{table(fp) if len(fp) else '<p><i>footprint.csv missing</i></p>'}
+{img(os.path.join(plots, 'single_effect.png'))}
+<p>Verdict per active synapse, dose and sigma (* = |contrast| &gt; IQR). <i>conc_on</i> is the buffer concentration
+at the synapse with the on-target placement; <i>shield</i> columns are the mean change of the peak deficit of the
+silent synapses within 3 um of the active one (negative = less depletion):</p>
+{table(v)}
+<p>Equivalent uniform dose of the on-target buffer:</p>
+{img(os.path.join(plots, 'single_equivalent_dose.png'))}{table(eq) if len(eq) else ''}
+<p>Shielding: effect on every silent synapse vs its distance to the active one:</p>
+{img(os.path.join(plots, 'single_shielding.png'))}
+"""
+    return html, conclusion
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("csv")
@@ -147,7 +231,10 @@ def main():
     sub = core(df)
     ref = df[(df.scenario == "reference")]
 
-    inventory = df.drop_duplicates("run").groupby(["stimulus", "scenario"]).size().rename("runs").reset_index()
+    inventory = df.drop_duplicates("run").assign(protocol=lambda d: np.where(d.active == "all", "all synapses",
+                                                                             "solitary")).groupby(
+        ["protocol", "stimulus", "scenario"]).size().rename("runs").reset_index()
+    sol_html, sol_conclusion = solitary_section(df, args.plots)
     tgt = pd.DataFrame([dict(synapse=s, target=cls, cell=tj["cell"][str(s)],
                              vfrac_r1=tj["vfrac"][str(s)], d_lateral_um=tj["d_lateral"][str(s)],
                              in_buffered_half=s in tj["buffered_half"]) for s, cls in tg])
@@ -204,6 +291,7 @@ stimulus. The buffered-minus-uniform gain never exceeds the threshold in Step 3;
 only at 10 mM.</li>
 <li>Floor-based metrics are uninformative: no synapse reaches the 0.47 mM floor with this stimulus. Recovery t1/2 is
 quantized by the 2 ms record interval, so its 2-4 ms IQR is resolution, not biology.</li>
+{sol_conclusion}
 <li><b>Verdict.</b> Within this model and design the claim is not supported: concentrating a matched amount of buffer at
 a synapse does not make a significant difference where the uniform buffer makes none. Placement changes the effect
 by a factor of about two at most; the total amount and the synapse's own geometry dominate.</li>
@@ -281,6 +369,8 @@ buffered gain &gt; thr and uniform &lt; thr.</p>
         if v.empty:
             continue
         H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}")
+    if sol_html:
+        H.append(sol_html)
     H.append("<h2>Deviations from the original plan</h2><ul>" +
              "".join(f"<li>{d}</li>" for d in DEVIATIONS) + "</ul>")
     H.append(f"<p><small>Source: {os.path.abspath(args.csv)}; reference run {tj['reference_run']}</small></p>"
