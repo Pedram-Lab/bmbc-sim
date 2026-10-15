@@ -15,9 +15,12 @@ Synapse Ca is the nearest ECS vertex (analysis.compute_local_ca); the cell conte
 the lumped-mass integral over the cell, which is the cumulative uptake because the
 cells have no efflux. Uptake metrics are NaN for synapses sharing a cell.
 
-Effects are differences to the no-buffer reference with the same seed and stimulus
-(``effect_<metric>``); ``thr_<metric>`` is the IQR of the metric across the
-reference run's synapses, the significance threshold of the plan.
+Effects are differences to the no-buffer reference with the same seed, stimulus and
+active-synapse set (``effect_<metric>``); ``thr_<metric>`` is the IQR of the metric
+across the reference synapses that carry flux, the significance threshold of the plan.
+Solitary-synapse runs (``synapse.active``) add ``active`` (the index set), ``is_active``
+and ``d_active`` (distance to the nearest active synapse); their buffer scenarios are
+``on`` (buffer on the active synapse) and ``off`` (on a neighbour).
 
     uv run scripts/ongoing_work/tissue_kinetics/evaluate_dose_response.py \\
         --targets <ref run>/targets.json --out dose_response.csv results/dose-*
@@ -67,17 +70,24 @@ def evaluate_run(run, targets):
     pulses = np.array([_mm(t) for t in syn["pulse_times"]])
     ca0, floor = _mm(diff["ca_ecs"]), _mm(diff["depletion"]) + FLOOR_EPS
     local_width = None if ecm["local_width"] is None else _mm(ecm["local_width"])
+    active = syn.get("active")  # None = every synapse carries flux
     if not ecm["enabled"]:
         scenario = "reference"
     elif local_width is None:
         scenario = "uniform"
-    else:
-        scenario = "all" if ecm["local_target"] is None else "half"
+    elif ecm["local_target"] is None:
+        scenario = "all"
+    elif active is None:
+        scenario = "half"
+    else:  # solitary-synapse runs: buffer on the active synapse or on a neighbour
+        scenario = "on" if sorted(ecm["local_target"]) == sorted(active) else "off"
 
     times, local_ca = compute_local_ca(run)
     with h5py.File(os.path.join(run, "snapshot.h5"), "r") as h5:
         centers = load_synapse_centers(run, h5)
         cells, n_in_cell = synapse_cells(h5, centers)
+        if active is not None:  # only synapses with flux count towards sharing a cell
+            n_in_cell = np.array([np.sum(cells[active] == c) for c in cells])
         points = h5["mesh/points"][:]
         names = [n for n in h5["compartments"] if n.startswith("cell_")]
         cell_of_node = np.full(len(points), -1)
@@ -108,6 +118,8 @@ def evaluate_run(run, targets):
         d_buffered = np.linalg.norm(centers[:, None] - centers[buffered][None], axis=2).min(axis=1)
     else:
         d_buffered = np.full(n, np.nan)
+    is_active = np.ones(n, bool) if active is None else np.isin(np.arange(n), active)
+    d_active = np.linalg.norm(centers[:, None] - centers[is_active][None], axis=2).min(axis=1)
 
     t_idx = lambda t: int(np.argmin(np.abs(times - t)))
     i0 = t_idx(pulses[0])
@@ -120,6 +132,8 @@ def evaluate_run(run, targets):
             ecm_kf=_mm(ecm["ecm_kf"]), ecm_kd=_mm(ecm["ecm_kd"]), local_width=local_width,
             n_buffered=int(buffered.sum()), n_pulses=len(pulses),
             stimulus=f"{len(pulses)}p_{_mm(syn['i_channel']):g}pA",
+            active="all" if active is None else ",".join(map(str, sorted(active))),
+            is_active=bool(is_active[s]), d_active=d_active[s],
             synapse=s, cell=int(cells[s]), n_in_cell=int(n_in_cell[s]),
             x=centers[s, 0], y=centers[s, 1], z=centers[s, 2],
             target_class=targets.get(s, ""), buffered=bool(buffered[s]),
@@ -146,17 +160,24 @@ def evaluate_run(run, targets):
 
 
 def add_effects(df):
-    """effect_<m> = m - reference (same seed, stimulus, synapse); thr_<m> = reference IQR."""
+    """effect_<m> = m - reference (same seed, stimulus, active set, synapse); thr_<m> = reference IQR.
+
+    The IQR is taken across the synapses that carry flux: all synapses of the full-stimulus
+    reference, or the active synapse of each solitary-synapse reference (one per run)."""
     metrics = METRICS + sorted(c for c in df.columns if c.startswith("uptake_") and c[7:].isdigit())
-    ref = df[df.scenario == "reference"].set_index(["seed", "stimulus", "synapse"])
+    ref = df[df.scenario == "reference"]
     if ref.empty:
         raise SystemExit("no reference run (ecm.enabled=false) among the inputs")
-    key = pd.MultiIndex.from_frame(df[["seed", "stimulus", "synapse"]])
+    ref_idx = ref.set_index(["seed", "stimulus", "active", "synapse"])
+    key = pd.MultiIndex.from_frame(df[["seed", "stimulus", "active", "synapse"]])
+    ref_active = ref[ref.is_active]
+    solitary = lambda d: d.active != "all"
+    thr_key = pd.MultiIndex.from_arrays([df.seed, df.stimulus, solitary(df)])
     for m in metrics:
-        base = ref[m].reindex(key).to_numpy()
-        df[f"effect_{m}"] = df[m].to_numpy() - base
-        iqr = ref.groupby(level=["seed", "stimulus"])[m].agg(lambda v: v.quantile(0.75) - v.quantile(0.25))
-        df[f"thr_{m}"] = iqr.reindex(pd.MultiIndex.from_frame(df[["seed", "stimulus"]])).to_numpy()
+        df[f"effect_{m}"] = df[m].to_numpy() - ref_idx[m].reindex(key).to_numpy()
+        iqr = ref_active.groupby([ref_active.seed, ref_active.stimulus, solitary(ref_active)])[m].agg(
+            lambda v: v.quantile(0.75) - v.quantile(0.25))
+        df[f"thr_{m}"] = iqr.reindex(thr_key).to_numpy()
     return df
 
 

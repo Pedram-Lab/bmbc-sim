@@ -151,6 +151,50 @@ def fig_confinement(df, out):
     plt.close(fig)
 
 
+def relative_effects(df, scenarios=("half",), metrics=("uptake_cum", "peak_deficit")):
+    """Local-run effect divided by the uniform-run effect on the SAME synapse (same dose,
+    kinetics, stimulus): removes synapse identity, so buffered and unbuffered synapses
+    become comparable. Rows of the local runs with rel_<m> added."""
+    key = ["seed", "stimulus", "active", "ecm_kf", "ecm_kd", "ecm_total", "synapse"]
+    uni = df[df.scenario == "uniform"].drop_duplicates(key).set_index(key)
+    # the Step 3 sweeps repeat the core grid point: keep one copy of each run
+    loc = df[df.scenario.isin(scenarios)].drop_duplicates(key + ["scenario", "local_width"]).copy()
+    idx = pd.MultiIndex.from_frame(loc[key])
+    for m in metrics:
+        loc[f"rel_{m}"] = loc[f"effect_{m}"].to_numpy() / uni[f"effect_{m}"].reindex(idx).to_numpy()
+    return loc
+
+
+def fig_placement(df, out):
+    """On- vs off-target at the same amount: relative effect vs distance to the nearest
+    buffered synapse, all synapses of the half-buffered core runs."""
+    sub = relative_effects(core(df))
+    doses = sorted(sub.ecm_total.unique())[-2:]
+    metrics = ["uptake_cum", "peak_deficit"]
+    fig, axes = plt.subplots(len(metrics), len(doses), figsize=(4 * len(doses), 3 * len(metrics)),
+                             squeeze=False, sharex=True)
+    for j, dose in enumerate(doses):
+        for i, m in enumerate(metrics):
+            ax = axes[i, j]
+            for width, g in sub[sub.ecm_total == dose].groupby("local_width"):
+                ax.plot(g.d_buffered, g[f"rel_{m}"], "o", ms=4, alpha=0.6, label=f"sigma={width:g} um")
+                t = g[g.target_class.notna()]
+                ax.plot(t.d_buffered, t[f"rel_{m}"], "k+", ms=9, mew=1.5)
+            ax.axhline(1, color="0.5", lw=0.8, label="uniform")
+            ax.axhline(0, color="0.5", lw=0.5, ls=":")
+            if i == 0:
+                ax.set_title(f"dose {dose:g} mM", fontsize=10)
+            if j == 0:
+                ax.set_ylabel(f"Δ{m} / Δ{m} uniform (same synapse)", fontsize=8)
+            if i == len(metrics) - 1:
+                ax.set_xlabel("distance to nearest buffered synapse (um)")
+    axes[0, 0].legend(fontsize=7)
+    fig.suptitle("Placement: effect relative to the uniform buffer, half-buffered runs (+ = evaluation synapse)")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "placement.png"), dpi=130)
+    plt.close(fig)
+
+
 def fig_robustness(df, out, axis, xlabel, logx=True):
     """Effect vs `axis` (ecm_kf / ecm_kd), one column per dose, uniform vs half-buffered."""
     other = {"ecm_kf": KD0, "ecm_kd": KF0}
@@ -226,9 +270,12 @@ def main():
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     df = pd.read_csv(args.csv)
+    if "active" not in df:
+        df["active"] = "all"
     fig_dose_response(df, args.out)
     fig_equivalent_dose(df, args.out)
     fig_confinement(df, args.out)
+    fig_placement(df, args.out)
     fig_robustness(df, args.out, "ecm_kf", "k_on (1/(mM s))")
     fig_robustness(df, args.out, "ecm_kd", "K_d (mM)")
     fig_stimulus(df, args.out)

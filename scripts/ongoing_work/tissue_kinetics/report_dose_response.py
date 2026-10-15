@@ -11,7 +11,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from plot_dose_response import KD0, KF0, STIM0, core, targets
+from plot_dose_response import KD0, KF0, STIM0, core, relative_effects, targets
 
 VERDICT_METRICS = ["uptake_cum", "peak_deficit", "frac_at_floor"]
 
@@ -81,6 +81,24 @@ def local_gain(df, scenarios=("all", "half")):
     return loc
 
 
+def placement(df):
+    """Median relative effect (local / uniform, same synapse) on buffered vs unbuffered
+    synapses per dose and sigma, and their ratio = how much more a synapse gets from
+    buffer on itself than from the same amount on a neighbour."""
+    rel = relative_effects(df)
+    rows = []
+    for (dose, width), g in rel.groupby(["ecm_total", "local_width"]):
+        row = dict(dose=dose, sigma=width, n_buffered=int(g.buffered.sum()),
+                   n_unbuffered=int((~g.buffered).sum()))
+        for m in ("uptake_cum", "peak_deficit"):
+            on, off = g[g.buffered][f"rel_{m}"].median(), g[~g.buffered][f"rel_{m}"].median()
+            row[f"{m}: on-target"] = on
+            row[f"{m}: off-target"] = off
+            row[f"{m}: on/off"] = on / off
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def verdict(df, axis, tg):
     """Local gain (half - uniform, same synapse) on buffered vs unbuffered targets, and the
     uniform effect itself, against the threshold. Claim holds where the buffered gain
@@ -122,6 +140,8 @@ def main():
     args = p.parse_args()
 
     df = pd.read_csv(args.csv)
+    if "active" not in df:
+        df["active"] = "all"
     tj = json.load(open(args.targets))
     tg = targets(df)
     sub = core(df)
@@ -155,6 +175,8 @@ def main():
                   & sub.target_class.notna()]
     thr_u, thr_d = sub.thr_uptake_cum.iloc[0], sub.thr_peak_deficit.iloc[0]
     ratio = (top.effect_uptake_cum / uni_top.set_index("synapse").effect_uptake_cum.reindex(top.synapse).to_numpy())
+    place = placement(sub)
+    p_top = place[place.dose == place.dose.max()]
     conclusions = f"""
 <h2>Conclusions</h2>
 <ul>
@@ -170,6 +192,12 @@ four evaluation synapses by {uni_top.effect_uptake_cum.min():.2f} to {uni_top.ef
 3-27x higher: the synapse draws Ca from a region several um wide, so buffer concentrated within sigma &lt;= 1 um
 contributes little beyond its share of the total. Most of the effect is global (the buffer props up the whole ECS),
 and unbuffered synapses in the half-buffered runs still receive a large part of the uniform effect.</li>
+<li>Placement, re-scored on all synapses with each synapse normalised by its own uniform effect: at
+{place.dose.max():g} mM a synapse carrying buffer gets {p_top["uptake_cum: on-target"].min():.2f}-{p_top["uptake_cum: on-target"].max():.2f}x
+the uniform uptake effect, a synapse without gets {p_top["uptake_cum: off-target"].min():.2f}-{p_top["uptake_cum: off-target"].max():.2f}x,
+so buffer on the synapse itself is worth {p_top["uptake_cum: on/off"].min():.1f}-{p_top["uptake_cum: on/off"].max():.1f}x the same
+amount on a neighbour. Placement does matter in relative terms; the absolute gain over uniform still stays below the
+threshold because the whole effect is small.</li>
 <li>Robustness: the ordering does not change with k_on (effects saturate above ~1e2 /(mM s), the buffer is inert
 below ~1 /(mM s)), with K_d (largest effect at K_d near the resting Ca, inert at 0.01 mM), or with a single-pulse
 stimulus. The buffered-minus-uniform gain never exceeds the threshold in Step 3; the uniform effect itself exceeds it
@@ -234,6 +262,12 @@ The comparison line is the buffer concentration actually present at the synapse 
 <p>Spatial confinement, half-buffered scenario at the largest dose: effects on the synapses that carry
 no buffer, vs their distance to the nearest buffered one.</p>
 {img(os.path.join(args.plots, 'confinement.png'))}{table(conf_tab)}
+<h2>Placement: on- vs off-target at the same amount</h2>
+<p>Comparing buffered with unbuffered <i>synapses</i> directly confounds placement with synapse identity, so each
+synapse's effect in the half-buffered run is divided by its own effect in the uniform run at the same dose
+(relative effect; 1 = same as uniform, 0 = no effect). Medians over the buffered and the unbuffered synapses of
+the core runs and their ratio:</p>
+{img(os.path.join(args.plots, 'placement.png'))}{table(place)}
 <h2>Step 3: robustness</h2>
 <p>Verdict per parameter value and dose (sigma = 1 um): <i>gain</i> = effect in the half-buffered run minus
 effect in the uniform run on the same synapse, averaged over the two buffered and the two unbuffered evaluation

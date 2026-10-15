@@ -69,6 +69,10 @@ class Synapse(ConfigGroup):
     tau1: Quantity("ms") = "10 ms"
     tau2: Quantity("ms") = "3 ms"
     pulse_times: list[Quantity("ms")] = ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
+    # Indices into synapse_centers.npy that carry flux; None = all of them. The other
+    # synapses are still placed and saved (so indices stay comparable across runs), they
+    # just stay silent: a sparse stimulus for solitary-synapse experiments.
+    active: list[int] | None = None
     # Convergence-test mode: no synapse patches; instead the whole membrane of the
     # cell nearest the box center absorbs the total active-synapse flux uniformly,
     # so the sink does not move with the mesh the way snapped synapse centers do.
@@ -135,6 +139,14 @@ class Config(SimulationConfig):
     synapse: Synapse = Synapse()
     ecm: ECM = ECM()
     mechanics: Mechanics = Mechanics()
+
+
+def _check_indices(values, n, name):
+    """Distinct synapse indices in [0, n) as an int array, else a ValueError naming `name`."""
+    idx = np.asarray(values, dtype=int)
+    if idx.size == 0 or idx.min() < 0 or idx.max() >= n or len(np.unique(idx)) != len(idx):
+        raise ValueError(f"{name} must be distinct indices in [0, {n}), got {list(values)}")
+    return idx
 
 
 def _on_outer_box(min_box, max_box, eps_rel=1e-6):
@@ -369,7 +381,19 @@ def run(cfg: Config) -> None:
     print(f"  Synapse centers snapped to membrane vertices, max shift {max_snap:.3f} um "
           f"-> {result_dir / 'synapse_centers.npy'}")
 
-    for i, centers in synapse_centers.items():
+    flux_centers = synapse_centers
+    if syn.active is not None:
+        idx = _check_indices(syn.active, len(all_centers), "synapse.active")
+        offsets = np.cumsum([0] + [len(c) for c in synapse_centers.values()])
+        flux_centers = {}
+        for (i, centers), lo in zip(synapse_centers.items(), offsets):
+            sel = idx[(idx >= lo) & (idx < lo + len(centers))] - lo
+            if len(sel):
+                flux_centers[i] = centers[sel]
+        print(f"  Active synapses with flux: {len(idx)}/{len(all_centers)} "
+              f"(cells {sorted(flux_centers)})")
+
+    for i, centers in flux_centers.items():
         synapse_distribution = cf.GaussianPeaks(
             centers,
             peak_width=syn.synapse_diameter / 6.0,
@@ -393,14 +417,8 @@ def run(cfg: Config) -> None:
         if ecm_cfg.local_width is not None:
             buffer_centers = all_centers
             if ecm_cfg.local_target is not None:
-                idx = np.asarray(ecm_cfg.local_target, dtype=int)
-                if idx.size == 0 or idx.min() < 0 or idx.max() >= len(all_centers) \
-                        or len(np.unique(idx)) != len(idx):
-                    raise ValueError(
-                        f"ecm.local_target must be distinct indices in "
-                        f"[0, {len(all_centers)}), got {ecm_cfg.local_target}"
-                    )
-                buffer_centers = all_centers[idx]
+                buffer_centers = all_centers[
+                    _check_indices(ecm_cfg.local_target, len(all_centers), "ecm.local_target")]
             print(f"  Localized ECM on {len(buffer_centers)}/{len(all_centers)} synapses, "
                   f"sigma {ecm_cfg.local_width}")
 
