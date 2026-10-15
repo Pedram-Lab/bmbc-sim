@@ -19,10 +19,30 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from plot_dose_response import KD0, KF0, LABEL, equivalent_dose  # noqa: E402
+from plot_dose_response import KD0, KF0, LABEL  # noqa: E402
 
 PLACEMENT_COLOR = {"uniform": "k", "on": "tab:red", "off": "tab:blue"}
 METRICS = ["uptake_cum", "peak_deficit"]
+MIN_EFFECT = 1e-3  # uniform effect (amol / mM) below which no dose equivalence is extrapolated
+
+
+def log_doses(ax, doses):
+    ax.set_xscale("log")
+    ax.set_xticks(doses, [f"{d:g}" for d in doses])
+    ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+
+
+def power_law_dose(uniform, effect, min_effect=MIN_EFFECT):
+    """Uniform dose with the same effect, power-law extrapolated from the uniform doses
+    (the on-target effects lie far above the uniform range, so interpolation is impossible).
+    None when the uniform effects are not of one sign or too small to fit."""
+    u = uniform.sort_values("ecm_total")
+    e, n = u[effect].to_numpy(), u.ecm_total.to_numpy()
+    s = np.sign(e[-1]) if len(e) else 0
+    if len(e) < 2 or abs(e[-1]) < min_effect or np.any(s * e <= 0):
+        return None
+    b, a = np.polyfit(np.log(n), np.log(s * e), 1)
+    return lambda y: np.where(s * y > 0, np.exp((np.log(np.abs(y)) - a) / b), np.nan)
 
 
 def solitary(df):
@@ -52,10 +72,10 @@ def fig_effect(df, out):
                 ax.plot(g.ecm_total, g[f"effect_{m}"], "-o" if width != 1.0 or scen == "uniform" else "--s",
                         color=PLACEMENT_COLOR[scen], ms=4, label=label)
             thr = g0[f"thr_{m}"].iloc[0]
-            if np.isfinite(thr) and thr > 0:
-                ax.axhspan(-thr, thr, color="0.85", zorder=0)
+            if np.isfinite(thr):
+                ax.text(0.03, 0.95, f"reference IQR {thr:.2g}", transform=ax.transAxes, fontsize=7, va="top")
             ax.axhline(0, color="0.5", lw=0.5)
-            ax.set_xscale("log")
+            log_doses(ax, sorted(g0.ecm_total.unique()))
             if i == 0:
                 ax.set_title(f"active synapse {s} ({g0.target_class.iloc[0]})", fontsize=10)
             if j == 0:
@@ -63,7 +83,7 @@ def fig_effect(df, out):
             if i == len(METRICS) - 1:
                 ax.set_xlabel("buffer dose, ECS mean (mM)")
     axes[0, 0].legend(fontsize=7)
-    fig.suptitle("Solitary synapse: effect of the buffer at the active synapse (grey = reference IQR)")
+    fig.suptitle("Solitary synapse: effect of the buffer at the active synapse")
     fig.tight_layout()
     fig.savefig(os.path.join(out, "single_effect.png"), dpi=130)
     plt.close(fig)
@@ -84,9 +104,8 @@ def fig_shielding(df, out):
             label = scen if scen == "uniform" else f"{scen}, sigma={width:g} um"
             ax.plot(g.d_active, g.effect_peak_deficit, "o" if width != 1.0 or scen == "uniform" else "s",
                     color=PLACEMENT_COLOR[scen], ms=4, alpha=0.7, label=label)
-            if scen == "off":
-                ax.axvline(g.d_buffered.min() if g.d_buffered.notna().any() else np.nan, color="tab:blue",
-                           lw=0.8, ls=":")
+            if scen == "off" and g.d_buffered.notna().any():  # the buffered neighbour's distance
+                ax.axvline(g.loc[g.d_buffered.idxmin(), "d_active"], color="tab:blue", lw=0.8, ls=":")
         ax.axhline(0, color="0.5", lw=0.5)
         ax.set_title(f"active synapse {a}", fontsize=10)
         ax.set_xlabel("distance to the active synapse (um)")
@@ -101,35 +120,36 @@ def fig_shielding(df, out):
 
 
 def fig_equivalent_dose(df, out):
+    """Equivalent uniform dose of the on-target buffer (power-law extrapolation of the two
+    uniform doses) against the local buffer concentration, both relative to the dose N."""
     act = active_rows(df)
     syns = sorted(act.synapse.unique())
-    fig, axes = plt.subplots(len(METRICS), len(syns), figsize=(3.2 * len(syns), 2.8 * len(METRICS)),
-                             squeeze=False, sharex=True)
+    colors = dict(zip(syns, plt.cm.tab10.colors))
+    fig, axes = plt.subplots(1, len(METRICS), figsize=(4 * len(METRICS), 3.4), squeeze=False)
     table = []
-    for j, s in enumerate(syns):
-        syn = act[act.synapse == s]
-        for i, m in enumerate(METRICS):
-            ax = axes[i, j]
-            inv = equivalent_dose(syn[syn.scenario == "uniform"], f"effect_{m}")
+    for i, m in enumerate(METRICS):
+        ax = axes[0, i]
+        for s in syns:
+            syn = act[act.synapse == s]
+            inv = power_law_dose(syn[syn.scenario == "uniform"], f"effect_{m}")
             for width, g in syn[syn.scenario == "on"].groupby("local_width"):
-                g = g.sort_values("ecm_total")
-                n_eq = inv(g[f"effect_{m}"].to_numpy()) if callable(inv) else np.full(len(g), np.nan)
-                ax.plot(g.ecm_total, n_eq / g.ecm_total, "-o", ms=4, label=f"sigma={width:g} um: N_eq/N")
-                ax.plot(g.ecm_total, g.ecm_at_synapse / g.ecm_total, "-", alpha=0.4, lw=2,
-                        label=f"sigma={width:g} um: local conc./N")
-                for n, r, c in zip(g.ecm_total, n_eq / g.ecm_total, g.ecm_at_synapse / g.ecm_total):
+                n_eq = inv(g[f"effect_{m}"].to_numpy()) if inv else np.full(len(g), np.nan)
+                conc = g.ecm_at_synapse / g.ecm_total
+                ax.plot(conc, n_eq / g.ecm_total, "o" if width != 1.0 else "s", color=colors[s], ms=5,
+                        label=f"synapse {s}, sigma={width:g} um")
+                for n, r, c in zip(g.ecm_total, n_eq / g.ecm_total, conc):
                     table.append(dict(synapse=s, metric=m, local_width=width, ecm_total=n,
                                       n_eq_over_n=r, conc_factor=c))
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            if i == 0:
-                ax.set_title(f"active synapse {s}", fontsize=10)
-            if j == 0:
-                ax.set_ylabel(f"{m}: equivalent uniform dose / N", fontsize=8)
-            if i == len(METRICS) - 1:
-                ax.set_xlabel("buffer dose N (mM)")
+        lim = [1, max(10, (act.ecm_at_synapse / act.ecm_total).max() * 1.5)]
+        ax.plot(lim, lim, "--", color="0.6", lw=0.8, label="N_eq/N = local conc./N")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("buffer concentration at the synapse / N")
+        ax.set_ylabel(f"{m}: equivalent uniform dose / N", fontsize=8)
     axes[0, 0].legend(fontsize=6)
-    fig.suptitle("Solitary synapse: equivalent uniform dose of the on-target buffer")
+    fig.suptitle("Solitary synapse: equivalent uniform dose of the on-target buffer\n"
+                 "(power-law extrapolation of the uniform doses; missing = uniform effect below "
+                 f"{MIN_EFFECT:g})", fontsize=10)
     fig.tight_layout()
     fig.savefig(os.path.join(out, "single_equivalent_dose.png"), dpi=130)
     plt.close(fig)

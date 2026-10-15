@@ -27,7 +27,7 @@ KF0, KD0, STIM0 = 1e5, 1.0, "5p_0.5pA"
 
 def core(df):
     """Rows with the default kinetics and stimulus (steps 1/2)."""
-    return df[(df.ecm_kf == KF0) & (df.ecm_kd == KD0) & (df.stimulus == STIM0)]
+    return df[(df.ecm_kf == KF0) & (df.ecm_kd == KD0) & (df.stimulus == STIM0) & (df.active == "all")]
 
 
 def targets(df):
@@ -272,6 +272,7 @@ def main():
     df = pd.read_csv(args.csv)
     if "active" not in df:
         df["active"] = "all"
+    df = df[df.active == "all"]  # solitary-synapse runs: plot_single_synapse.py
     fig_dose_response(df, args.out)
     fig_equivalent_dose(df, args.out)
     fig_confinement(df, args.out)

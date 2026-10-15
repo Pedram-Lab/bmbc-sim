@@ -109,7 +109,7 @@ def evaluate_run(run, targets):
     n = len(centers)
     if scenario == "all":
         buffered = np.ones(n, bool)
-    elif scenario == "half":
+    elif scenario in ("half", "on", "off"):
         buffered = np.zeros(n, bool)
         buffered[ecm["local_target"]] = True
     else:
@@ -202,8 +202,8 @@ def main():
     df.to_csv(args.out, index=False)
     print(f"{len(df)} rows -> {args.out}")
     ref = df[df.scenario == "reference"]
-    for stim, g in ref.groupby("stimulus"):
-        print(f"reference {stim}: " + ", ".join(
+    for (stim, act), g in ref.groupby(["stimulus", ref.active == "all"]):
+        print(f"reference {stim} ({'all synapses' if act else 'solitary'}): " + ", ".join(
             f"{m} IQR {g[f'thr_{m}'].iloc[0]:.3g}" for m in METRICS))
 
 
