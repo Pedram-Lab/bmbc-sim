@@ -2,7 +2,7 @@
 # per run (one of the 4 evaluation synapses), the same total amount of buffer placed
 # uniformly, on the active synapse (on-target) or on a neighbour ~3 um away
 # (off-target), with the Gaussian width set to the depletion footprint measured by
-# footprint.py on single_reference_sweep (SIGMA below), plus sigma = 1 um on-target at
+# footprint.py on single_reference_sweep (2.0 um), plus sigma = 1 um on-target at
 # the larger dose. Reference: single_reference_sweep. 4 targets x 2 doses x 3 placements
 # + 4 = 28 runs.
 # Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_buffer_sweep
@@ -27,34 +27,34 @@ sweep:
   "synapse.active, ecm.ecm_total, ecm.local_width, ecm.local_target":
     # target 28 (restricted); off-target neighbour 4 at 3.0 um
     - [[28], "0.3 mM", null, null]
-    - [[28], "0.3 mM", "SIGMA um", [28]]
-    - [[28], "0.3 mM", "SIGMA um", [4]]
+    - [[28], "0.3 mM", "2.0 um", [28]]
+    - [[28], "0.3 mM", "2.0 um", [4]]
     - [[28], "1 mM", null, null]
-    - [[28], "1 mM", "SIGMA um", [28]]
-    - [[28], "1 mM", "SIGMA um", [4]]
+    - [[28], "1 mM", "2.0 um", [28]]
+    - [[28], "1 mM", "2.0 um", [4]]
     - [[28], "1 mM", "1 um", [28]]
     # target 49 (restricted); neighbour 5 at 2.3 um
     - [[49], "0.3 mM", null, null]
-    - [[49], "0.3 mM", "SIGMA um", [49]]
-    - [[49], "0.3 mM", "SIGMA um", [5]]
+    - [[49], "0.3 mM", "2.0 um", [49]]
+    - [[49], "0.3 mM", "2.0 um", [5]]
     - [[49], "1 mM", null, null]
-    - [[49], "1 mM", "SIGMA um", [49]]
-    - [[49], "1 mM", "SIGMA um", [5]]
+    - [[49], "1 mM", "2.0 um", [49]]
+    - [[49], "1 mM", "2.0 um", [5]]
     - [[49], "1 mM", "1 um", [49]]
     # target 3 (connected); neighbour 51 at 3.5 um
     - [[3], "0.3 mM", null, null]
-    - [[3], "0.3 mM", "SIGMA um", [3]]
-    - [[3], "0.3 mM", "SIGMA um", [51]]
+    - [[3], "0.3 mM", "2.0 um", [3]]
+    - [[3], "0.3 mM", "2.0 um", [51]]
     - [[3], "1 mM", null, null]
-    - [[3], "1 mM", "SIGMA um", [3]]
-    - [[3], "1 mM", "SIGMA um", [51]]
+    - [[3], "1 mM", "2.0 um", [3]]
+    - [[3], "1 mM", "2.0 um", [51]]
     - [[3], "1 mM", "1 um", [3]]
     # target 39 (connected); neighbour 30 at 1.7 um
     - [[39], "0.3 mM", null, null]
-    - [[39], "0.3 mM", "SIGMA um", [39]]
-    - [[39], "0.3 mM", "SIGMA um", [30]]
+    - [[39], "0.3 mM", "2.0 um", [39]]
+    - [[39], "0.3 mM", "2.0 um", [30]]
     - [[39], "1 mM", null, null]
-    - [[39], "1 mM", "SIGMA um", [39]]
-    - [[39], "1 mM", "SIGMA um", [30]]
+    - [[39], "1 mM", "2.0 um", [39]]
+    - [[39], "1 mM", "2.0 um", [30]]
     - [[39], "1 mM", "1 um", [39]]
 seeds: 1
