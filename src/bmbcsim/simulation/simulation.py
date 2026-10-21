@@ -33,6 +33,7 @@ class Simulation:
             result_directory: str | os.PathLike,
             electrostatics: bool = False,
             mechanics: bool = False,
+            boundary_stiffness: float = 1.0,
     ):
         """Initialize a new simulation.
 
@@ -45,6 +46,8 @@ class Simulation:
             yes, compartments must have a permittivity.
         :param mechanics: Whether to include mechanics in the simulation. If yes,
             compartments must have elasticity parameters set.
+        :param boundary_stiffness: Scale of the mechanical embedding springs on the
+            exterior boundary (1 = default, 0 = free block), see :class:`MechanicSolver`.
         """
         # Set up result directory and logging first: SimulationGeometry logs the
         # compartment/membrane inventory, which is only in the file if the handler
@@ -64,6 +67,7 @@ class Simulation:
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
         self.mechanics = mechanics
+        self._boundary_stiffness = boundary_stiffness
 
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
@@ -360,5 +364,6 @@ class Simulation:
         if self.mechanics:
             logger.debug("Setting up mechanics solver...")
             self._mechanics = MechanicSolver(
-                mesh, self._rd_fes, self.simulation_geometry, self._concentrations
+                mesh, self._rd_fes, self.simulation_geometry, self._concentrations,
+                boundary_stiffness=self._boundary_stiffness,
             )

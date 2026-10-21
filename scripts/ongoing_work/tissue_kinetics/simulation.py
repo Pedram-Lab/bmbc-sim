@@ -121,6 +121,9 @@ class Mechanics(ConfigGroup):
     # (Was a pressure, kPa/mM; the solver now takes a target volume instead,
     # which removes the ~0.64 mu limit point that capped expansion.)
     ecm_ca_condensation: Quantity("1 / mM") = "0.25 / mM"
+    # Embedding springs on the block's exterior relative to E / (2 L) (a 2 L layer of the
+    # same tissue; L = mesh diagonal / sqrt(3)); 0 = free block, large = rigid box.
+    boundary_stiffness: float = 1.0
 
 
 class Config(SimulationConfig):
@@ -280,6 +283,7 @@ def run(cfg: Config) -> None:
         mesh=tissue_mesh,
         result_directory=result_dir,
         mechanics=with_mechanics,
+        boundary_stiffness=mech.boundary_stiffness,
     )
     geo = sim.simulation_geometry
 

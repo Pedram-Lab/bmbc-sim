@@ -506,13 +506,17 @@ _LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
-    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations):
+    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations,
+                 boundary_stiffness=1.0):
         """
         :param mesh: The mesh to deform.
         :param concentration_fes: The finite element space for concentration fields.
         :param simulation_geometry: The simulation geometry containing compartments
             with elastic parameters.
         :param concentrations: Dictionary mapping species to concentration GridFunctions.
+        :param boundary_stiffness: Scale of the embedding springs on the exterior
+            boundary relative to the default E / (2 L) with L the mesh diagonal / sqrt(3),
+            i.e. a layer of 2 L of the same tissue; 0 leaves the block free.
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
@@ -606,13 +610,14 @@ class MechanicSolver:
             young_bnd = ngs.BoundaryFromVolumeCF(young)
             mu_bnd = ngs.BoundaryFromVolumeCF(mu)
             n = ngs.specialcf.normal(3)
-            normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
+            spring = boundary_stiffness / (2 * characteristic_length)
+            normal_springs = spring * young_bnd * ngs.InnerProduct(trial, n) ** 2
             # Tangential part as the projection off the normal. Not
             # specialcf.tangential(3): that is an edge (codim-2) quantity, exactly
             # zero on the facets of a 3D mesh, which would silently drop all shear
             # resistance of the embedding.
             tangential = ngs.InnerProduct(trial, trial) - ngs.InnerProduct(trial, n) ** 2
-            tangent_springs = (mu_bnd / (2 * characteristic_length)) * tangential
+            tangent_springs = spring * mu_bnd * tangential
             for boundary_name in exterior_boundaries:
                 self._stiffness += ngs.Variation(
                     (normal_springs + tangent_springs) * ngs.ds(boundary_name)
