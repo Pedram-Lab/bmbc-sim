@@ -1,0 +1,41 @@
+# Mechanics phase 1: calibrate the condensation strength k (mechanics.ecm_ca_condensation).
+# The mechanical driving is k x local ECM amount, so k is swept at a fixed 1 mM dose in the
+# two regimes that bracket it: crowd uniform (ECM 1 mM at every synapse) and solitary
+# on-target sigma 1.5 um (ECM ~40 mM at the synapse). Short protocol: pulses start at 0 ms,
+# 100 ms total (depletion peaks ~45 ms). Rows 1-2 are the mechanics-off twins with the same
+# protocol. Read out: peak ECS volume ratio, min J, s/step, uptake vs twin. 10 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name mech_calib_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8
+
+base:
+  end_time: "0.1 s"
+  geometry:
+    ecs_ratio: 0.19
+  synapse:
+    pulse_times: ["0 ms", "10 ms", "20 ms", "30 ms", "40 ms"]
+  ecm:
+    enabled: true
+    ecm_total: "1 mM"
+    ecm_kd: "1 mM"
+    ecm_kf: "1e5 / (mM s)"
+
+result_root: results/mech-calib
+
+sweep:
+  "mechanics.enabled, mechanics.ecm_ca_condensation, synapse.active, ecm.local_width, ecm.local_target":
+    - [false, "0 / mM", null, null, null]           # crowd uniform, mechanics off
+    - [false, "0 / mM", [28], "1.5 um", [28]]       # solitary on-target, mechanics off
+    - [true, "0.25 / mM", null, null, null]
+    - [true, "0.5 / mM", null, null, null]
+    - [true, "1 / mM", null, null, null]
+    - [true, "2 / mM", null, null, null]
+    - [true, "0.02 / mM", [28], "1.5 um", [28]]
+    - [true, "0.05 / mM", [28], "1.5 um", [28]]
+    - [true, "0.1 / mM", [28], "1.5 um", [28]]
+    - [true, "0.2 / mM", [28], "1.5 um", [28]]
+seeds: 1
