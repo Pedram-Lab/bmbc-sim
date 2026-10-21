@@ -127,7 +127,7 @@ def evaluate_run(run, targets):
     for s in range(n):
         ca = local_ca[:, s]
         row = dict(
-            run=run, seed=cfg["seed"], scenario=scenario,
+            run=run, seed=cfg["seed"], ecs_ratio=cfg["geometry"]["ecs_ratio"], scenario=scenario,
             ecm_total=_mm(ecm["ecm_total"]) if ecm["enabled"] else 0.0,
             ecm_kf=_mm(ecm["ecm_kf"]), ecm_kd=_mm(ecm["ecm_kd"]), local_width=local_width,
             n_buffered=int(buffered.sum()), n_pulses=len(pulses),
@@ -160,7 +160,7 @@ def evaluate_run(run, targets):
 
 
 def add_effects(df):
-    """effect_<m> = m - reference (same seed, stimulus, active set, synapse); thr_<m> = reference IQR.
+    """effect_<m> = m - reference (same seed, ECS ratio, stimulus, active set, synapse); thr_<m> = reference IQR.
 
     The IQR is taken across the synapses that carry flux: all synapses of the full-stimulus
     reference, or the active synapse of each solitary-synapse reference (one per run)."""
@@ -168,14 +168,15 @@ def add_effects(df):
     ref = df[df.scenario == "reference"]
     if ref.empty:
         raise SystemExit("no reference run (ecm.enabled=false) among the inputs")
-    ref_idx = ref.set_index(["seed", "stimulus", "active", "synapse"])
-    key = pd.MultiIndex.from_frame(df[["seed", "stimulus", "active", "synapse"]])
+    ref_idx = ref.set_index(["seed", "ecs_ratio", "stimulus", "active", "synapse"])
+    key = pd.MultiIndex.from_frame(df[["seed", "ecs_ratio", "stimulus", "active", "synapse"]])
     ref_active = ref[ref.is_active]
     solitary = lambda d: d.active != "all"
-    thr_key = pd.MultiIndex.from_arrays([df.seed, df.stimulus, solitary(df)])
+    thr_key = pd.MultiIndex.from_arrays([df.seed, df.ecs_ratio, df.stimulus, solitary(df)])
     for m in metrics:
         df[f"effect_{m}"] = df[m].to_numpy() - ref_idx[m].reindex(key).to_numpy()
-        iqr = ref_active.groupby([ref_active.seed, ref_active.stimulus, solitary(ref_active)])[m].agg(
+        iqr = ref_active.groupby([ref_active.seed, ref_active.ecs_ratio, ref_active.stimulus,
+                                  solitary(ref_active)])[m].agg(
             lambda v: v.quantile(0.75) - v.quantile(0.25))
         df[f"thr_{m}"] = iqr.reindex(thr_key).to_numpy()
     return df
@@ -202,8 +203,8 @@ def main():
     df.to_csv(args.out, index=False)
     print(f"{len(df)} rows -> {args.out}")
     ref = df[df.scenario == "reference"]
-    for (stim, act), g in ref.groupby(["stimulus", ref.active == "all"]):
-        print(f"reference {stim} ({'all synapses' if act else 'solitary'}): " + ", ".join(
+    for (ecs, stim, act), g in ref.groupby(["ecs_ratio", "stimulus", ref.active == "all"]):
+        print(f"reference ecs {ecs} {stim} ({'all synapses' if act else 'solitary'}): " + ", ".join(
             f"{m} IQR {g[f'thr_{m}'].iloc[0]:.3g}" for m in METRICS))
 
 

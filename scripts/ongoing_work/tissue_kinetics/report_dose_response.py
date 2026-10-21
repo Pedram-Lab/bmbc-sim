@@ -11,6 +11,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from compare_ecs import load as load_ecs, summary as ecs_summary
 from plot_dose_response import KD0, KF0, STIM0, core, relative_effects, targets
 
 VERDICT_METRICS = ["uptake_cum", "peak_deficit", "frac_at_floor"]
@@ -237,11 +238,17 @@ def main():
     p.add_argument("--plots", default="plots")
     p.add_argument("--targets", required=True)
     p.add_argument("--out", default="report.html")
+    p.add_argument("--compare", default=None,
+                   help="dose_response.csv of the same study at another ECS ratio (compare_ecs.py section)")
+    p.add_argument("--compare-ecs", type=float, default=0.1, help="its ECS ratio if the CSV lacks the column")
     args = p.parse_args()
 
     df = pd.read_csv(args.csv)
     if "active" not in df:
         df["active"] = "all"
+    if "ecs_ratio" not in df:
+        df["ecs_ratio"] = 0.1
+    ecs_ratio = df.ecs_ratio.iloc[0]
     tj = json.load(open(args.targets))
     tg = targets(df)
     sub = core(df)
@@ -312,6 +319,29 @@ quantized by the 2 ms record interval, so its 2-4 ms IQR is resolution, not biol
 effect, concentrating a matched amount of buffer at a synapse changes the effect by a factor of about two at most, and
 the total amount and the synapse's own geometry dominate. {sol_verdict}</li>
 </ul>"""
+    cmp_html = ""
+    if args.compare:
+        both = pd.concat([df, load_ecs(args.compare, args.compare_ecs)])
+        cs = ecs_summary(both)
+        a, b = cs.iloc[0], cs.iloc[1]
+        cs_tab = cs.T.reset_index()
+        cs_tab.columns = ["quantity", f"ecs {a.ecs_ratio:g}", f"ecs {b.ecs_ratio:g}"]
+        cmp_html = f"""<h2>ECS ratio comparison</h2>
+<p>The same study at ECS ratio {a.ecs_ratio:g} and {b.ecs_ratio:g} (the cell set is cropped at
+<code>reference_ecs_ratio</code> = 0.19, so synapse indices denote the same membrane spots; only the ECS width
+changes). Crowd columns: 5-pulse reference, largest dose, sigma = 1 um; solitary columns: 1 mM, sigma* from
+the footprint at that ratio, neighbours within 3 um.</p>
+{img(os.path.join(args.plots, 'ecs_compare.png'))}{table(cs_tab.iloc[1:])}"""
+        conclusions = conclusions.replace("<li><b>Verdict.</b>", f"""<li>ECS ratio: at {b.ecs_ratio:g} (25 % ECS) against {a.ecs_ratio:g} the picture is unchanged.
+The crowd placement gain falls from {a["crowd: placement on-target / uniform"]:.2f}x to {b["crowd: placement on-target / uniform"]:.2f}x
+the uniform effect (off-target stays at 1x) while the uniform effect itself is the same; the solitary
+on-target/uniform ratio is {a["solitary: on/uniform uptake effect"]}x vs {b["solitary: on/uniform uptake effect"]}x
+(sigma* {a["solitary: sigma* (um)"]:g} vs {b["solitary: sigma* (um)"]:g} um), the absolute change
+{a["solitary: on-target uptake % ref"]} vs {b["solitary: on-target uptake % ref"]} % of the synapse's own uptake, and
+the shielding of silent neighbours {a["solitary: shielding <3 um, on (mM)"]:.3f} vs {b["solitary: shielding <3 um, on (mM)"]:.3f} mM.
+A wider ECS lowers the solitary depletion ({a["solitary: ref peak deficit (mM)"]} vs {b["solitary: ref peak deficit (mM)"]} mM)
+but not the relative value of placement.</li>
+<li><b>Verdict.</b>""")
     eq_path = os.path.join(args.plots, "equivalent_dose.csv")
     eq = pd.read_csv(eq_path) if os.path.exists(eq_path) else pd.DataFrame()
 
@@ -333,7 +363,7 @@ the total amount and the synapse's own geometry dominate. {sol_verdict}</li>
 <h1>Synapse-local vs uniform ECM Ca buffer at matched total amount</h1>
 <p><b>Claim under test.</b> For the same total buffer amount, concentrating the buffer near a synapse
 changes that synapse's Ca depletion significantly, while spreading it uniformly over the ECS does not.</p>
-<p><b>Setup.</b> tissue_kinetics default geometry (20x20x1 um, ECS ratio 0.1), 5 pulses at 100 Hz
+<p><b>Setup.</b> tissue_kinetics default geometry (20x20x1 um, ECS ratio {ecs_ratio:g}), 5 pulses at 100 Hz
 (floor 0.47 mM), immobile buffer Ca + ECM &lt;-&gt; ECM_Ca with K_d = {KD0:g} mM, k_on = {KF0:g} /(mM s),
 initialized at equilibrium with 1.3 mM Ca; dt = 0.5 ms, records every 2 ms, one seed. The buffer dose N is
 the ECS mean concentration, identical across placements: uniform, Gaussians (sigma) on every active synapse,
@@ -387,8 +417,15 @@ buffered gain &gt; thr and uniform &lt; thr.</p>
         H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}")
     if sol_html:
         H.append(sol_html)
+    if cmp_html:
+        H.append(cmp_html)
+    deviations = DEVIATIONS + ([
+        "ECS ratio 0.19 rerun (2026-10-20, configs *_ecs19_sweep.yaml, 33 runs): trimmed to the doses 0.3-10 mM, "
+        "sigma = 1 um (crowd) and 1 mM (solitary); the four evaluation synapses are kept from the 0.1 selection for "
+        "the per-synapse comparison although select_targets.py at 0.19 would pick 9 and 22 (not 3 and 39) as the "
+        "connected pair; the solitary buffer width is the 0.19 footprint (sigma* = 1.5 um)."] if args.compare else [])
     H.append("<h2>Deviations from the original plan</h2><ul>" +
-             "".join(f"<li>{d}</li>" for d in DEVIATIONS) + "</ul>")
+             "".join(f"<li>{d}</li>" for d in deviations) + "</ul>")
     H.append(f"<p><small>Source: {os.path.abspath(args.csv)}; reference run {tj['reference_run']}</small></p>"
              "</body></html>")
     open(args.out, "w").write("\n".join(H))
