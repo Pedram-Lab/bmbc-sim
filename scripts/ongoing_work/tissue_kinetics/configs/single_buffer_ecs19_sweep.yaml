@@ -19,7 +19,7 @@ base:
     ecm_kd: "1 mM"
     ecm_kf: "1e5 / (mM s)"
 
-result_root: /data/ecm-simulations/single-buffer-ecs19
+result_root: results/single-buffer-ecs19
 
 sweep:
   "synapse.active, ecm.local_width, ecm.local_target":

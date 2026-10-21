@@ -13,7 +13,7 @@ base:
   geometry:
     ecs_ratio: 0.19
 
-result_root: /data/ecm-simulations/single-reference-ecs19
+result_root: results/single-reference-ecs19
 
 sweep:
   synapse.active: [[28], [49], [3], [39]]

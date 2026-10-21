@@ -18,7 +18,7 @@ base:
     ecm_kd: "1 mM"
     ecm_kf: "1e5 / (mM s)"
 
-result_root: /data/ecm-simulations/dose-core-ecs19
+result_root: results/dose-core-ecs19
 
 sweep:
   "ecm.enabled, ecm.ecm_total, ecm.local_width, ecm.local_target":
