@@ -5,6 +5,7 @@
 dose_response.png     effect vs dose per evaluation synapse, uniform vs local buffer
 local_dose.png        effect vs buffer concentration at the synapse, all synapses, uniform as reference line
 relative_effect.png   effect(local)/effect(uniform) vs local concentration/dose with power-law fit (+ .csv)
+uptake_vs_deficit.png the two verdict metrics against each other, raw and as effects
 robustness_<axis>.png effect vs k_on / Kd / stimulus for uniform vs half-buffered
 """
 import argparse
@@ -160,6 +161,34 @@ def fig_relative_effect(df, out, min_dose=1.0):
     pd.DataFrame(fits).to_csv(os.path.join(out, "relative_effect.csv"), index=False)
 
 
+def fig_uptake_vs_deficit(df, out):
+    """Do the two verdict metrics agree? uptake_cum vs peak_deficit, raw values (left) and effects (right)."""
+    sub = core(df)  # reference rows carry the config-default kinetics, so core() drops them
+    ref = df[(df.scenario == "reference") & (df.stimulus == STIM0) & (df.active == "all")]
+    sub = pd.concat([sub, ref])
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+    for ax, pre in zip(axes, ["", "effect_"]):
+        for (scen, width), g in sub.groupby(["scenario", sub.local_width.fillna(0)]):
+            if scen == "reference":
+                if pre:
+                    continue
+                ax.plot(g.peak_deficit, g.uptake_cum, "s", color="0.6", ms=4, mec="none", label="no buffer")
+                continue
+            ax.plot(g[f"{pre}peak_deficit"], g[f"{pre}uptake_cum"], MARKER[width] if width else "o",
+                    color=COLOR[scen], ms=4, alpha=0.5, mec="none", label=series_label(scen, width))
+        if pre:
+            thr_x, thr_y = sub.thr_peak_deficit.iloc[0], sub.thr_uptake_cum.iloc[0]
+            ax.axvspan(-thr_x, thr_x, color="0.88", zorder=0), ax.axhspan(-thr_y, thr_y, color="0.88", zorder=0)
+            ax.axhline(0, color="0.5", lw=0.5), ax.axvline(0, color="0.5", lw=0.5)
+        ax.set_xlabel(("Δ " if pre else "") + LABEL["peak_deficit"])
+        ax.set_ylabel(("Δ " if pre else "") + LABEL["uptake_cum"])
+    axes[0].legend(fontsize=6)
+    axes[0].set_title("per synapse and run"), axes[1].set_title("effects (gray: IQR thresholds)")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "uptake_vs_deficit.png"), dpi=130)
+    plt.close(fig)
+
+
 def relative_effects(df, scenarios=("half",), metrics=("uptake_cum", "peak_deficit")):
     """Local-run effect divided by the uniform-run effect on the SAME synapse (same dose,
     kinetics, stimulus): removes synapse identity, so buffered and unbuffered synapses
@@ -285,6 +314,7 @@ def main():
     fig_dose_response(df, args.out)
     fig_local_dose(df, args.out)
     fig_relative_effect(df, args.out)
+    fig_uptake_vs_deficit(df, args.out)
     fig_placement(df, args.out)
     fig_robustness(df, args.out, "ecm_kf", "k_on (1/(mM s))")
     fig_robustness(df, args.out, "ecm_kd", "K_d (mM)")

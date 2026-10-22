@@ -395,6 +395,9 @@ at the same dose, against the concentration factor (buffer at the synapse / dose
 &gt; 1, their unbuffered neighbours at &lt; 1, so the plot covers equivalent dose and spatial confinement at once.
 A slope of 1 would mean the effect follows the local concentration, 0 that only the total amount counts.</p>
 {img(os.path.join(args.plots, 'relative_effect.png'))}{table(rel.reset_index()) if rel is not None else ''}
+<p>Do the two verdict metrics tell the same story? Cumulative uptake against peak free-Ca deficit per synapse and run,
+raw values (left) and effects relative to the no-buffer reference (right).</p>
+{img(os.path.join(args.plots, 'uptake_vs_deficit.png'))}
 <h2>Placement: on- vs off-target at the same amount</h2>
 <p>Comparing buffered with unbuffered <i>synapses</i> directly confounds placement with synapse identity, so each
 synapse's effect in the half-buffered run is divided by its own effect in the uniform run at the same dose
