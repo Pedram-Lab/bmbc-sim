@@ -291,6 +291,9 @@ def main():
     ratio = (top.effect_uptake_cum / uni_top.set_index("synapse").effect_uptake_cum.reindex(top.synapse).to_numpy())
     place = placement(sub)
     p_top = place[place.dose == place.dose.max()]
+    rel_path = os.path.join(args.plots, "relative_effect.csv")
+    rel = pd.read_csv(rel_path).set_index("metric") if os.path.exists(rel_path) else None
+
     conclusions = f"""
 <h2>Conclusions</h2>
 <ul>
@@ -302,10 +305,12 @@ four evaluation synapses by {uni_top.effect_uptake_cum.min():.2f} to {uni_top.ef
 (all placements and widths, buffered targets, largest dose); the local gain over uniform is
 {top.gain_uptake_cum.min():.2f} to {top.gain_uptake_cum.max():.2f} amol, i.e. {int(sig(top.gain_uptake_cum, thr_u).sum())} of
 {len(top)} buffered target cases exceed the threshold. Below 3 mM no placement produces a significant effect or gain.</li>
-<li>The equivalent uniform dose is only about 1-2x the actual dose although the buffer concentration at the synapse is
-3-27x higher: the synapse draws Ca from a region several um wide, so buffer concentrated within sigma &lt;= 1 um
-contributes little beyond its share of the total. Most of the effect is global (the buffer props up the whole ECS),
-and unbuffered synapses in the half-buffered runs still receive a large part of the uniform effect.</li>
+<li>Relative to the uniform buffer at the same dose, a synapse's effect scales with the concentration factor at the
+synapse only as a power {rel.loc["uptake_cum", "slope"]:.2f} (uptake) / {rel.loc["peak_deficit", "slope"]:.2f} (peak deficit),
+far from the slope 1 of a purely local effect: a 10x higher local concentration buys ~{10 ** rel.loc["uptake_cum", "slope"]:.1f}x
+the uniform uptake effect. The synapse draws Ca from a region several um wide, so buffer concentrated within sigma
+&lt;= 1 um contributes little beyond its share of the total; most of the effect is global (the buffer props up the
+whole ECS), and unbuffered synapses in the half-buffered runs still receive a large part of the uniform effect.</li>
 <li>Placement, re-scored on all synapses with each synapse normalised by its own uniform effect: at
 {place.dose.max():g} mM a synapse carrying buffer gets {p_top["uptake_cum: on-target"].min():.2f}-{p_top["uptake_cum: on-target"].max():.2f}x
 the uniform uptake effect, a synapse without gets {p_top["uptake_cum: off-target"].min():.2f}-{p_top["uptake_cum: off-target"].max():.2f}x,
@@ -346,19 +351,6 @@ the shielding of silent neighbours {a["solitary: shielding <3 um, on (mM)"]:.3f}
 A wider ECS lowers the solitary depletion ({a["solitary: ref peak deficit (mM)"]} vs {b["solitary: ref peak deficit (mM)"]} mM)
 but not the relative value of placement.</li>
 <li><b>Verdict.</b>""")
-    eq_path = os.path.join(args.plots, "equivalent_dose.csv")
-    eq = pd.read_csv(eq_path) if os.path.exists(eq_path) else pd.DataFrame()
-
-    conf = sub[(sub.scenario == "half") & (sub.ecm_total == sub.ecm_total.max()) & ~sub.buffered]
-    conf_rows = []
-    for width, g in conf.groupby("local_width"):
-        for m in VERDICT_METRICS:
-            s_ = g[sig(g[f"effect_{m}"], g[f"thr_{m}"])]
-            conf_rows.append(dict(sigma=width, metric=m, n_unbuffered=len(g), n_significant=len(s_),
-                                  max_distance_significant_um=s_.d_buffered.max() if len(s_) else np.nan,
-                                  min_distance_unbuffered_um=g.d_buffered.min()))
-    conf_tab = pd.DataFrame(conf_rows)
-
     H = []
     H.append(f"""<!doctype html><html><head><meta charset="utf-8"><title>Buffer dose-response</title>
 <style>body{{font-family:sans-serif;max-width:1400px;margin:auto;padding:1em;line-height:1.4}}
@@ -393,14 +385,16 @@ for the verdict; it is reported but not flagged.</p>
 <p>Local gain = effect with the local buffer minus effect with the uniform buffer, on the same
 synapse at the same dose (* = |gain| &gt; IQR). Filled/True = this synapse carries buffer in that run:</p>
 {table(gain_tab)}
-<h2>Step 2: equivalent uniform dose and confinement</h2>
-<p>N_eq is the uniform dose whose effect on the same synapse matches the local-buffer effect
-(log-interpolated along the uniform dose-response; blank where outside the sampled range).
-The comparison line is the buffer concentration actually present at the synapse divided by N.</p>
-{img(os.path.join(args.plots, 'equivalent_dose.png'))}{table(eq) if len(eq) else ''}
-<p>Spatial confinement, half-buffered scenario at the largest dose: effects on the synapses that carry
-no buffer, vs their distance to the nearest buffered one.</p>
-{img(os.path.join(args.plots, 'confinement.png'))}{table(conf_tab)}
+<h2>Step 2: local versus mean dose</h2>
+<p>Which dose sets the effect, the buffer concentration at the synapse or the amount in the whole ECS? Left: the
+effect of every synapse in every core run against the buffer concentration at that synapse (uniform runs: the dose
+itself, drawn as the black median line). Synapses far from any local buffer sit in the "&lt;" column.</p>
+{img(os.path.join(args.plots, 'local_dose.png'))}
+<p>The same data normalised: each synapse's effect in a local-buffer run divided by its own effect in the uniform run
+at the same dose, against the concentration factor (buffer at the synapse / dose). Buffered synapses sit at factors
+&gt; 1, their unbuffered neighbours at &lt; 1, so the plot covers equivalent dose and spatial confinement at once.
+A slope of 1 would mean the effect follows the local concentration, 0 that only the total amount counts.</p>
+{img(os.path.join(args.plots, 'relative_effect.png'))}{table(rel.reset_index()) if rel is not None else ''}
 <h2>Placement: on- vs off-target at the same amount</h2>
 <p>Comparing buffered with unbuffered <i>synapses</i> directly confounds placement with synapse identity, so each
 synapse's effect in the half-buffered run is divided by its own effect in the uniform run at the same dose
@@ -419,10 +413,12 @@ buffered gain &gt; thr and uniform &lt; thr.</p>
         v = verdict(df, axis, tg)
         if v.empty:
             continue
-        H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}"
-                 f"<p>Absolute depletion kinetics of all synapses per parameter value (evaluate_depletion_kinetics.py; "
-                 f"traces pooled over doses and placements): time to 95 % of the depth, minimum Ca, time to 95 % "
-                 f"recovery.</p>{img(os.path.join(args.plots, f'depletion_kinetics_{axis}.png'))}")
+        H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}")
+        kin = os.path.join(args.plots, f"depletion_kinetics_{axis}.png")
+        if os.path.exists(kin):
+            H.append("<p>Absolute depletion kinetics of all synapses per parameter value (evaluate_depletion_kinetics.py; "
+                     "traces pooled over doses and placements): time to 95 % of the depth, minimum Ca, time to 95 % "
+                     f"recovery.</p>{img(kin)}")
     if sol_html:
         H.append(sol_html)
     if cmp_html:

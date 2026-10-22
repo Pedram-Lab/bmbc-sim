@@ -3,8 +3,8 @@
     uv run scripts/ongoing_work/tissue_kinetics/plot_dose_response.py dose_response.csv --out plots/
 
 dose_response.png     effect vs dose per evaluation synapse, uniform vs local buffer
-equivalent_dose.png   uniform dose giving the same effect as the local buffer, / dose
-confinement.png       effect vs distance to the nearest buffered synapse (half-buffered)
+local_dose.png        effect vs buffer concentration at the synapse, all synapses, uniform as reference line
+relative_effect.png   effect(local)/effect(uniform) vs local concentration/dose with power-law fit (+ .csv)
 robustness_<axis>.png effect vs k_on / Kd / stimulus for uniform vs half-buffered
 """
 import argparse
@@ -22,12 +22,15 @@ LABEL = {"uptake_cum": "cumulative uptake (amol)", "frac_at_floor": "fraction of
          "recovery_half": "recovery t1/2 (ms)", "uptake_1": "uptake, 1st spike (amol)"}
 COLOR = {"uniform": "k", "all": "tab:blue", "half": "tab:red"}
 DASH = {0.5: "--", 1.0: "-"}
+MARKER = {0.5: "^", 1.0: "o"}
 KF0, KD0, STIM0 = 1e5, 1.0, "5p_0.5pA"
 
 
 def core(df):
     """Rows with the default kinetics and stimulus (steps 1/2)."""
-    return df[(df.ecm_kf == KF0) & (df.ecm_kd == KD0) & (df.stimulus == STIM0) & (df.active == "all")]
+    sub = df[(df.ecm_kf == KF0) & (df.ecm_kd == KD0) & (df.stimulus == STIM0) & (df.active == "all")]
+    # the k_on / K_d sweeps repeat the default kinetics: one row per (scenario, dose, sigma, synapse)
+    return sub.drop_duplicates(["scenario", "ecm_total", "local_width", "synapse"])
 
 
 def targets(df):
@@ -79,76 +82,82 @@ def fig_dose_response(df, out):
     plt.close(fig)
 
 
-def equivalent_dose(uniform, effect):
-    """Uniform dose with the same effect, interpolated in log dose (NaN outside the range)."""
-    u = uniform.sort_values("ecm_total")
-    e, ln = u[effect].to_numpy(), np.log(u.ecm_total.to_numpy())
-    order = np.argsort(e)
-    if len(e) < 2 or np.ptp(e) == 0:
-        return np.nan
-    return lambda y: np.exp(np.interp(y, e[order], ln[order], left=np.nan, right=np.nan))
+def local_dose(sub):
+    """Buffer concentration at the synapse: the dose itself for the uniform runs."""
+    return np.where(sub.scenario == "uniform", sub.ecm_total, sub.ecm_at_synapse)
 
 
-def fig_equivalent_dose(df, out):
-    sub, tg = core(df), targets(df)
-    metrics = ["uptake_cum", "peak_deficit"]
-    fig, axes = plt.subplots(len(metrics), len(tg), figsize=(3.2 * len(tg), 2.8 * len(metrics)),
-                             squeeze=False, sharex=True)
-    table = []
-    for j, (s, cls) in enumerate(tg):
-        syn = sub[sub.synapse == s]
-        for i, m in enumerate(metrics):
-            ax = axes[i, j]
-            inv = equivalent_dose(syn[syn.scenario == "uniform"], f"effect_{m}")
-            for (scen, width), g in syn[syn.scenario.isin(["all", "half"]) & syn.buffered].groupby(
-                    ["scenario", "local_width"]):
-                g = g.sort_values("ecm_total")
-                n_eq = inv(g[f"effect_{m}"].to_numpy()) if callable(inv) else np.full(len(g), np.nan)
-                ax.plot(g.ecm_total, n_eq / g.ecm_total, DASH[width] + "o", color=COLOR[scen], ms=4,
-                        label=f"{series_label(scen, width)}: N_eq/N")
-                ax.plot(g.ecm_total, g.ecm_at_synapse / g.ecm_total, DASH[width], color=COLOR[scen],
-                        alpha=0.4, lw=2, label=f"{series_label(scen, width)}: local conc./N")
-                for n, r, c in zip(g.ecm_total, n_eq / g.ecm_total, g.ecm_at_synapse / g.ecm_total):
-                    table.append(dict(synapse=s, target_class=cls, metric=m, scenario=scen,
-                                      local_width=width, ecm_total=n, n_eq_over_n=r, conc_factor=c))
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            if i == 0:
-                ax.set_title(f"synapse {s} ({cls})", fontsize=10)
-            if j == 0:
-                ax.set_ylabel(f"{m}: equivalent uniform dose / N", fontsize=8)
-            if i == len(metrics) - 1:
-                ax.set_xlabel("buffer dose N (mM)")
-    axes[0, 0].legend(fontsize=6)
-    fig.suptitle("Equivalent uniform dose vs the local concentration factor at the synapse")
-    fig.tight_layout()
-    fig.savefig(os.path.join(out, "equivalent_dose.png"), dpi=130)
-    plt.close(fig)
-    pd.DataFrame(table).to_csv(os.path.join(out, "equivalent_dose.csv"), index=False)
-
-
-def fig_confinement(df, out):
+def fig_local_dose(df, out, xmin=0.01):
+    """Effect vs buffer concentration at the synapse, all synapses; uniform as median/IQR line."""
     sub = core(df)
-    sub = sub[(sub.scenario == "half") & (sub.ecm_total == sub.ecm_total.max())]
-    metrics = ["uptake_cum", "frac_at_floor", "peak_deficit"]
-    fig, axes = plt.subplots(1, len(metrics), figsize=(3.6 * len(metrics), 3.2))
+    sub = sub[sub.scenario != "reference"].assign(local=local_dose)
+    metrics = ["uptake_cum", "peak_deficit"]
+    fig, axes = plt.subplots(1, len(metrics), figsize=(4.5 * len(metrics), 3.8))
     for ax, m in zip(axes, metrics):
-        for width, g in sub.groupby("local_width"):
-            ax.plot(g.d_buffered, g[f"effect_{m}"], "o", ms=4, label=f"sigma={width:g} um",
-                    alpha=0.7)
-            t = g[g.target_class.notna()]
-            ax.plot(t.d_buffered, t[f"effect_{m}"], "k+", ms=9, mew=1.5)
+        for (scen, width), g in sub.groupby(["scenario", sub.local_width.fillna(0)]):
+            if scen == "uniform":
+                st = g.groupby("ecm_total")[f"effect_{m}"].quantile([0.25, 0.5, 0.75]).unstack()
+                ax.plot(st.index, st[0.5], "k-", lw=1.5, label="uniform (median, IQR over synapses)")
+                ax.fill_between(st.index, st[0.25], st[0.75], color="k", alpha=0.12)
+                continue
+            lo = g.local < xmin
+            ax.plot(g.local[~lo], g[f"effect_{m}"][~lo], MARKER[width], color=COLOR[scen], ms=4,
+                    alpha=0.5, mec="none", label=series_label(scen, width))
+            ax.plot(np.full(lo.sum(), 0.7 * xmin), g[f"effect_{m}"][lo], "<", color=COLOR[scen],
+                    ms=4, alpha=0.3, mec="none")
         thr = sub[f"thr_{m}"].iloc[0]
         if np.isfinite(thr):
-            ax.axhspan(-thr, thr, color="0.85", zorder=0)
+            ax.axhspan(-thr, thr, color="0.88", zorder=0)
         ax.axhline(0, color="0.5", lw=0.5)
-        ax.set_xlabel("distance to nearest buffered synapse (um)")
-        ax.set_ylabel("Δ " + LABEL[m], fontsize=8)
-    axes[0].legend(fontsize=7)
-    fig.suptitle(f"Half-buffered, dose {sub.ecm_total.max():g} mM, all synapses (+ = evaluation synapse)")
+        ax.set_xscale("log")
+        ax.set_xlabel(f"buffer concentration at the synapse (mM);  <: below {xmin:g} mM")
+        ax.set_ylabel("Δ " + LABEL[m], fontsize=9)
+    axes[0].legend(fontsize=6)
+    fig.suptitle("Effect vs buffer concentration at the synapse, all synapses and doses")
     fig.tight_layout()
-    fig.savefig(os.path.join(out, "confinement.png"), dpi=130)
+    fig.savefig(os.path.join(out, "local_dose.png"), dpi=130)
     plt.close(fig)
+
+
+def fig_relative_effect(df, out, min_dose=1.0):
+    """effect(local) / effect(uniform) vs local concentration / dose, log-log, with a power-law fit.
+
+    Slope 1 = the effect follows the local concentration, 0 = only the total amount counts.
+    Doses below `min_dose` are left out because the uniform effect is not resolved there."""
+    sub = core(df)
+    sub = sub[sub.scenario != "reference"].assign(local=local_dose)
+    uni = sub[sub.scenario == "uniform"].set_index(["ecm_total", "synapse"])
+    loc = sub[(sub.scenario != "uniform") & (sub.ecm_total >= min_dose)]
+    key = pd.MultiIndex.from_frame(loc[["ecm_total", "synapse"]])
+    metrics = ["uptake_cum", "peak_deficit"]
+    fig, axes = plt.subplots(1, len(metrics), figsize=(4.5 * len(metrics), 4))
+    fits = []
+    for ax, m in zip(axes, metrics):
+        rel = loc[f"effect_{m}"].to_numpy() / uni[f"effect_{m}"].reindex(key).to_numpy()
+        cf = (loc.local / loc.ecm_total).to_numpy()
+        ok = np.isfinite(rel) & (rel > 0) & (cf > 1e-3)
+        for (scen, width), idx in loc.groupby(["scenario", "local_width"]).groups.items():
+            sel = loc.index.isin(idx) & ok
+            sc = ax.scatter(cf[sel], rel[sel], marker=MARKER[width], c=np.log10(loc.ecm_total.to_numpy()[sel]),
+                            cmap="viridis", vmin=np.log10(min_dose), vmax=np.log10(loc.ecm_total.max()),
+                            edgecolor=COLOR[scen], lw=0.6, s=22, alpha=0.8, label=series_label(scen, width))
+        slope, icpt = np.polyfit(np.log(cf[ok]), np.log(rel[ok]), 1)
+        fits.append(dict(metric=m, slope=slope, prefactor=np.exp(icpt), n=int(ok.sum()), min_dose=min_dose))
+        xx = np.geomspace(1e-3, 30, 50)
+        ax.plot(xx, np.exp(icpt) * xx ** slope, "k--", lw=1, label=f"fit: slope {slope:.2f}")
+        ax.plot(xx, xx, "k:", lw=1, label="effect ∝ local conc. (slope 1)")
+        ax.axhline(1, color="0.5", lw=1, label="same as uniform")
+        ax.set_xscale("log"), ax.set_yscale("log")
+        ax.set_xlim(1e-3, 30), ax.set_ylim(1e-2, 30)
+        ax.set_xlabel("buffer at the synapse / dose N")
+        ax.set_ylabel(f"effect(local) / effect(uniform), {m}", fontsize=8)
+        ax.text(0.03, 0.95, f"n = {ok.sum()} (synapse, run) pairs", transform=ax.transAxes, fontsize=7, va="top")
+    axes[0].legend(fontsize=6, loc="lower right")
+    fig.colorbar(sc, ax=axes, label="log10 dose N (mM)", shrink=0.8)
+    fig.suptitle(f"Does the local concentration buy a proportional effect? all synapses, doses >= {min_dose:g} mM")
+    fig.savefig(os.path.join(out, "relative_effect.png"), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    pd.DataFrame(fits).to_csv(os.path.join(out, "relative_effect.csv"), index=False)
 
 
 def relative_effects(df, scenarios=("half",), metrics=("uptake_cum", "peak_deficit")):
@@ -274,8 +283,8 @@ def main():
         df["active"] = "all"
     df = df[df.active == "all"]  # solitary-synapse runs: plot_single_synapse.py
     fig_dose_response(df, args.out)
-    fig_equivalent_dose(df, args.out)
-    fig_confinement(df, args.out)
+    fig_local_dose(df, args.out)
+    fig_relative_effect(df, args.out)
     fig_placement(df, args.out)
     fig_robustness(df, args.out, "ecm_kf", "k_on (1/(mM s))")
     fig_robustness(df, args.out, "ecm_kd", "K_d (mM)")
