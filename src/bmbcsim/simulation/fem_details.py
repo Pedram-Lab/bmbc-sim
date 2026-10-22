@@ -8,6 +8,7 @@ import sympy
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
+from bmbcsim.logging import logger
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
 from bmbcsim.units import to_simulation_units
 
@@ -561,9 +562,14 @@ class MechanicSolver:
         # exists. Rescaling the reference state instead keeps the energy coercive
         # (it tends to +infinity as J -> 0 and as J -> infinity) for every J_g.
         #
-        # `_load_factor` interpolates J_g from 1 to its target so :meth:`step` can
-        # reach a large swell incrementally; it stays at 1 for a full-load solve.
+        # `_load_factor` interpolates J_g from the last converged target
+        # (`_prev_growth`, 1 on the undeformed mesh) to the current one so
+        # :meth:`step` can walk a large change incrementally; it stays at 1 for a
+        # full-load solve.
         self._load_factor = ngs.Parameter(1.0)
+        self._prev_growth = ngs.GridFunction(concentration_fes)
+        self._prev_growth.vec[:] = 1.0
+        self._growth_targets = []  # (component index, full-load J_g) per driving compartment
         # The driver is the amount of species per *reference* volume: the
         # concentration times the nodal volume ratio V / V_ref that
         # :meth:`adjust_concentrations` divides it by. The concentration alone is
@@ -585,10 +591,13 @@ class MechanicSolver:
             if driving is not None:
                 species, strength, baseline = driving
                 amount = concentrations[species].components[i] * self._volume_ratio.components[i]
-                target = 1 + self._load_factor * strength * (amount - baseline)
+                full = 1 + strength * (amount - baseline)
                 # J_g <= 0 is not a volume; unclamped it yields NaN rather than
                 # any diagnosable failure.
-                target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
+                full = ngs.IfPos(full - _MIN_SWELLING, full, _MIN_SWELLING)
+                self._growth_targets.append((i, full))
+                prev = self._prev_growth.components[i]
+                target = prev + self._load_factor * (full - prev)
                 for full_name in compartment.get_region_names(full_names=True):
                     swelling[full_name] = target
         growth = mesh.MaterialCF(swelling, default=1)
@@ -631,6 +640,7 @@ class MechanicSolver:
         self._residual = self.deformation.vec.CreateVector()
         self._direction = self.deformation.vec.CreateVector()
         self._trial = self.deformation.vec.CreateVector()
+        self._u_prev = self.deformation.vec.CreateVector()
 
         # Set up volume tracking for concentration adjustment
         self._patch_mass = ngs.LinearForm(concentration_fes)
@@ -645,8 +655,12 @@ class MechanicSolver:
         """Solve for elastic equilibrium under the current swelling.
 
         Attempts one line-searched Newton solve (:meth:`_newton_solve`) at full
-        load, warm-started from the previous step; if that stalls, applies the
-        swelling in adaptive increments (:meth:`_solve_by_load_stepping`).
+        load, warm-started from the previous step; if that stalls, walks the
+        swelling from the previous step's converged target to the current one in
+        adaptive increments (:meth:`_solve_by_load_stepping`). The previous state
+        is an equilibrium for the previous target, so the homotopy starts on a
+        converged, finite-energy configuration and only has to bridge one time
+        step's change in J_g, however large J_g itself has become.
         """
         # Solve on the reference configuration. The mesh still carries the
         # previous step's deformation (applied below so diffusion/reaction run on
@@ -675,11 +689,18 @@ class MechanicSolver:
         # in the energy norm the Newton decrement measures, that is this energy.
         min_decrement = rtol ** 2 * self._energy_scale
 
+        # Equilibrium of the previous target; `_trial` is the line search's scratch
+        # vector, so it cannot hold this.
+        self._u_prev.data = self.deformation.vec
         if not self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
-            # Restart undeformed so each increment begins at a finite-energy state.
-            self.deformation.vec[:] = 0.0
-            self._solve_by_load_stepping(max_newton, tol, min_decrement)
+            self.deformation.vec.data = self._u_prev  # discard the stalled attempt
+            increments = self._solve_by_load_stepping(max_newton, tol, min_decrement)
             self._load_factor.Set(1.0)
+            logger.debug("Mechanics: warm start stalled, load stepping took %d increments.", increments)
+
+        # The converged target is the start of the next step's homotopy.
+        for i, full in self._growth_targets:
+            self._prev_growth.components[i].Set(full)
 
         # Apply the converged deformation to the mesh.
         self._mesh.SetDeformation(self.deformation)
@@ -753,11 +774,11 @@ class MechanicSolver:
         return np.linalg.norm(self._residual.FV().NumPy()) <= tol
 
     def _solve_by_load_stepping(self, max_newton, tol, min_decrement):
-        """Reach the full swelling through adaptive increments.
+        """Reach the current swelling target through adaptive increments.
 
-        Each increment advances ``self._load_factor`` toward 1 and re-solves,
-        warm-started from the previous converged increment; a failed increment is
-        rejected and halved.
+        Each increment advances ``self._load_factor`` from the previous step's
+        target (0) toward the current one (1) and re-solves, warm-started from the
+        previous converged increment; a failed increment is rejected and halved.
 
         This is a homotopy, not a bifurcation detector: the energy is coercive for
         every target volume, so a minimiser always exists, but neo-Hookean energy
@@ -768,9 +789,11 @@ class MechanicSolver:
         u_safe.data = self.deformation.vec  # last converged state (at `load`)
         load = 0.0
         increment = 0.5
+        n_increments = 0
         while load < 1.0 - _LOAD_EPS:
             trial_load = min(load + increment, 1.0)
             self._load_factor.Set(trial_load)
+            n_increments += 1
             if self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
                 load = trial_load
                 u_safe.data = self.deformation.vec
@@ -781,12 +804,13 @@ class MechanicSolver:
                 if increment < _MIN_LOAD_INCREMENT:
                     raise RuntimeError(
                         "Mechanics solve stalled at load fraction "
-                        f"{load:.4g} of the requested swelling. An equilibrium "
+                        f"{load:.4g} of this step's change in swelling. An equilibrium "
                         "exists for every target volume, so this is a mesh "
                         "problem, not a physical limit: elements degenerate or "
                         "invert on the way. Check element quality in the driving "
                         "compartment, or reduce the coupling strength."
                     )
+        return n_increments
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
         """Adjust concentrations based on the volume change due to mesh deformation.
