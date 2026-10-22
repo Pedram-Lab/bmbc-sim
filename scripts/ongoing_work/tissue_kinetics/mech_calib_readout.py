@@ -9,8 +9,6 @@ would read the compression as uptake).
 local_vol_peak: ECS volume ratio within 2 um of the active synapse (whole ECS for the crowd).
 total_vol_peak / ecs_frac_peak: whole-block volume ratio and ECS-fraction ratio (block inflation vs
 ECS gained at the cells' expense). Concentration metrics include the dilution by swelling.
-boundary_stiffness / end_ms / t_end_ms: embedding springs, configured and reached end time (a run
-that failed by runaway swelling stops early; its peak volumes are still meaningful).
 
 Usage: uv run scripts/ongoing_work/tissue_kinetics/mech_calib_readout.py results/mech-calib_* [--out=phase1.csv]
 """
@@ -97,8 +95,6 @@ def readout(run):
     else:
         up = syn_uptake[active[0]]
     return dict(run=run.split("/")[-2][:40], k=k, active="all" if active is None else active[0],
-                boundary_stiffness=mech.get("boundary_stiffness", 1.0),
-                end_ms=1e3 * float(str(cfg["end_time"]).split()[0]), t_end_ms=float(times[-1]),
                 local_width=cfg["ecm"].get("local_width"), ecs_vol_peak=max(ecs_vol),
                 ecs_vol_end=ecs_vol[-1], local_vol_peak=max(local_vol), total_vol_peak=max(tot_vol),
                 ecs_frac_peak=ecs_frac.max(), J_min=min(j_min), J_max_ecs=max(j_max), uptake_amol=up, **dep,
