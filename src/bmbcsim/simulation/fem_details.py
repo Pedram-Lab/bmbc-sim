@@ -722,6 +722,7 @@ class MechanicSolver:
         """
         energy = self._stiffness.Energy(u)
         if not np.isfinite(energy):
+            logger.debug("Mechanics Newton: start state has non-finite energy.")
             return False
 
         self._stiffness.Apply(u, self._residual)
@@ -734,7 +735,8 @@ class MechanicSolver:
             self._stiffness.AssembleLinearization(u)
             try:
                 inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
-            except Exception:
+            except Exception as e:
+                logger.debug("Mechanics Newton: tangent not invertible (%s).", e)
                 return False
             self._direction.data = inv * self._residual
 
@@ -742,6 +744,7 @@ class MechanicSolver:
             # so the direction is not a descent direction.
             slope = self._residual.InnerProduct(self._direction)
             if slope <= 0:
+                logger.debug("Mechanics Newton: indefinite tangent (decrement %.3g).", slope)
                 return False
 
             # The Newton decrement is twice the energy drop this step predicts:
@@ -764,6 +767,8 @@ class MechanicSolver:
                     break
                 alpha *= 0.5
             if not accepted:
+                logger.debug("Mechanics Newton: line search failed (decrement %.3g, residual %.3g).",
+                             slope, np.linalg.norm(self._residual.FV().NumPy()))
                 return False
 
             u.data = self._trial
