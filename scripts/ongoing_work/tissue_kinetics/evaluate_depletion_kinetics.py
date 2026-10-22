@@ -35,7 +35,8 @@ replenishment metrics from the minimum onwards:
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
 of the sweep root (excluding processed-data/ and plots/), and every simulation run
 found anywhere beneath it is pooled -- so with more than one swept axis, the outer
-axis is the parameter and the inner ones are pooled into it.
+axis is the parameter and the inner ones are pooled into it. Parameters are shown in
+natural (numeric) order; ``--order`` takes a permutation of their positions to override it.
 
 Output, per sweep: a stacked 3-panel box plot at
 ``<sweep>/plots/depletion_kinetics[_<metric>].png`` (no suffix for ``time``) and a
@@ -324,13 +325,16 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("sweeps", nargs="+", help="One or more sweep directories")
+    p.add_argument("--order", type=int, nargs="+", metavar="POS",
+                   help="Permutation of the parameter positions after natural sorting (0-based), "
+                        "e.g. '--order 2 0 1' puts the third parameter first")
     p.add_argument("--metric", choices=FAMILIES, default="time",
                    help="Kinetics metric family to plot around the minimum-[Ca] panel "
                         "(the CSV always holds all of them). Default: %(default)s")
     return p.parse_args()
 
 
-def run_sweep(sweep_dir, metric):
+def run_sweep(sweep_dir, metric, order=None):
     sweep_dir = os.path.abspath(sweep_dir)
     sweep_name = os.path.basename(sweep_dir.rstrip("/"))
     params = discover_parameters(sweep_dir)
@@ -338,6 +342,10 @@ def run_sweep(sweep_dir, metric):
         print(f"  No parameters with seed results found in {sweep_dir}; skipping.")
         return
     param_labels = sorted((lbl for lbl, _ in params), key=_natural_key)
+    if order:
+        if sorted(order) != list(range(len(param_labels))):
+            raise SystemExit(f"--order must be a permutation of 0..{len(param_labels) - 1}, got {order}")
+        param_labels = [param_labels[i] for i in order]
     print(f"  {len(param_labels)} parameters: {', '.join(param_labels)}")
 
     # tidy rows for CSV, plus arrays for plotting
@@ -383,7 +391,7 @@ def main():
     args = parse_args()
     for sweep_dir in args.sweeps:
         print(f"==> {sweep_dir}")
-        run_sweep(sweep_dir, args.metric)
+        run_sweep(sweep_dir, args.metric, args.order)
 
 
 if __name__ == "__main__":

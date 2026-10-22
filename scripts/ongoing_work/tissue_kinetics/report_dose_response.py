@@ -48,6 +48,10 @@ def img(path):
 
 
 def table(df, fmt="{:.3g}"):
+    return f'<details><summary>table ({len(df)} rows)</summary>{_table(df, fmt)}</details>'
+
+
+def _table(df, fmt="{:.3g}"):
     return df.to_html(index=False, float_format=lambda v: fmt.format(v), border=0,
                       classes="t", na_rep="")
 
@@ -358,6 +362,7 @@ but not the relative value of placement.</li>
     H = []
     H.append(f"""<!doctype html><html><head><meta charset="utf-8"><title>Buffer dose-response</title>
 <style>body{{font-family:sans-serif;max-width:1400px;margin:auto;padding:1em;line-height:1.4}}
+details{{margin:0.5em 0}} summary{{cursor:pointer;color:#555;font-size:0.85em}}
 .t{{border-collapse:collapse;font-size:12px}} .t td,.t th{{padding:2px 8px;border-bottom:1px solid #ddd;text-align:right}}
 .t th{{background:#f3f3f3}} h2{{margin-top:2em;border-bottom:2px solid #333}} small{{color:#666}}</style></head><body>
 <h1>Synapse-local vs uniform ECM Ca buffer at matched total amount</h1>
@@ -414,7 +419,10 @@ buffered gain &gt; thr and uniform &lt; thr.</p>
         v = verdict(df, axis, tg)
         if v.empty:
             continue
-        H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}")
+        H.append(f"<h3>{title}</h3>{img(os.path.join(args.plots, fig))}{table(v)}"
+                 f"<p>Absolute depletion kinetics of all synapses per parameter value (evaluate_depletion_kinetics.py; "
+                 f"traces pooled over doses and placements): time to 95 % of the depth, minimum Ca, time to 95 % "
+                 f"recovery.</p>{img(os.path.join(args.plots, f'depletion_kinetics_{axis}.png'))}")
     if sol_html:
         H.append(sol_html)
     if cmp_html:
