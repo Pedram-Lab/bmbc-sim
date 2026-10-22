@@ -4,6 +4,7 @@ Rows with ``active != "all"``: one synapse carries flux per run, the buffer is u
 on the active synapse (``on``) or on a neighbour (``off``) at the same total amount.
 
 * single_effect.png      effect at the active synapse: uniform vs on vs off, per dose and target
+* single_lollipop.png    the same at the top dose, one cluster per target (lollipops, IQR shaded)
 * single_shielding.png   effect on the SILENT synapses vs distance to the active one (crosstalk)
 * single_equivalent_dose.png / .csv   uniform dose with the same effect as the on-target buffer
 
@@ -89,6 +90,42 @@ def fig_effect(df, out):
     plt.close(fig)
 
 
+def fig_lollipop(df, out):
+    """Top-dose effects at the active synapse as lollipops: one cluster per target, one stick per
+    placement (same colours/markers as fig_effect); the reference IQR is shaded on the side the
+    effects fall on."""
+    act = active_rows(df)
+    act = act[(act.scenario != "reference") & (act.ecm_total == act.ecm_total.max())]
+    syns = sorted(act.synapse.unique())
+    keys = sorted(set(zip(act.scenario, act.local_width.fillna(0))),
+                  key=lambda k: ({"uniform": 0, "off": 1, "on": 2}[k[0]], -k[1]))
+    offs = np.linspace(-0.3, 0.3, len(keys))
+    fig, axes = plt.subplots(len(METRICS), 1, figsize=(1.6 * len(syns) + 1, 2.6 * len(METRICS)),
+                             sharex=True, squeeze=False)
+    for i, m in enumerate(METRICS):
+        ax = axes[i, 0]
+        thr, sign = act[f"thr_{m}"].iloc[0], np.sign(act[f"effect_{m}"].median())
+        if np.isfinite(thr):
+            ax.axhspan(0, sign * thr, color="0.88", zorder=0, label="reference IQR")
+        for (scen, width), o in zip(keys, offs):
+            g = act[(act.scenario == scen) & (act.local_width.fillna(0) == width)].set_index("synapse")
+            x = np.array([syns.index(s) for s in g.index]) + o
+            y = g[f"effect_{m}"].to_numpy()
+            marker = "s" if width == 1.0 and scen != "uniform" else "o"
+            ax.vlines(x, 0, y, color=PLACEMENT_COLOR[scen], lw=1)
+            ax.plot(x, y, marker, color=PLACEMENT_COLOR[scen], ms=5,
+                    label=scen if scen == "uniform" else f"{scen}, sigma={width:g} um")
+        ax.axhline(0, color="0.5", lw=0.5)
+        ax.set_ylabel("Δ " + LABEL[m], fontsize=8)
+    axes[-1, 0].set_xticks(range(len(syns)), [f"synapse {s}\n({act[act.synapse == s].target_class.iloc[0]})"
+                                              for s in syns])
+    axes[0, 0].legend(fontsize=7, ncol=2)
+    fig.suptitle(f"Solitary synapse: buffer effect at the active synapse, dose {act.ecm_total.iloc[0]:g} mM")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "single_lollipop.png"), dpi=130)
+    plt.close(fig)
+
+
 def fig_shielding(df, out):
     sol = solitary(df)
     sil = sol[~sol.is_active & (sol.scenario != "reference")]
@@ -166,6 +203,7 @@ def main():
     if solitary(df).empty:
         raise SystemExit("no solitary-synapse runs (synapse.active) in the CSV")
     fig_effect(df, args.out)
+    fig_lollipop(df, args.out)
     fig_shielding(df, args.out)
     fig_equivalent_dose(df, args.out)
     print(f"plots -> {args.out}: {sorted(f for f in os.listdir(args.out) if f.startswith('single_'))}")
