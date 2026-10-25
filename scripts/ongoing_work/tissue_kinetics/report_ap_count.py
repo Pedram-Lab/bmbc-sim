@@ -2,12 +2,14 @@
 pulses (all synapses and solitary synapse), and mechanics with 2 pulses. Figures + HTML report.
 
     uv run scripts/ongoing_work/tissue_kinetics/report_ap_count.py ap_count.csv \\
-        --mech results/mech-2p-analysis/readout.csv --out results/fewap-analysis/
+        --mech results/mech-2p-analysis/readout.csv --mech-runs results/mech-2p_2026-10-24-154840 --out results/fewap-analysis/
 
 ap_count.csv comes from evaluate_dose_response.py over the 1-10 pulse references and the
 fewap_* / dose_* / single_* sweeps (ecs 0.1); the mechanics table from mech_calib_readout.py.
 """
 import argparse
+import functools
+import itertools
 import os
 
 import matplotlib
@@ -15,7 +17,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
 
+from analysis import compute_local_ca
+from bmbcsim.simulation.result_io import find_run_dirs
 from plot_dose_response import KD0, KF0, LABEL
 from report_dose_response import _table, img, sig, table
 
@@ -23,6 +28,7 @@ METRICS = ["uptake_cum", "peak_deficit"]
 COLOR = {"uniform": "k", "half": "tab:red", "on": "tab:red", "off": "tab:blue"}
 SETTINGS = [("all synapses, 0.3 mM", "all", 0.3), ("all synapses, 3 mM", "all", 3.0),
             ("solitary, 1 mM", "solitary", 1.0)]
+TARGETS = [28, 49, 3, 39]  # the singled-out synapses (solitary runs)
 
 
 def references(df):
@@ -114,6 +120,93 @@ def fig_effects(eff, out):
     plt.close(fig)
 
 
+@functools.cache
+def _ca(run):
+    return compute_local_ca(run)
+
+
+def _trace(ax, run, syn, **kw):
+    t, ca = _ca(run)
+    ax.plot(t, ca[:, syn], **{"lw": 1, **kw})
+
+
+def _grid(n_rows, title):
+    fig, axes = plt.subplots(n_rows, len(TARGETS), figsize=(3.2 * len(TARGETS), 2.3 * n_rows + 0.6),
+                             sharex=True, sharey="row", squeeze=False)
+    for ax, s in zip(axes[0], TARGETS):
+        ax.set_title(f"synapse {s}", fontsize=10)
+    fig.suptitle(title)
+    return fig, axes
+
+
+def _save(fig, axes, xlim, path):
+    for ax in axes[-1]:
+        ax.set_xlabel("time (ms)")
+    axes[0, 0].set_xlim(*xlim)
+    fig.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+
+
+def fig_trace_reference(df, out):
+    """Ca at each singled-out synapse without buffer, one line per pulse count."""
+    ref = df[df.scenario == "reference"]
+    fig, axes = _grid(2, "No buffer: Ca at the synapse (nearest ECS vertex)")
+    for i, solitary in enumerate((False, True)):
+        for j, s in enumerate(TARGETS):
+            g = ref[ref.active == (str(s) if solitary else "all")]
+            for n, run in g.groupby("n_pulses").run.first().items():
+                _trace(axes[i, j], run, s, color=plt.cm.viridis((n - 1) / 9), label=f"{n} AP")
+        axes[i, 0].set_ylabel(("solitary" if solitary else "all synapses") + "\nCa (mM)")
+    axes[0, -1].legend(fontsize=6, ncol=2)
+    _save(fig, axes, (80, 400), os.path.join(out, "trace_reference.png"))
+
+
+def fig_trace_effects(df, out):
+    """Ca at each singled-out synapse per buffer placement, for 1, 2 and 5 pulses."""
+    d = df[(df.scenario == "reference") | ((df.ecm_kf == KF0) & (df.ecm_kd == KD0) & (df.scenario != "all"))]
+    rows = [("all synapses, 3 mM", "all", 3.0, 1.0), ("solitary, 1 mM", None, 1.0, 2.0)]
+    fig, axes = _grid(6, "Ca at the synapse per buffer placement")
+    for i, ((label, act, dose, width), n) in enumerate(itertools.product(rows, (1, 2, 5))):
+        for j, s in enumerate(TARGETS):
+            g = d[(d.active == (act or str(s))) & (d.n_pulses == n) & (d.synapse == s)
+                  & ((d.scenario == "reference")
+                     | ((d.ecm_total == dose) & (d.local_width.isna() | (d.local_width == width))))]
+            for scen, r in g.groupby("scenario").first().iterrows():
+                lab = {"reference": "no buffer", "half": "half, " + ("buffered" if r.buffered else "not buffered")}
+                _trace(axes[i, j], r.run, s, color=COLOR.get(scen, "0.7"), label=lab.get(scen, scen),
+                       lw=2.5 if scen == "reference" else 1)
+            axes[i, j].legend(fontsize=6)
+        axes[i, 0].set_ylabel(f"{label}\n{n} AP\nCa (mM)", fontsize=8)
+    _save(fig, axes, (80, 300), os.path.join(out, "trace_effects.png"))
+
+
+def fig_trace_mechanics(runs_dir, out):
+    """Ca at each singled-out synapse per condensation k (k 0 = mechanics off)."""
+    panels = {}
+    for r in find_run_dirs(runs_dir):
+        cfg = yaml.safe_load(open(f"{r}/config.yaml"))
+        mech = cfg["mechanics"]
+        k = float(str(mech["ecm_ca_condensation"]).split()[0]) if mech["enabled"] else 0.0
+        active = cfg["synapse"].get("active")
+        row = ("solitary, on target" if active else "all synapses, "
+               + ("uniform" if cfg["ecm"].get("local_width") is None else "at every synapse"))
+        for s in active or TARGETS:
+            panels.setdefault(row, {}).setdefault(s, []).append((k, str(r)))
+    names = sorted(panels)
+    fig, axes = _grid(len(names), "Mechanics, 2 action potentials, 1 mM: Ca at the synapse")
+    for i, row in enumerate(names):
+        for j, s in enumerate(TARGETS):
+            for c, (k, run) in zip(("k", "tab:orange", "tab:red"), sorted(panels[row].get(s, []))):
+                _trace(axes[i, j], run, s, color=c, label="mechanics off" if k == 0 else f"k {k:g} /mM")
+            if s in panels[row]:
+                axes[i, j].legend(fontsize=6)
+            else:
+                axes[i, j].text(0.5, 0.5, "not run", transform=axes[i, j].transAxes, ha="center", color="0.5")
+        axes[i, 0].set_ylabel(row.replace(", ", "\n") + "\nCa (mM)", fontsize=8)
+    _save(fig, axes, (40, 200), os.path.join(out, "trace_mechanics.png"))
+
+
 def mechanics_table(mech, eff):
     """Mechanics-on runs vs their twin, next to the chemical effect of the same buffer at 2 pulses."""
     m = mech[mech.k > 0].copy()
@@ -161,6 +254,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("csv")
     p.add_argument("--mech", required=True)
+    p.add_argument("--mech-runs", required=True, help="mech_2p sweep directory (time traces)")
     p.add_argument("--out", default=".")
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -168,6 +262,9 @@ def main():
     ref, eff = references(df), effects(df)
     fig_reference(ref, args.out)
     fig_effects(eff, args.out)
+    fig_trace_reference(df, args.out)
+    fig_trace_effects(df, args.out)
+    fig_trace_mechanics(args.mech_runs, args.out)
     mech, chem = mechanics_table(pd.read_csv(args.mech), eff)
     ref_wide = ref.pivot_table(index=["setting", "n_pulses"], columns="metric",
                                values=["median", "q25", "q75"]).reset_index()
@@ -187,14 +284,20 @@ end, 1 mM, compared with the same run with mechanics off.</p>
 <h2>Conclusions</h2><ul>{conclusions(ref, eff, mech)}</ul>
 <h2>No-buffer depletion vs number of action potentials</h2>
 {img(os.path.join(args.out, 'ap_reference.png'))}{table(ref_wide)}
+<p>Ca at the singled-out synapses (nearest ECS vertex), all synapses firing (1-10 action potentials) and
+solitary (1, 2, 5):</p>{img(os.path.join(args.out, 'trace_reference.png'))}
 <h2>Buffer effects with 1, 2 and 5 action potentials</h2>
 <p>Median over the synapses at the buffer (bars: min/max); grey: reference IQR of that pulse count.</p>
 {img(os.path.join(args.out, 'ap_effects.png'))}{table(eff)}
+<p>Ca at the singled-out synapses per placement (all synapses: 3 mM, half at sigma 1 um; solitary: 1 mM,
+sigma 2 um):</p>{img(os.path.join(args.out, 'trace_effects.png'))}
 <h2>Mechanics with 2 action potentials</h2>
 <p>Mechanics on vs off at the same buffer (1 mM); "local ECS vol" is within 2 um of the active synapse
 (whole ECS for all synapses). For comparison, the chemical effect of the buffer at 2 pulses
 (vs no buffer, same synapse; the all-synapses chemistry was run at 0.3 and 3 mM):</p>
 {_table(mech)}<p></p>{_table(chem, "{:.2f}")}
+<p>Ca at the singled-out synapses (nearest ECS vertex of the undeformed mesh, so it includes the dilution by
+swelling); solitary mechanics ran for synapses 28 and 49 only:</p>{img(os.path.join(args.out, 'trace_mechanics.png'))}
 </body></html>"""
     path = os.path.join(args.out, "report.html")
     open(path, "w").write(html)
