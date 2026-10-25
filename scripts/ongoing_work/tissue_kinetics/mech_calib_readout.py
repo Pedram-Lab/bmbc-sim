@@ -103,7 +103,9 @@ def readout(run):
 
 def main(paths, out=None):
     df = pd.DataFrame([readout(str(r)) for p in paths for r in find_run_dirs(p)])
-    df["regime"] = np.where(df.active == "all", "crowd", "solitary")
+    # twin = same stimulus and buffer placement with mechanics off
+    df["regime"] = (np.where(df.active == "all", "crowd", "solitary_" + df.active.astype(str))
+                    + np.where(df.local_width.isna(), "", " sigma " + df.local_width.astype(str)))
     twin = df[df.k == 0].set_index("regime")
     for m in ("uptake_amol", "peak_deficit", "onset_mM_s", "recovery_mM_s"):
         ref = twin[m].reindex(df.regime).to_numpy()
