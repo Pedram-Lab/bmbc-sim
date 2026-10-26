@@ -302,10 +302,13 @@ def fig_stimulus(df, out):
 
 
 def main():
+    global STIM0
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("csv")
     p.add_argument("--out", default="plots")
+    p.add_argument("--stimulus", default=STIM0, help="baseline stimulus of steps 1-3 (e.g. 2p_0.5pA)")
     args = p.parse_args()
+    STIM0 = args.stimulus
     os.makedirs(args.out, exist_ok=True)
     df = pd.read_csv(args.csv)
     if "active" not in df:

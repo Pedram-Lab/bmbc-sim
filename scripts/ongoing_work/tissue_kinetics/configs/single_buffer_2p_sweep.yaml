@@ -1,0 +1,41 @@
+# single_buffer_sweep with 2 action potentials 10 ms apart. The 1 mM uniform/on/off
+# placements at sigma 2 um are in fewap_buffer_sweep (the 2-AP footprint is 1.3-1.8 um,
+# sigma kept at 2 um for comparability); reference: fewap_reference_sweep.
+# 4 targets x (3 placements at 0.3 mM + sigma 1 um on-target at 1 mM) = 16 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_buffer_2p_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 16   # x 4 NGSolve threads (n_threads default)
+
+result_root: results/single-buffer-2p
+
+base:
+  ecm:
+    enabled: true
+    ecm_kd: "1 mM"
+    ecm_kf: "1e5 / (mM s)"
+  synapse:
+    pulse_times: ["100 ms", "110 ms"]
+
+sweep:
+  "synapse.active, ecm.ecm_total, ecm.local_width, ecm.local_target":
+    - [[28], "0.3 mM", null, null]
+    - [[28], "0.3 mM", "2.0 um", [28]]
+    - [[28], "0.3 mM", "2.0 um", [4]]
+    - [[28], "1 mM", "1 um", [28]]
+    - [[49], "0.3 mM", null, null]
+    - [[49], "0.3 mM", "2.0 um", [49]]
+    - [[49], "0.3 mM", "2.0 um", [5]]
+    - [[49], "1 mM", "1 um", [49]]
+    - [[3], "0.3 mM", null, null]
+    - [[3], "0.3 mM", "2.0 um", [3]]
+    - [[3], "0.3 mM", "2.0 um", [51]]
+    - [[3], "1 mM", "1 um", [3]]
+    - [[39], "0.3 mM", null, null]
+    - [[39], "0.3 mM", "2.0 um", [39]]
+    - [[39], "0.3 mM", "2.0 um", [30]]
+    - [[39], "1 mM", "1 um", [39]]
+seeds: 1

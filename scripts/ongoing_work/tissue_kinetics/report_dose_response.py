@@ -11,7 +11,9 @@ import os
 import numpy as np
 import pandas as pd
 
+import compare_ecs
 from compare_ecs import load as load_ecs, summary as ecs_summary
+import plot_dose_response
 from plot_dose_response import KD0, KF0, STIM0, core, relative_effects, targets
 
 VERDICT_METRICS = ["uptake_cum", "peak_deficit", "frac_at_floor"]
@@ -237,6 +239,7 @@ indicative only; missing where the uniform effect is below the fit tolerance):</
 
 
 def main():
+    global STIM0
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("csv")
     p.add_argument("--plots", default="plots")
@@ -245,7 +248,13 @@ def main():
     p.add_argument("--compare", default=None,
                    help="dose_response.csv of the same study at another ECS ratio (compare_ecs.py section)")
     p.add_argument("--compare-ecs", type=float, default=0.1, help="its ECS ratio if the CSV lacks the column")
+    p.add_argument("--compare-ap", default=None,
+                   help="dose_response.csv of the same study with 5 pulses (summary table 5 vs --stimulus)")
+    p.add_argument("--stimulus", default=STIM0, help="baseline stimulus of steps 1-3 (e.g. 2p_0.5pA)")
     args = p.parse_args()
+    STIM0 = args.stimulus
+    plot_dose_response.STIM0 = STIM0
+    n_ap = int(STIM0.split("p")[0])
 
     df = pd.read_csv(args.csv)
     if "active" not in df:
@@ -294,6 +303,12 @@ def main():
     rel_path = os.path.join(args.plots, "relative_effect.csv")
     rel = pd.read_csv(rel_path).set_index("metric") if os.path.exists(rel_path) else None
 
+    robust = ("""Robustness: the ordering does not change with k_on (effects saturate above ~1e2 /(mM s), the buffer is inert
+below ~1 /(mM s)), with K_d (largest effect at K_d near the resting Ca, inert at 0.01 mM), or with a single-pulse
+stimulus. The buffered-minus-uniform gain never exceeds the threshold in Step 3; the uniform effect itself exceeds it
+only at 10 mM.""" if df[df.scenario != "reference"].ecm_kf.nunique() > 1 else f"""Robustness: k_on and K_d were not rerun with {n_ap} pulses (see
+the 5-pulse study). With a single pulse neither the buffered-minus-uniform gain nor the uniform effect reaches the
+threshold (0.3 and 3 mM); with {n_ap} pulses the uniform effect exceeds it only at 10 mM.""")
     conclusions = f"""
 <h2>Conclusions</h2>
 <ul>
@@ -317,10 +332,7 @@ the uniform uptake effect, a synapse without gets {p_top["uptake_cum: off-target
 so buffer on the synapse itself is worth {p_top["uptake_cum: on/off"].min():.1f}-{p_top["uptake_cum: on/off"].max():.1f}x the same
 amount on a neighbour. Placement does matter in relative terms; the absolute gain over uniform still stays below the
 threshold because the whole effect is small.</li>
-<li>Robustness: the ordering does not change with k_on (effects saturate above ~1e2 /(mM s), the buffer is inert
-below ~1 /(mM s)), with K_d (largest effect at K_d near the resting Ca, inert at 0.01 mM), or with a single-pulse
-stimulus. The buffered-minus-uniform gain never exceeds the threshold in Step 3; the uniform effect itself exceeds it
-only at 10 mM.</li>
+<li>{robust}</li>
 <li>Floor-based metrics are uninformative: no synapse reaches the 0.47 mM floor with this stimulus. Recovery t1/2 is
 quantized by the 2 ms record interval, so its 2-4 ms IQR is resolution, not biology.</li>
 {sol_conclusion}
@@ -351,6 +363,16 @@ the shielding of silent neighbours {a["solitary: shielding <3 um, on (mM)"]:.3f}
 A wider ECS lowers the solitary depletion ({a["solitary: ref peak deficit (mM)"]} vs {b["solitary: ref peak deficit (mM)"]} mM)
 but not the relative value of placement.</li>
 <li><b>Verdict.</b>""")
+    if args.compare_ap:
+        cs = []
+        for csv, stim in ((args.compare_ap, "5p_0.5pA"), (args.csv, STIM0)):
+            compare_ecs.STIM0 = stim
+            cs.append(ecs_summary(load_ecs(csv, ecs_ratio)).drop(columns="ecs_ratio"))
+        cs_tab = pd.concat(cs).T.reset_index()
+        cs_tab.columns = ["quantity", "5 APs", f"{n_ap} APs"]
+        cmp_html += f"""<h2>Comparison with 5 action potentials</h2>
+<p>The same summary quantities for the original 5-pulse study and this one (crowd: largest dose, sigma = 1 um;
+solitary: 1 mM, sigma 2 um, neighbours within 3 um).</p>{table(cs_tab)}"""
     H = []
     H.append(f"""<!doctype html><html><head><meta charset="utf-8"><title>Buffer dose-response</title>
 <style>body{{font-family:sans-serif;max-width:1400px;margin:auto;padding:1em;line-height:1.4}}
@@ -360,7 +382,7 @@ details{{margin:0.5em 0}} summary{{cursor:pointer;color:#555;font-size:0.85em}}
 <h1>Synapse-local vs uniform ECM Ca buffer at matched total amount</h1>
 <p><b>Claim under test.</b> For the same total buffer amount, concentrating the buffer near a synapse
 changes that synapse's Ca depletion significantly, while spreading it uniformly over the ECS does not.</p>
-<p><b>Setup.</b> tissue_kinetics default geometry (20x20x1 um, ECS ratio {ecs_ratio:g}), 5 pulses at 100 Hz
+<p><b>Setup.</b> tissue_kinetics default geometry (20x20x1 um, ECS ratio {ecs_ratio:g}), {n_ap} pulses at 100 Hz
 (floor 0.47 mM), immobile buffer Ca + ECM &lt;-&gt; ECM_Ca with K_d = {KD0:g} mM, k_on = {KF0:g} /(mM s),
 initialized at equilibrium with 1.3 mM Ca; dt = 0.5 ms, records every 2 ms, one seed. The buffer dose N is
 the ECS mean concentration, identical across placements: uniform, Gaussians (sigma) on every active synapse,
@@ -374,7 +396,7 @@ reference; the significance threshold is the IQR of the metric across the refere
 their cell, pairwise &ge; 5 um apart. The buffered half ({len(tj['buffered_half'])} of {tj['n_synapses']}
 active synapses) contains exactly one of each.</p>{table(tgt)}
 <h2>Reference baseline and thresholds</h2>
-<p>Metric distributions across all synapses of the 5-pulse reference run; the IQR is the threshold.
+<p>Metric distributions across all synapses of the {n_ap}-pulse reference run; the IQR is the threshold.
 A zero IQR (floor metrics when no synapse reaches the depletion floor) makes that metric unusable
 for the verdict; it is reported but not flagged.</p>
 {table(baseline)}<p>Thresholds per stimulus:</p>{table(thr)}
@@ -426,11 +448,15 @@ buffered gain &gt; thr and uniform &lt; thr.</p>
         H.append(sol_html)
     if cmp_html:
         H.append(cmp_html)
-    deviations = DEVIATIONS + ([
+    deviations = (DEVIATIONS if not args.compare_ap else DEVIATIONS[:-1]) + ([
         "ECS ratio 0.19 rerun (2026-10-20, configs *_ecs19_sweep.yaml, 33 runs): trimmed to the doses 0.3-10 mM, "
         "sigma = 1 um (crowd) and 1 mM (solitary); the four evaluation synapses are kept from the 0.1 selection for "
         "the per-synapse comparison although select_targets.py at 0.19 would pick 9 and 22 (not 3 and 39) as the "
-        "connected pair; the solitary buffer width is the 0.19 footprint (sigma* = 1.5 um)."] if args.compare else [])
+        "connected pair; the solitary buffer width is the 0.19 footprint (sigma* = 1.5 um)."] if args.compare else []) + ([
+        f"{n_ap}-pulse rerun (2026-10-25, dose_core_2p_sweep and single_buffer_2p_sweep plus the 2-pulse runs of "
+        "fewap_*_sweep): no k_on/K_d sweeps; the single-pulse runs are the crowd ones of dose_stimulus_sweep (the "
+        "single-pulse solitary runs are in the fewer-AP report). The solitary buffer width stays at the 5-pulse "
+        "footprint (2 um) although the 2-pulse footprint is 1.3-1.8 um."] if args.compare_ap else [])
     H.append("<h2>Deviations from the original plan</h2><ul>" +
              "".join(f"<li>{d}</li>" for d in deviations) + "</ul>")
     H.append(f"<p><small>Source: {os.path.abspath(args.csv)}; reference run {tj['reference_run']}</small></p>"
