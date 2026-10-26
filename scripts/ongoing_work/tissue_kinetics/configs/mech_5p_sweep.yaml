@@ -1,0 +1,39 @@
+# Mechanics with 5 action potentials at ecs_ratio 0.1 (the dose-response study's ECS):
+# 50 ms startup, pulses at 50-90 ms, 200 ms total (400 steps). ECM 1 mM, Kd 1 mM.
+# Same rows as mech_2p_sweep. Rows 1-4 are the mechanics-off twins (k 0) with the same protocol; k ranges from
+# mech_calib_sweep (crowd stable to k 5, solitary mesh-safe to 0.2 with 5 pulses).
+# Solitary on-target uses single_buffer_sweep's sigma 2 um; crowd local puts sigma 1 um
+# on all 60 synapses. 4 twins + 6 mechanics runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name mech_5p_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 10
+
+base:
+  end_time: "0.2 s"
+  synapse:
+    pulse_times: ["50 ms", "60 ms", "70 ms", "80 ms", "90 ms"]
+  ecm:
+    enabled: true
+    ecm_total: "1 mM"
+    ecm_kd: "1 mM"
+    ecm_kf: "1e5 / (mM s)"
+
+result_root: results/mech-5p
+
+sweep:
+  "mechanics.enabled, mechanics.ecm_ca_condensation, synapse.active, ecm.local_width, ecm.local_target":
+    - [false, "0 / mM", null, null, null]           # crowd uniform, mechanics off
+    - [false, "0 / mM", null, "1 um", null]         # crowd local, mechanics off
+    - [false, "0 / mM", [28], "2.0 um", [28]]       # solitary on-target, mechanics off
+    - [false, "0 / mM", [49], "2.0 um", [49]]
+    - [true, "2 / mM", null, null, null]
+    - [true, "5 / mM", null, null, null]
+    - [true, "2 / mM", null, "1 um", null]
+    - [true, "0.2 / mM", [28], "2.0 um", [28]]
+    - [true, "0.5 / mM", [28], "2.0 um", [28]]
+    - [true, "0.5 / mM", [49], "2.0 um", [49]]
+seeds: 1
