@@ -180,7 +180,7 @@ class Simulation:
             t = start_time.copy()
             try:
                 for _ in trange(n_steps):
-                    # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
+                    # Strang splitting: mechanics → (D+P)/2 → (E, R, T) → (D+P)/2, P = ProportionalFlux
 
                     # 1. Mechanics — deform mesh before geometry-dependent steps
                     if self.mechanics:
@@ -192,7 +192,12 @@ class Simulation:
                     for solver in self._diffusion.values():
                         solver.prepare()
 
-                    # 2. Diffusion half-step (implicit, with drift)
+                    # Time-dependent fluxes at the step midpoint (used by both half-steps)
+                    for membrane in self.simulation_geometry.membranes.values():
+                        for _, _, _, transport in membrane.get_transport():
+                            transport.update_flux(t + time_step / 2)
+
+                    # 2. Diffusion half-step (implicit, with drift and ProportionalFlux)
                     for species, c in self._concentrations.items():
                         self._diffusion[species].diffusion_half_step(c)
 
@@ -221,10 +226,8 @@ class Simulation:
                             max_newton_iterations,
                         )
 
-                    # 5. Transport (explicit membrane transport)
-                    for membrane in self.simulation_geometry.membranes.values():
-                        for _, _, _, transport in membrane.get_transport():
-                            transport.update_flux(t)
+                    # 5. Transport (explicit membrane transport; ProportionalFlux is
+                    #    implicit inside the diffusion half-steps)
                     for species, c in self._concentrations.items():
                         self._diffusion[species].transport_step(c)
 

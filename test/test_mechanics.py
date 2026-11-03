@@ -125,7 +125,7 @@ def test_mechanics_with_driving_species(tmp_path):
 
     # Final concentration should be higher due to volume contraction
     # (chemical pressure drives contraction, concentration increases to conserve mass)
-    assert ca_values.isel(time=-1) == pytest.approx(1.089, rel=1e-2)
+    assert ca_values.isel(time=-1) == pytest.approx(1.075, rel=1e-2)
 
 
 def test_mechanics_takes_fast_path_when_warm_started(tmp_path, monkeypatch):
@@ -205,7 +205,7 @@ def test_mechanics_with_dynamic_species(tmp_path):
 
     # Final concentration should be higher due to volume contraction
     # (smaller as in the previous test since influx scales with boundary area)
-    assert ca_values.isel(time=-1) == pytest.approx(1.040, rel=1e-2)
+    assert ca_values.isel(time=-1) == pytest.approx(1.027, rel=1e-2)
 
 
 if __name__ == "__main__":

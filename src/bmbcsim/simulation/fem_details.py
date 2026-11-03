@@ -10,6 +10,7 @@ import scipy.sparse.linalg as spla
 
 from bmbcsim.logging import logger
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.simulation.transport import ProportionalFlux
 from bmbcsim.units import to_simulation_units
 
 
@@ -32,10 +33,12 @@ class DiffusionSolver:
             drift,
             dt,
             reassemble,
+            sink_forms=None,
     ):
         self._mass_form = mass_form
         self._stiffness_form = stiffness_form
         self._transport_form = transport_form
+        self._sink_forms = sink_forms
         self._drift = drift
         self._dt = dt
         self._reassemble = reassemble
@@ -100,6 +103,14 @@ class DiffusionSolver:
 
         # Handle membrane transport terms
         transport_form = ngs.LinearForm(fes)
+        # ProportionalFlux is treated implicitly (IMEX) in the diffusion half-steps:
+        # its linear branch f (c - depletion) / (saturation - depletion) enters the
+        # system as a lumped diagonal; clipping the gate to [0, 1] is lagged.
+        # The lumped forms are row sums over the source test functions: full flux a,
+        # rate coefficient alpha, and offset s (loss rate = alpha * c - s).
+        full, rate, offset, gain = (ngs.LinearForm(fes) for _ in range(4))
+        gate = ngs.GridFunction(fes)
+        has_sinks = False
         for membrane in simulation_geometry.membranes.values():
             for s, source, target, transport in membrane.get_transport():
                 if s != species:
@@ -120,6 +131,21 @@ class DiffusionSolver:
 
                 src_c, src_test = select(source, concentration, trial_and_test)
                 trg_c, trg_test = select(target, concentration, trial_and_test)
+
+                if isinstance(transport, ProportionalFlux):
+                    if source is None:
+                        raise ValueError("ProportionalFlux requires a source compartment.")
+                    ds = ngs.ds(membrane.name)
+                    f = transport.flux_value
+                    width = transport.saturation - transport.depletion
+                    full += f * src_test * ds
+                    rate += (f / width).Compile() * src_test * ds
+                    offset += (f * transport.depletion / width).Compile() * src_test * ds
+                    if trg_test is not None:
+                        g = gate.components[compartment_to_index[source]]
+                        gain += (f * g).Compile() * trg_test * ds
+                    has_sinks = True
+                    continue
 
                 # Calculate the flux density through the membrane
                 # Note: area normalization is handled in Transport.finalize_coefficients
@@ -162,6 +188,7 @@ class DiffusionSolver:
             drift,
             dt,
             reassemble,
+            (full, rate, offset, gain, gate) if has_sinks else None,
         )
 
     def _prepare_operators(self):
@@ -193,9 +220,18 @@ class DiffusionSolver:
             self._prepare_operators()
 
     def diffusion_half_step(self, concentration: ngs.GridFunction):
-        """Apply a half-step of implicit diffusion (with drift if applicable)."""
+        """Apply a half-step of implicit diffusion (with drift if applicable),
+        including the implicit ProportionalFlux sinks."""
         half_dt = self._dt / 2
         c = concentration.vec.FV().NumPy().copy()
+
+        sink = np.zeros_like(c)
+        if self._sink_forms is not None:
+            full, rate, offset, gain, gate = self._sink_forms
+            for form in (full, rate, offset):
+                form.Assemble()
+            a, alpha, s = (form.vec.FV().NumPy() for form in (full, rate, offset))
+            sink = alpha
 
         if self._drift is not None:
             # Assemble drift (potential may have been updated since last call)
@@ -205,12 +241,16 @@ class DiffusionSolver:
             rhs = half_dt * (drift_csr @ c - self._stiffness @ c)
             system = spla.LinearOperator(
                 self._m_star.shape,
-                matvec=lambda x: self._m_star @ x - half_dt * (drift_csr @ x),
+                matvec=lambda x: self._m_star @ x + half_dt * (sink * x - drift_csr @ x),
                 dtype=np.float64,
             )
         else:
             rhs = -half_dt * (self._stiffness @ c)
-            system = self._m_star
+            system = self._m_star if self._sink_forms is None \
+                else self._m_star + half_dt * sps.diags(sink)
+
+        if self._sink_forms is not None:
+            rhs += half_dt * (s - alpha * c)
 
         solution, info = spla.gmres(
             system,
@@ -226,7 +266,17 @@ class DiffusionSolver:
         elif info < 0:
             print(f"Error: GMRES failed with error code {info}")
 
-        concentration.vec.FV().NumPy()[:] += solution
+        c += solution
+        if self._sink_forms is not None:
+            # Lagged clipping: the loss rate is bounded by [0, full flux]; the
+            # target side receives exactly what the source lost
+            loss = alpha * c - s
+            clipped = np.clip(loss, 0, a)
+            c += half_dt * (loss - clipped) / self._lumped_mass
+            gate.vec.FV().NumPy()[:] = np.divide(clipped, a, out=np.zeros_like(a), where=a > 0)
+            gain.Assemble()
+            c += half_dt * gain.vec.FV().NumPy() / self._lumped_mass
+        concentration.vec.FV().NumPy()[:] = c
 
     def transport_step(self, concentration: ngs.GridFunction):
         """Apply explicit membrane transport using lumped mass."""
