@@ -639,3 +639,25 @@ def test_normalization_without_total_unchanged(volume_region, fes):
     gf2.Set(coeff2)
 
     np.testing.assert_array_equal(gf1.vec.FV().NumPy(), gf2.vec.FV().NumPy())
+
+
+def test_gaussian_peaks_shape_and_total(volume_region, fes):
+    """GaussianPeaks hits ``total`` exactly and keeps the Gaussian ratio between nodes."""
+    coords = np.array(volume_region.mesh.ngmesh.Coordinates())
+    center = coords[np.argmin(np.linalg.norm(coords, axis=1))]  # node nearest origin
+    width = 1.0 * u.um
+    total = 100.0 * u.amol
+    field = cf.GaussianPeaks(center, peak_width=width, peak_value=1.0 * mM, total=total)
+    coeff_func = field.to_coefficient_function(volume_region, fes, 'molar concentration')
+
+    integral = ngs.Integrate(coeff_func, volume_region.mesh, definedon=volume_region)
+    assert integral == pytest.approx(100.0, rel=1e-10)  # amol in simulation units
+
+    gf = ngs.GridFunction(fes)
+    gf.Set(coeff_func)
+    values = gf.vec.FV().NumPy()
+    i_center = np.argmin(np.linalg.norm(coords - center, axis=1))
+    i_far = np.argmax(np.linalg.norm(coords - center, axis=1))
+    r_far = np.linalg.norm(coords[i_far] - center)
+    assert values[i_center] == pytest.approx(values.max())
+    assert values[i_far] / values[i_center] == pytest.approx(np.exp(-r_far**2 / 2.0), rel=1e-6)

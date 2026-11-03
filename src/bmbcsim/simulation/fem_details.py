@@ -8,7 +8,9 @@ import sympy
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
+from bmbcsim.logging import logger
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
+from bmbcsim.simulation.transport import ProportionalFlux
 from bmbcsim.units import to_simulation_units
 
 
@@ -31,10 +33,12 @@ class DiffusionSolver:
             drift,
             dt,
             reassemble,
+            sink_forms=None,
     ):
         self._mass_form = mass_form
         self._stiffness_form = stiffness_form
         self._transport_form = transport_form
+        self._sink_forms = sink_forms
         self._drift = drift
         self._dt = dt
         self._reassemble = reassemble
@@ -99,6 +103,14 @@ class DiffusionSolver:
 
         # Handle membrane transport terms
         transport_form = ngs.LinearForm(fes)
+        # ProportionalFlux is treated implicitly (IMEX) in the diffusion half-steps:
+        # its linear branch f (c - depletion) / (saturation - depletion) enters the
+        # system as a lumped diagonal; clipping the gate to [0, 1] is lagged.
+        # The lumped forms are row sums over the source test functions: full flux a,
+        # rate coefficient alpha, and offset s (loss rate = alpha * c - s).
+        full, rate, offset, gain = (ngs.LinearForm(fes) for _ in range(4))
+        gate = ngs.GridFunction(fes)
+        has_sinks = False
         for membrane in simulation_geometry.membranes.values():
             for s, source, target, transport in membrane.get_transport():
                 if s != species:
@@ -119,6 +131,21 @@ class DiffusionSolver:
 
                 src_c, src_test = select(source, concentration, trial_and_test)
                 trg_c, trg_test = select(target, concentration, trial_and_test)
+
+                if isinstance(transport, ProportionalFlux):
+                    if source is None:
+                        raise ValueError("ProportionalFlux requires a source compartment.")
+                    ds = ngs.ds(membrane.name)
+                    f = transport.flux_value
+                    width = transport.saturation - transport.depletion
+                    full += f * src_test * ds
+                    rate += (f / width).Compile() * src_test * ds
+                    offset += (f * transport.depletion / width).Compile() * src_test * ds
+                    if trg_test is not None:
+                        g = gate.components[compartment_to_index[source]]
+                        gain += (f * g).Compile() * trg_test * ds
+                    has_sinks = True
+                    continue
 
                 # Calculate the flux density through the membrane
                 # Note: area normalization is handled in Transport.finalize_coefficients
@@ -161,6 +188,7 @@ class DiffusionSolver:
             drift,
             dt,
             reassemble,
+            (full, rate, offset, gain, gate) if has_sinks else None,
         )
 
     def _prepare_operators(self):
@@ -192,9 +220,18 @@ class DiffusionSolver:
             self._prepare_operators()
 
     def diffusion_half_step(self, concentration: ngs.GridFunction):
-        """Apply a half-step of implicit diffusion (with drift if applicable)."""
+        """Apply a half-step of implicit diffusion (with drift if applicable),
+        including the implicit ProportionalFlux sinks."""
         half_dt = self._dt / 2
         c = concentration.vec.FV().NumPy().copy()
+
+        sink = np.zeros_like(c)
+        if self._sink_forms is not None:
+            full, rate, offset, gain, gate = self._sink_forms
+            for form in (full, rate, offset):
+                form.Assemble()
+            a, alpha, s = (form.vec.FV().NumPy() for form in (full, rate, offset))
+            sink = alpha
 
         if self._drift is not None:
             # Assemble drift (potential may have been updated since last call)
@@ -204,12 +241,16 @@ class DiffusionSolver:
             rhs = half_dt * (drift_csr @ c - self._stiffness @ c)
             system = spla.LinearOperator(
                 self._m_star.shape,
-                matvec=lambda x: self._m_star @ x - half_dt * (drift_csr @ x),
+                matvec=lambda x: self._m_star @ x + half_dt * (sink * x - drift_csr @ x),
                 dtype=np.float64,
             )
         else:
             rhs = -half_dt * (self._stiffness @ c)
-            system = self._m_star
+            system = self._m_star if self._sink_forms is None \
+                else self._m_star + half_dt * sps.diags(sink)
+
+        if self._sink_forms is not None:
+            rhs += half_dt * (s - alpha * c)
 
         solution, info = spla.gmres(
             system,
@@ -225,7 +266,17 @@ class DiffusionSolver:
         elif info < 0:
             print(f"Error: GMRES failed with error code {info}")
 
-        concentration.vec.FV().NumPy()[:] += solution
+        c += solution
+        if self._sink_forms is not None:
+            # Lagged clipping: the loss rate is bounded by [0, full flux]; the
+            # target side receives exactly what the source lost
+            loss = alpha * c - s
+            clipped = np.clip(loss, 0, a)
+            c += half_dt * (loss - clipped) / self._lumped_mass
+            gate.vec.FV().NumPy()[:] = np.divide(clipped, a, out=np.zeros_like(a), where=a > 0)
+            gain.Assemble()
+            c += half_dt * gain.vec.FV().NumPy() / self._lumped_mass
+        concentration.vec.FV().NumPy()[:] = c
 
     def transport_step(self, concentration: ngs.GridFunction):
         """Apply explicit membrane transport using lumped mass."""
@@ -506,13 +557,17 @@ _LOAD_EPS = 1e-9            # tolerance for "load factor has reached 1"
 class MechanicSolver:
     """FEM solver for (non-linear) elasticity on the current mesh deformation."""
 
-    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations):
+    def __init__(self, mesh, concentration_fes, simulation_geometry, concentrations,
+                 boundary_stiffness=1.0):
         """
         :param mesh: The mesh to deform.
         :param concentration_fes: The finite element space for concentration fields.
         :param simulation_geometry: The simulation geometry containing compartments
             with elastic parameters.
         :param concentrations: Dictionary mapping species to concentration GridFunctions.
+        :param boundary_stiffness: Scale of the embedding springs on the exterior
+            boundary relative to the default E / (2 L) with L the mesh diagonal / sqrt(3),
+            i.e. a layer of 2 L of the same tissue; 0 leaves the block free.
         """
         self._mesh = mesh
         self._fes = ngs.VectorH1(mesh, order=1)
@@ -557,9 +612,14 @@ class MechanicSolver:
         # exists. Rescaling the reference state instead keeps the energy coercive
         # (it tends to +infinity as J -> 0 and as J -> infinity) for every J_g.
         #
-        # `_load_factor` interpolates J_g from 1 to its target so :meth:`step` can
-        # reach a large swell incrementally; it stays at 1 for a full-load solve.
+        # `_load_factor` interpolates J_g from the last converged target
+        # (`_prev_growth`, 1 on the undeformed mesh) to the current one so
+        # :meth:`step` can walk a large change incrementally; it stays at 1 for a
+        # full-load solve.
         self._load_factor = ngs.Parameter(1.0)
+        self._prev_growth = ngs.GridFunction(concentration_fes)
+        self._prev_growth.vec[:] = 1.0
+        self._growth_targets = []  # (component index, full-load J_g) per driving compartment
         # The driver is the amount of species per *reference* volume: the
         # concentration times the nodal volume ratio V / V_ref that
         # :meth:`adjust_concentrations` divides it by. The concentration alone is
@@ -581,10 +641,13 @@ class MechanicSolver:
             if driving is not None:
                 species, strength, baseline = driving
                 amount = concentrations[species].components[i] * self._volume_ratio.components[i]
-                target = 1 + self._load_factor * strength * (amount - baseline)
+                full = 1 + strength * (amount - baseline)
                 # J_g <= 0 is not a volume; unclamped it yields NaN rather than
                 # any diagnosable failure.
-                target = ngs.IfPos(target - _MIN_SWELLING, target, _MIN_SWELLING)
+                full = ngs.IfPos(full - _MIN_SWELLING, full, _MIN_SWELLING)
+                self._growth_targets.append((i, full))
+                prev = self._prev_growth.components[i]
+                target = prev + self._load_factor * (full - prev)
                 for full_name in compartment.get_region_names(full_names=True):
                     swelling[full_name] = target
         growth = mesh.MaterialCF(swelling, default=1)
@@ -606,13 +669,14 @@ class MechanicSolver:
             young_bnd = ngs.BoundaryFromVolumeCF(young)
             mu_bnd = ngs.BoundaryFromVolumeCF(mu)
             n = ngs.specialcf.normal(3)
-            normal_springs = (young_bnd / (2 * characteristic_length)) * ngs.InnerProduct(trial, n) ** 2
+            spring = boundary_stiffness / (2 * characteristic_length)
+            normal_springs = spring * young_bnd * ngs.InnerProduct(trial, n) ** 2
             # Tangential part as the projection off the normal. Not
             # specialcf.tangential(3): that is an edge (codim-2) quantity, exactly
             # zero on the facets of a 3D mesh, which would silently drop all shear
             # resistance of the embedding.
             tangential = ngs.InnerProduct(trial, trial) - ngs.InnerProduct(trial, n) ** 2
-            tangent_springs = (mu_bnd / (2 * characteristic_length)) * tangential
+            tangent_springs = spring * mu_bnd * tangential
             for boundary_name in exterior_boundaries:
                 self._stiffness += ngs.Variation(
                     (normal_springs + tangent_springs) * ngs.ds(boundary_name)
@@ -626,6 +690,7 @@ class MechanicSolver:
         self._residual = self.deformation.vec.CreateVector()
         self._direction = self.deformation.vec.CreateVector()
         self._trial = self.deformation.vec.CreateVector()
+        self._u_prev = self.deformation.vec.CreateVector()
 
         # Set up volume tracking for concentration adjustment
         self._patch_mass = ngs.LinearForm(concentration_fes)
@@ -640,8 +705,12 @@ class MechanicSolver:
         """Solve for elastic equilibrium under the current swelling.
 
         Attempts one line-searched Newton solve (:meth:`_newton_solve`) at full
-        load, warm-started from the previous step; if that stalls, applies the
-        swelling in adaptive increments (:meth:`_solve_by_load_stepping`).
+        load, warm-started from the previous step; if that stalls, walks the
+        swelling from the previous step's converged target to the current one in
+        adaptive increments (:meth:`_solve_by_load_stepping`). The previous state
+        is an equilibrium for the previous target, so the homotopy starts on a
+        converged, finite-energy configuration and only has to bridge one time
+        step's change in J_g, however large J_g itself has become.
         """
         # Solve on the reference configuration. The mesh still carries the
         # previous step's deformation (applied below so diffusion/reaction run on
@@ -670,11 +739,18 @@ class MechanicSolver:
         # in the energy norm the Newton decrement measures, that is this energy.
         min_decrement = rtol ** 2 * self._energy_scale
 
+        # Equilibrium of the previous target; `_trial` is the line search's scratch
+        # vector, so it cannot hold this.
+        self._u_prev.data = self.deformation.vec
         if not self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
-            # Restart undeformed so each increment begins at a finite-energy state.
-            self.deformation.vec[:] = 0.0
-            self._solve_by_load_stepping(max_newton, tol, min_decrement)
+            self.deformation.vec.data = self._u_prev  # discard the stalled attempt
+            increments = self._solve_by_load_stepping(max_newton, tol, min_decrement)
             self._load_factor.Set(1.0)
+            logger.debug("Mechanics: warm start stalled, load stepping took %d increments.", increments)
+
+        # The converged target is the start of the next step's homotopy.
+        for i, full in self._growth_targets:
+            self._prev_growth.components[i].Set(full)
 
         # Apply the converged deformation to the mesh.
         self._mesh.SetDeformation(self.deformation)
@@ -696,6 +772,7 @@ class MechanicSolver:
         """
         energy = self._stiffness.Energy(u)
         if not np.isfinite(energy):
+            logger.debug("Mechanics Newton: start state has non-finite energy.")
             return False
 
         self._stiffness.Apply(u, self._residual)
@@ -708,7 +785,8 @@ class MechanicSolver:
             self._stiffness.AssembleLinearization(u)
             try:
                 inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
-            except Exception:
+            except Exception as e:
+                logger.debug("Mechanics Newton: tangent not invertible (%s).", e)
                 return False
             self._direction.data = inv * self._residual
 
@@ -716,6 +794,7 @@ class MechanicSolver:
             # so the direction is not a descent direction.
             slope = self._residual.InnerProduct(self._direction)
             if slope <= 0:
+                logger.debug("Mechanics Newton: indefinite tangent (decrement %.3g).", slope)
                 return False
 
             # The Newton decrement is twice the energy drop this step predicts:
@@ -738,6 +817,8 @@ class MechanicSolver:
                     break
                 alpha *= 0.5
             if not accepted:
+                logger.debug("Mechanics Newton: line search failed (decrement %.3g, residual %.3g).",
+                             slope, np.linalg.norm(self._residual.FV().NumPy()))
                 return False
 
             u.data = self._trial
@@ -748,11 +829,11 @@ class MechanicSolver:
         return np.linalg.norm(self._residual.FV().NumPy()) <= tol
 
     def _solve_by_load_stepping(self, max_newton, tol, min_decrement):
-        """Reach the full swelling through adaptive increments.
+        """Reach the current swelling target through adaptive increments.
 
-        Each increment advances ``self._load_factor`` toward 1 and re-solves,
-        warm-started from the previous converged increment; a failed increment is
-        rejected and halved.
+        Each increment advances ``self._load_factor`` from the previous step's
+        target (0) toward the current one (1) and re-solves, warm-started from the
+        previous converged increment; a failed increment is rejected and halved.
 
         This is a homotopy, not a bifurcation detector: the energy is coercive for
         every target volume, so a minimiser always exists, but neo-Hookean energy
@@ -763,9 +844,11 @@ class MechanicSolver:
         u_safe.data = self.deformation.vec  # last converged state (at `load`)
         load = 0.0
         increment = 0.5
+        n_increments = 0
         while load < 1.0 - _LOAD_EPS:
             trial_load = min(load + increment, 1.0)
             self._load_factor.Set(trial_load)
+            n_increments += 1
             if self._newton_solve(self.deformation.vec, max_newton, tol, min_decrement):
                 load = trial_load
                 u_safe.data = self.deformation.vec
@@ -776,12 +859,13 @@ class MechanicSolver:
                 if increment < _MIN_LOAD_INCREMENT:
                     raise RuntimeError(
                         "Mechanics solve stalled at load fraction "
-                        f"{load:.4g} of the requested swelling. An equilibrium "
+                        f"{load:.4g} of this step's change in swelling. An equilibrium "
                         "exists for every target volume, so this is a mesh "
                         "problem, not a physical limit: elements degenerate or "
                         "invert on the way. Check element quality in the driving "
                         "compartment, or reduce the coupling strength."
                     )
+        return n_increments
 
     def adjust_concentrations(self, concentrations: dict[ChemicalSpecies, ngs.GridFunction]):
         """Adjust concentrations based on the volume change due to mesh deformation.

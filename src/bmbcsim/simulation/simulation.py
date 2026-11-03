@@ -13,6 +13,7 @@ from bmbcsim.simulation.geometry.compartment import Compartment
 from bmbcsim.simulation.geometry.membrane import Membrane
 from bmbcsim.simulation.geometry.simulation_geometry import SimulationGeometry
 from bmbcsim.units import to_simulation_units
+import bmbcsim.simulation.coefficient_fields as cf
 from bmbcsim.simulation.simulation_agents import ChemicalSpecies
 from bmbcsim.simulation.fem_details import (
     DiffusionSolver,
@@ -32,6 +33,7 @@ class Simulation:
             result_directory: str | os.PathLike,
             electrostatics: bool = False,
             mechanics: bool = False,
+            boundary_stiffness: float = 1.0,
     ):
         """Initialize a new simulation.
 
@@ -44,6 +46,8 @@ class Simulation:
             yes, compartments must have a permittivity.
         :param mechanics: Whether to include mechanics in the simulation. If yes,
             compartments must have elasticity parameters set.
+        :param boundary_stiffness: Scale of the mechanical embedding springs on the
+            exterior boundary (1 = default, 0 = free block), see :class:`MechanicSolver`.
         """
         # Set up result directory and logging first: SimulationGeometry logs the
         # compartment/membrane inventory, which is only in the file if the handler
@@ -63,6 +67,7 @@ class Simulation:
         self.species: list[ChemicalSpecies] = []
         self.electrostatics = electrostatics
         self.mechanics = mechanics
+        self._boundary_stiffness = boundary_stiffness
 
         # Set up empty containers for simulation data
         self._compartment_fes: dict[Compartment, ngs.FESpace] = {}
@@ -175,7 +180,7 @@ class Simulation:
             t = start_time.copy()
             try:
                 for _ in trange(n_steps):
-                    # Strang splitting: mechanics → D/2 → (E, R, T) → D/2
+                    # Strang splitting: mechanics → (D+P)/2 → (E, R, T) → (D+P)/2, P = ProportionalFlux
 
                     # 1. Mechanics — deform mesh before geometry-dependent steps
                     if self.mechanics:
@@ -187,7 +192,12 @@ class Simulation:
                     for solver in self._diffusion.values():
                         solver.prepare()
 
-                    # 2. Diffusion half-step (implicit, with drift)
+                    # Time-dependent fluxes at the step midpoint (used by both half-steps)
+                    for membrane in self.simulation_geometry.membranes.values():
+                        for _, _, _, transport in membrane.get_transport():
+                            transport.update_flux(t + time_step / 2)
+
+                    # 2. Diffusion half-step (implicit, with drift and ProportionalFlux)
                     for species, c in self._concentrations.items():
                         self._diffusion[species].diffusion_half_step(c)
 
@@ -216,10 +226,8 @@ class Simulation:
                             max_newton_iterations,
                         )
 
-                    # 5. Transport (explicit membrane transport)
-                    for membrane in self.simulation_geometry.membranes.values():
-                        for _, _, _, transport in membrane.get_transport():
-                            transport.update_flux(t)
+                    # 5. Transport (explicit membrane transport; ProportionalFlux is
+                    #    implicit inside the diffusion half-steps)
                     for species, c in self._concentrations.items():
                         self._diffusion[species].transport_step(c)
 
@@ -300,6 +308,14 @@ class Simulation:
                 coefficients.permittivity = \
                     coefficients.permittivity.to_coefficient_function(volume_region, fes, 'permittivity')
 
+            if coefficients.driving_species is not None:
+                species, strength, baseline = coefficients.driving_species
+                if isinstance(baseline, cf.Coefficient):
+                    coefficients.driving_species = (
+                        species, strength,
+                        baseline.to_coefficient_function(volume_region, fes, 'molar concentration'),
+                    )
+
         # Finalize transport coefficients that use spatial fields
         for membrane in self.simulation_geometry.membranes.values():
             fes = self._membrane_fes[membrane]
@@ -351,5 +367,6 @@ class Simulation:
         if self.mechanics:
             logger.debug("Setting up mechanics solver...")
             self._mechanics = MechanicSolver(
-                mesh, self._rd_fes, self.simulation_geometry, self._concentrations
+                mesh, self._rd_fes, self.simulation_geometry, self._concentrations,
+                boundary_stiffness=self._boundary_stiffness,
             )

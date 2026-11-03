@@ -1,0 +1,19 @@
+# Dose-response study, step 4/5: solitary-synapse reference. Only one synapse carries
+# flux per run (synapse.active), one run per evaluation synapse of
+# dose_reference_sweep's targets.json, no buffer. With all 60 synapses firing the
+# whole ECS is depleted by 0.3-0.5 mM (pool effect); a solitary synapse has a local
+# catchment, which footprint.py measures to pick the buffer width for
+# single_buffer_sweep. 4 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_reference_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8
+
+result_root: results/single-reference
+
+sweep:
+  synapse.active: [[28], [49], [3], [39]]
+seeds: 1

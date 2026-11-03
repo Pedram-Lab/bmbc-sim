@@ -288,15 +288,86 @@ class SmoothNoise(Coefficient):
                 f"correlation_length={self._correlation_length})")
 
 
-class LocalizedPeaks(Coefficient):
-    """Random field with localized Gaussian peaks.
+class GaussianPeaks(Coefficient):
+    """Sum of Gaussian peaks at given coordinates on top of a background value.
 
-    Creates a background value with a specified number of Gaussian peaks
-    centered at mesh DOFs. Peak locations are chosen by sampling random unit
-    directions from the seeded RNG and, for each direction, picking the DOF
-    with the largest cosine similarity to that direction relative to the
-    region's DOF centroid. This makes placements stable across meshes that
-    represent the same underlying geometry (up to mesh-resolution effects).
+    The field is evaluated nodally, so a peak narrower than the mesh spacing
+    is only resolved if its center lies (close) on a mesh node; snap centers to
+    mesh vertices beforehand in that case. With ``total`` the field is rescaled
+    so its integral over the region equals ``total``, which makes
+    ``peak_value`` a shape parameter only.
+    """
+
+    def __init__(
+        self,
+        centers: np.ndarray,
+        peak_width: u.Quantity,
+        peak_value: u.Quantity,
+        background_value: u.Quantity | None = None,
+        total: u.Quantity | None = None,
+    ):
+        """Initialize a Gaussian peaks field.
+
+        :param centers: ``(n, 3)`` array of peak centers in simulation length units.
+        :param peak_width: Standard deviation of each Gaussian.
+        :param peak_value: Value of a single, isolated peak at its center.
+        :param background_value: Baseline value away from peaks (default 0).
+        :param total: Optional target integral over the region.
+        """
+        self._centers = np.atleast_2d(np.asarray(centers, dtype=float))
+        if self._centers.shape[1:] != (3,):
+            raise ValueError(f"centers must have shape (n, 3), got {self._centers.shape}")
+        self._peak_width = peak_width
+        self._peak_value = peak_value
+        self._background_value = background_value
+        self._total = total
+        self.needs_area_normalization = (total is None)
+
+    def to_coefficient_function(
+        self,
+        region: ngs.Region,
+        fes: ngs.FESpace,
+        unit_name: str,
+    ) -> ngs.CoefficientFunction:
+        peak_val = to_simulation_units(self._peak_value, unit_name)
+        bg_val = 0.0 if self._background_value is None \
+            else to_simulation_units(self._background_value, unit_name)
+        width = to_simulation_units(self._peak_width, 'length')
+
+        dof_coords = _get_dof_coordinates(region, fes)
+        values = np.full(fes.ndof, bg_val)
+        for center in self._centers:
+            dist_sq = np.sum((dof_coords - center) ** 2, axis=1)
+            values += (peak_val - bg_val) * np.exp(-dist_sq / (2 * width ** 2))
+
+        gf = ngs.GridFunction(fes)
+        gf.vec.FV().NumPy()[:] = values
+        return _normalize_field(gf, region, self._total)
+
+    @property
+    def centers(self) -> np.ndarray:
+        """Return the ``(n, 3)`` peak centers."""
+        return self._centers
+
+    @property
+    def peak_width(self) -> u.Quantity:
+        """Return the Gaussian standard deviation."""
+        return self._peak_width
+
+    def __repr__(self) -> str:
+        return (f"GaussianPeaks(n={len(self._centers)}, "
+                f"peak_value={self._peak_value}, "
+                f"background_value={self._background_value}, "
+                f"peak_width={self._peak_width})")
+
+
+class LocalizedPeaks(Coefficient):
+    """:class:`GaussianPeaks` whose centers are picked among the region's DOFs.
+
+    Peak locations are chosen by :func:`select_directional_points` on the DOF
+    coordinates, which makes placements stable across meshes of the same
+    geometry (up to mesh resolution). For centers known up front, use
+    :class:`GaussianPeaks` directly.
     """
 
     def __init__(
@@ -345,33 +416,15 @@ class LocalizedPeaks(Coefficient):
         fes: ngs.FESpace,
         unit_name: str,
     ) -> ngs.CoefficientFunction:
-        rng = np.random.default_rng(self._seed)
-
-        peak_val = to_simulation_units(self._peak_value, unit_name)
-        bg_val = to_simulation_units(self._background_value, unit_name)
-        width = to_simulation_units(self._peak_width, 'length')
-        height = peak_val - bg_val
-
-        # Get DOF coordinates (handles compressed boundary spaces correctly)
         dof_coords = _get_dof_coordinates(region, fes)
-        n_dofs = fes.ndof
-
-        self._peak_node_indices = _select_directional_peak_dofs(
-            dof_coords, self._num_peaks, rng, self._exclude_predicate,
-            in_plane=self._in_plane,
+        self._peak_node_indices = select_directional_points(
+            dof_coords, self._num_peaks, np.random.default_rng(self._seed),
+            self._exclude_predicate, in_plane=self._in_plane,
         )
-        peak_centers = dof_coords[self._peak_node_indices]
-
-        # Compute field values at all DOFs
-        gf = ngs.GridFunction(fes)
-        values = np.full(n_dofs, bg_val)
-
-        for center in peak_centers:
-            dist_sq = np.sum((dof_coords - center) ** 2, axis=1)
-            values += height * np.exp(-dist_sq / (2 * width ** 2))
-
-        gf.vec.FV().NumPy()[:] = values
-        return _normalize_field(gf, region, self._total)
+        return GaussianPeaks(
+            dof_coords[self._peak_node_indices], self._peak_width,
+            self._peak_value, self._background_value, self._total,
+        ).to_coefficient_function(region, fes, unit_name)
 
     @property
     def seed(self) -> int:
@@ -423,28 +476,29 @@ def _get_dof_coordinates(region: ngs.Region, fes: ngs.FESpace) -> np.ndarray:
     return dof_coords
 
 
-def _select_directional_peak_dofs(
-    dof_coords: np.ndarray,
+def select_directional_points(
+    points: np.ndarray,
     num_peaks: int,
     rng: np.random.Generator,
     exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
     in_plane: bool = False,
 ) -> np.ndarray:
-    """Choose ``num_peaks`` DOF indices via centroid-relative random directions.
+    """Choose ``num_peaks`` indices into ``points`` via centroid-relative random directions.
 
     For each of ``num_peaks`` random unit vectors drawn from ``rng``, pick the
-    DOF with the largest cosine similarity (smallest angular distance) to that
-    direction, computed in coordinates relative to the centroid of all DOFs.
+    point with the largest cosine similarity (smallest angular distance) to that
+    direction, computed in coordinates relative to the centroid of all points.
     With ``in_plane=True``, directions are sampled in the xy-plane, so the
-    chosen DOFs cluster around the centroid's z-plane.
-    DOFs flagged by ``exclude_predicate`` and DOFs coincident with the centroid
-    are skipped, and no DOF is chosen twice — collisions fall back to the
-    next-best DOF for that direction.
+    chosen points cluster around the centroid's z-plane.
+    Points flagged by ``exclude_predicate`` and points coincident with the
+    centroid are skipped, and no point is chosen twice — collisions fall back
+    to the next-best point for that direction.
 
-    The result depends only on the DOF coordinates, the seed of ``rng``, and
-    the exclusion mask — so equivalent meshes of the same geometry yield the
-    same physical placements up to mesh resolution.
+    The result depends only on the point coordinates, the seed of ``rng``, and
+    the exclusion mask — so equivalent point sets of the same geometry yield
+    the same physical placements up to sampling resolution.
     """
+    dof_coords = np.asarray(points, dtype=float)
     n_dofs = len(dof_coords)
     centroid = dof_coords.mean(axis=0)
     rel = dof_coords - centroid

@@ -1,0 +1,35 @@
+# How much can the crowd's ECS swell? k = ecm_ca_condensation up to 15 /mM at the default
+# embedding, plus a free block (boundary_stiffness 0) at k 10. Phase 1 (mech_calib) gave
+# +9 % ECS volume at k 2, linear in k, with the block inflating instead of the cells
+# compressing; k 5 (first launch of this sweep, 2026-10-21, results/mech-crowd_2026-10-21-17*)
+# gave +22 %. 50 ms protocol: the deficit, hence the swelling, peaks at 44 ms.
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8
+
+base:
+  end_time: "0.05 s"
+  geometry:
+    ecs_ratio: 0.19
+  synapse:
+    pulse_times: ["0 ms", "10 ms", "20 ms", "30 ms", "40 ms"]
+  ecm:
+    enabled: true
+    ecm_total: "1 mM"
+    ecm_kd: "1 mM"
+    ecm_kf: "1e5 / (mM s)"
+  mechanics:
+    enabled: true
+
+result_root: results/mech-crowd
+
+sweep:
+  "mechanics.ecm_ca_condensation, mechanics.boundary_stiffness":
+    - ["10 / mM", 1.0]
+    - ["15 / mM", 1.0]
+    - ["10 / mM", 0.0]
+
+seeds: 1

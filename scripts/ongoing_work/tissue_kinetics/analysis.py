@@ -6,8 +6,9 @@ of whichever plotting script happened to define them first:
 * :func:`group_runs` -- turn a sweep directory into ``{axis value: [runs]}``. This is
   what makes a script work on *any* sweep: the axis is a parameter, not a hardcoded
   assumption, and replicates of one grid point group together.
-* :func:`find_synapse_centers` / :func:`compute_local_ca` -- locate the synapse
-  patches from the recorded surface flux and sample Ca next to them.
+* :func:`load_synapse_centers` / :func:`compute_local_ca` -- the synapse patches
+  (saved by the simulation, or located from the recorded surface flux) and the Ca
+  sampled next to them.
 
 The thresholds below are tuned to this experiment's synapse geometry, which is why
 they live here rather than in ``bmbcsim``.
@@ -123,6 +124,33 @@ def find_synapse_centers(h5, flux_field=FLUX_FIELD,
     return np.array(centers)
 
 
+def load_synapse_centers(result_path, h5):
+    """Synapse centers of a run, in the order the simulation saved them.
+
+    Prefers ``synapse_centers.npy`` (written by the simulation; index = the
+    ``ecm.local_target`` index) and falls back to the flux-peak detection of
+    :func:`find_synapse_centers` for older runs.
+    """
+    npy = os.path.join(result_path, "synapse_centers.npy")
+    if os.path.exists(npy):
+        return np.load(npy)
+    return find_synapse_centers(h5)
+
+
+def synapse_cells(h5, centers):
+    """Index of the cell each synapse center sits on, and how many synapses that cell has."""
+    points = h5["mesh/points"][:]
+    names = [n for n in h5["compartments"] if n.startswith("cell_")]
+    cell_of_point = np.full(len(points), -1)
+    for name in names:
+        cell_of_point[h5[f"compartments/{name}"][:] > 0.5] = int(name.split("_")[1])
+    is_cell = cell_of_point >= 0
+    _, nearest = cKDTree(points[is_cell]).query(centers)
+    cells = cell_of_point[is_cell][nearest]
+    n_in_cell = dict(zip(*np.unique(cells, return_counts=True)))
+    return cells, np.array([n_in_cell[c] for c in cells])
+
+
 def compute_local_ca(result_path, species=SPECIES_NAME):
     """Compute per-synapse local ECS Ca concentration time series.
 
@@ -135,7 +163,7 @@ def compute_local_ca(result_path, species=SPECIES_NAME):
     """
     h5_path = os.path.join(result_path, "snapshot.h5")
     with h5py.File(h5_path, "r") as h5:
-        synapse_centers = find_synapse_centers(h5)
+        synapse_centers = load_synapse_centers(result_path, h5)
         n_synapses = len(synapse_centers)
         if n_synapses == 0:
             raise RuntimeError(f"No synapses found in {result_path}")

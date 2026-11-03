@@ -1,0 +1,26 @@
+# Fewer action potentials: no-buffer references for fewap_crowd_sweep and
+# fewap_buffer_sweep. All synapses with 2 pulses (the 1-pulse run is in
+# dose_reference_sweep) and the 4 solitary targets with 1 and 2 pulses, 10 ms apart,
+# default protocol (first pulse at 100 ms, 0.5 s end). 9 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name fewap_reference_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8
+
+result_root: results/fewap-reference
+
+sweep:
+  "synapse.active, synapse.pulse_times":
+    - [null, ["100 ms", "110 ms"]]
+    - [[28], ["100 ms"]]
+    - [[28], ["100 ms", "110 ms"]]
+    - [[49], ["100 ms"]]
+    - [[49], ["100 ms", "110 ms"]]
+    - [[3], ["100 ms"]]
+    - [[3], ["100 ms", "110 ms"]]
+    - [[39], ["100 ms"]]
+    - [[39], ["100 ms", "110 ms"]]
+seeds: 1

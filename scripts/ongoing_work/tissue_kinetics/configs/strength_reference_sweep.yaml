@@ -1,0 +1,18 @@
+# Stimulus strength at 5 action potentials: no-buffer references with the channel current at
+# 0.2/0.4/0.6/0.8/2.0 x the default 0.5 pA (default protocol, pulses 10 ms apart from 100 ms,
+# 0.5 s end), all synapses and the 4 solitary targets. Against ap_count_reference_sweep this
+# separates timing (pulse count) from strength (charge) in the depletion saturation. 25 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name strength_reference_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8
+
+result_root: results/strength-reference
+
+sweep:
+  synapse.i_channel: ["0.1 pA", "0.2 pA", "0.3 pA", "0.4 pA", "1.0 pA"]
+  synapse.active: [null, [28], [49], [3], [39]]
+seeds: 1

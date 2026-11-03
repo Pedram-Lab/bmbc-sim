@@ -1,0 +1,26 @@
+# Dose-response study, step 3b: affinity. kf fixed at 1e5 /(mM s), Kd around the
+# resting Ca (plus 0.01 mM: a buffer that is saturated at rest and does nothing).
+# 4 x 2 x 2 = 16 runs (4 duplicate dose_core_sweep).
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name dose_kd_sweep
+defaults:
+  - cluster: local
+  - _self_
+
+cluster:
+  n_workers: 8   # runs in flight at any time (user preference; the box has 72 cores); LSF is not reachable from here
+
+base:
+  ecm:
+    enabled: true
+    ecm_kd: "1 mM"
+    ecm_kf: "1e5 / (mM s)"
+
+result_root: results/dose-kd-sweep
+
+sweep:
+  ecm.ecm_kd: ["0.01 mM", "0.3 mM", "1 mM", "3 mM"]
+  ecm.ecm_total: ["0.3 mM", "3 mM"]
+  "ecm.local_width, ecm.local_target":
+    - [null, null]
+    - ["1 um", [0, 1, 2, 3, 7, 9, 11, 14, 16, 20, 21, 25, 26, 27, 28, 30, 32, 34, 36, 38, 43, 44, 45, 47, 48, 50, 55, 56, 58, 59]]
+seeds: 1
