@@ -62,7 +62,7 @@ class Diffusion(ConfigGroup):
 class Synapse(ConfigGroup):
     """Distributed NMDAR synapse patches (Ca2+ sink)."""
 
-    n_synapses: int = 400
+    n_synapses: int = 1372   # 1 per um^3 of the 14 x 14 x 7 box, f_active of them carry flux
     n_channels_per_synapse: int = 35
     synapse_diameter: Quantity("um") = "0.25 um"
     f_active: float = 0.15
@@ -168,6 +168,13 @@ def _boundary_vertices(mesh: ngs.Mesh, name: str) -> np.ndarray:
     coords = np.array(mesh.ngmesh.Coordinates())
     idx = {v.nr for el in mesh.Boundaries(name).Elements() for v in el.vertices}
     return coords[sorted(idx)]
+
+
+def _volume_centroid(mesh: ngs.Mesh, material: str) -> np.ndarray:
+    """Volume centroid of the named region (does not depend on how the mesh resolves it)."""
+    region = mesh.Materials(material)
+    return np.array([ngs.Integrate(x, mesh, definedon=region) for x in (ngs.x, ngs.y, ngs.z)]) \
+        / ngs.Integrate(1, mesh, definedon=region)
 
 
 def run(cfg: Config) -> None:
@@ -276,7 +283,7 @@ def run(cfg: Config) -> None:
         raise ValueError("ecm.local_width needs synapse patches; unset synapse.uniform_cell")
 
     if syn.uniform_cell:
-        centroids = np.array([_boundary_vertices(tissue_mesh, b).mean(axis=0) for b in bnd_names])
+        centroids = np.array([_volume_centroid(tissue_mesh, c) for c in cell_names])
         i_center = int(np.argmin(np.linalg.norm(centroids - 0.5 * (min_box + max_box), axis=1)))
         print(f"  Uniform sink on cell_{i_center} (whole membrane, "
               f"{membranes[i_center].area:.2f} um^2)")
@@ -289,16 +296,21 @@ def run(cfg: Config) -> None:
         membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
         synapses_per_cell[:] = 0  # skip the patch loop below
 
-    # Synapse centers are membrane mesh vertices (the narrow flux Gaussian sits on
-    # a DOF), picked along random directions from the cell's centroid. The cells of
-    # one geometry seed are the same at every ecs_ratio, only eroded by the gap, so
-    # (seed, synapse index) is nearly the same membrane spot across ratios.
+    # Synapse centers: for each random direction (from the seeded rng), the membrane
+    # vertex seen from the cell's volume centroid closest to that direction; it lies
+    # within ~h of where the ray hits the membrane (the cells are convex), and the
+    # narrow flux Gaussian sits on a DOF. Neither the direction nor the centroid
+    # depends on the mesh, and the cells of one geometry seed are the same at every
+    # ecs_ratio, only eroded by the gap, so (seed, synapse index) is the same membrane
+    # spot across ratios up to the mesh size.
     synapse_centers = {}  # cell index -> (n_syn, 3) centers
     for i, n_syn in enumerate(synapses_per_cell):
         if n_syn == 0:
             continue
         vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
-        synapse_centers[i] = vertices[cf.select_directional_points(vertices, n_syn, rng, exclude_outer_box)]
+        picked = cf.select_directional_points(vertices, n_syn, rng, exclude_outer_box,
+                                              center=_volume_centroid(tissue_mesh, cell_names[i]))
+        synapse_centers[i] = vertices[picked]
     all_centers = (np.concatenate(list(synapse_centers.values()))
                    if synapse_centers else np.empty((0, 3)))
     np.save(result_dir / "synapse_centers.npy", all_centers)

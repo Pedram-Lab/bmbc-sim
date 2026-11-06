@@ -482,6 +482,7 @@ def select_directional_points(
     rng: np.random.Generator,
     exclude_predicate: Callable[[np.ndarray], np.ndarray] | None = None,
     in_plane: bool = False,
+    center: np.ndarray | None = None,
 ) -> np.ndarray:
     """Choose ``num_peaks`` indices into ``points`` via centroid-relative random directions.
 
@@ -489,7 +490,9 @@ def select_directional_points(
     point with the largest cosine similarity (smallest angular distance) to that
     direction, computed in coordinates relative to the centroid of all points.
     With ``in_plane=True``, directions are sampled in the xy-plane, so the
-    chosen points cluster around the centroid's z-plane.
+    chosen points cluster around the centroid's z-plane. ``center`` replaces the
+    centroid of the points (whose mean depends on how densely they sample the shape)
+    by a given point, e.g. the volume centroid of the enclosed region.
     Points flagged by ``exclude_predicate`` and points coincident with the
     centroid are skipped, and no point is chosen twice — collisions fall back
     to the next-best point for that direction.
@@ -500,7 +503,7 @@ def select_directional_points(
     """
     dof_coords = np.asarray(points, dtype=float)
     n_dofs = len(dof_coords)
-    centroid = dof_coords.mean(axis=0)
+    centroid = dof_coords.mean(axis=0) if center is None else np.asarray(center, dtype=float)
     rel = dof_coords - centroid
     norms = np.linalg.norm(rel, axis=1)
 
