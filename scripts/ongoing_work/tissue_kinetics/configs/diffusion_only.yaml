@@ -13,4 +13,4 @@ ecm:
 mechanics:
   enabled: false
 geometry:
-  ecs_ratio: 0.1
+  ecs_ratio: 0.17

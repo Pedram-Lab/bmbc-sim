@@ -10,4 +10,4 @@ postfix: mechanics     # -> results/tissue_kinetics_mechanics_<timestamp>
 mechanics:
   enabled: true
 geometry:
-  ecs_ratio: 0.04
+  ecs_ratio: 0.1

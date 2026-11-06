@@ -1,7 +1,7 @@
-# Solitary-synapse reference at ecs_ratio 0.19 (single_reference_sweep.yaml at 0.1): no
+# Solitary-synapse reference at ecs_ratio 0.25 (single_reference_sweep.yaml at 0.1): no
 # buffer, one active synapse per run. footprint.py on these runs gives the buffer width
-# for single_buffer_ecs19.yaml. 4 runs.
-# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_reference_ecs19_sweep
+# for single_buffer_ecs25.yaml. 4 runs.
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_reference_ecs25_sweep
 defaults:
   - cluster: local
   - _self_
@@ -11,9 +11,9 @@ cluster:
 
 base:
   geometry:
-    ecs_ratio: 0.19
+    ecs_ratio: 0.25
 
-result_root: results/single-reference-ecs19
+result_root: results/single-reference-ecs25
 
 sweep:
   synapse.active: [[28], [49], [3], [39]]

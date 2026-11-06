@@ -22,5 +22,5 @@ base:
 # values are validated per Config field.
 sweep:
   ecm.ecm_kd: ["0.1 mM", "0.3 mM", "0.7 mM", "1.3 mM", "3.0 mM", "10.0 mM"]
-  geometry.ecs_ratio: [0.04, 0.19]
+  geometry.ecs_ratio: [0.1, 0.25]
 seeds: 10

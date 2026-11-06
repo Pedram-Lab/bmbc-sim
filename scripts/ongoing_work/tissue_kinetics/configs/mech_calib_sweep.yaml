@@ -15,7 +15,7 @@ cluster:
 base:
   end_time: "0.1 s"
   geometry:
-    ecs_ratio: 0.19
+    ecs_ratio: 0.25
   synapse:
     pulse_times: ["0 ms", "10 ms", "20 ms", "30 ms", "40 ms"]
   ecm:

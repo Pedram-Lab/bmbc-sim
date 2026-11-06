@@ -1,8 +1,8 @@
-# Solitary synapse, buffer placement at ecs_ratio 0.19 (single_buffer_sweep.yaml at 0.1).
+# Solitary synapse, buffer placement at ecs_ratio 0.25 (single_buffer_sweep.yaml at 0.1).
 # 1 mM only (0.3 mM was far below any threshold at 0.1): uniform, on-target and
-# off-target neighbour at sigma = footprint 1/e radius of single_reference_ecs19
+# off-target neighbour at sigma = footprint 1/e radius of single_reference_ecs25
 # (filled in by the run chain), plus sigma = 1 um on-target. 4 targets x 4 = 16 runs.
-# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_buffer_ecs19_sweep
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name single_buffer_ecs25_sweep
 defaults:
   - cluster: local
   - _self_
@@ -12,14 +12,14 @@ cluster:
 
 base:
   geometry:
-    ecs_ratio: 0.19
+    ecs_ratio: 0.25
   ecm:
     enabled: true
     ecm_total: "1 mM"
     ecm_kd: "1 mM"
     ecm_kf: "1e5 / (mM s)"
 
-result_root: results/single-buffer-ecs19
+result_root: results/single-buffer-ecs25
 
 sweep:
   "synapse.active, ecm.local_width, ecm.local_target":

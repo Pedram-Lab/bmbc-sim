@@ -28,7 +28,7 @@ base:
     mesh_dir: data/tissue_6x6x1
   synapse:
     uniform_cell: true
-    n_synapses: 36   # 400 * (6x6)/(20x20): same areal density as the production box
+    n_synapses: 36   # 1 per um^3, as in the production box
 
 sweep:
   geometry.n_refine: [0, 1, 2]

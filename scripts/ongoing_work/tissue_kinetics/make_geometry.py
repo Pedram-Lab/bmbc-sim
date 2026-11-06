@@ -80,7 +80,7 @@ def main():
     p.add_argument("--d", type=float, default=4.0, help="target cell diameter (um)")
     p.add_argument("--r", type=float, default=0.5, help="nominal rounding radius of the cells (um)")
     p.add_argument("--h", type=float, default=0.3, help="surface mesh size (um)")
-    p.add_argument("--w-bracket", type=float, nargs=2, default=[0.03, 0.3], help="bisection bracket for w (um)")
+    p.add_argument("--w-bracket", type=float, nargs=2, default=[0.03, 0.5], help="bisection bracket for w (um)")
     p.add_argument("--tol", type=float, default=1e-3, help="tolerance on the ECS fraction")
     p.add_argument("--max-iter", type=int, default=20)
     p.add_argument("--workers", type=int, default=8, help="processes for the per-cell membranes")

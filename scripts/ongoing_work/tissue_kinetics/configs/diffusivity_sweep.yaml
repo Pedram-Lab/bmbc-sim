@@ -14,5 +14,5 @@ result_root: results/diffusivity-sweep
 # values are validated per Config field.
 sweep:
   diffusion.diffusivity_ecs: ["0.4 um2 / ms", "0.7 um2 / ms", "1.0 um2 / ms"]
-  geometry.ecs_ratio: [0.04, 0.19]
+  geometry.ecs_ratio: [0.1, 0.25]
 seeds: 10
