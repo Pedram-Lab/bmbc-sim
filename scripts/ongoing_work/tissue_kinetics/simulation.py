@@ -7,6 +7,7 @@ over a parameter grid.
 
     uv run scripts/ongoing_work/tissue_kinetics/simulation.py mechanics.enabled=true
 """
+import json
 import math
 
 import numpy as np
@@ -17,9 +18,10 @@ from astropy import constants as const
 import ngsolve as ngs
 
 import bmbcsim
+from bmbcsim.meshing.tissue_mesher import load_tissue_mesh
 from bmbcsim.simulation import transport
-from bmbcsim.geometry import TissueGeometry
 from bmbcsim.simulation import coefficient_fields as cf
+from make_geometry import geometry_file
 from bmbcsim.config import (
     SimulationConfig,
     ConfigGroup,
@@ -30,17 +32,16 @@ from bmbcsim.config import (
 
 
 class Geometry(ConfigGroup):
-    """Mesh / cell-packing geometry."""
+    """Tissue mesh from make_geometry.py, identified by (seed, ecs_ratio).
 
-    target_cell_diam: float = 4.0
+    The cell set and numbering depend only on the seed, so the meshes of one seed
+    at different ecs_ratio have the same cells. The box is set by the mesh.
+    """
+
+    mesh_dir: str = "data/tissue"
+    seed: int = 0
+    # Target ECS volume fraction (a whole percentage); the measured one is in geometry.json
     ecs_ratio: float = 0.1
-    # ECS ratio at which the cell set is cropped/numbered; set to the largest
-    # ecs_ratio in a comparison sweep. See step 1d.
-    reference_ecs_ratio: float = 0.19
-    box_size_x: float = 20.0
-    box_size_y: float = 20.0
-    box_size_z: float = 1.0
-    mesh_size: float = 5.0
     # Uniform ``ngs.Mesh.Refine()`` passes after meshing: each halves h (8x elements)
     # on the *same* geometry, which maxh cannot guarantee once the cell-surface
     # triangulation dominates h. For convergence tests.
@@ -177,105 +178,35 @@ def run(cfg: Config) -> None:
     # Mechanics implies ECM (needs ECM_Ca as driving species)
     with_mechanics = mech.enabled
     with_ecm = ecm_cfg.enabled or with_mechanics
-    # Derived parameter: boundary permeability from tortuosity if not set
-    boundary_permeability = diff.boundary_permeability
-    if boundary_permeability is None:
-        l_char = max(geom.box_size_x, geom.box_size_y, geom.box_size_z) / 2.0 * u.um
-        boundary_permeability = diff.diffusivity_ecs / diff.tortuosity**2 / l_char
-
-    # Claim the result directory and record the config that produced it before the
-    # geometry work starts: meshing is where runs fail (see the ECS-connectivity
-    # check below), and a failed run is only debuggable if its config is on disk.
+    # Claim the result directory and record the config that produced it before
+    # loading the geometry, so a run that fails on a missing mesh is debuggable.
     result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
 
-    # --- Load and post-process geometry from VTK ---
-    print("Loading geometry...")
-    geometry = TissueGeometry.from_file("data/tissue_geometry.vtk")
-    print(f"  Cells after from_file: {len(geometry.cells)}")
-
-    # Scale so the median cell "diameter" matches target_cell_diam
-    median_diam = float(np.median(
-        [np.subtract(cell.bounds[1::2], cell.bounds[::2]).max() for cell in geometry.cells]
-    ))
-    scale_factor = geom.target_cell_diam / median_diam
-    print(f"  Median cell diameter (original units): {median_diam:.3f}")
-    print(f"  Scale factor to get ~{geom.target_cell_diam} um cells: {scale_factor:.3f}")
-
-    geometry = geometry.scale(scale_factor)
-    geometry = geometry.decimate(factor=0.5)
-    geometry = geometry.smooth(n_iter=10)
-    geometry = geometry.decimate(factor=0.5)
-
-    # Translate so that the domain starts at (0,0,0)
-    minc, _ = geometry.bounding_box()
-    for cell in geometry.cells:
-        cell.points -= minc
-
-    # Crop at a fixed reference shrink so the cell set is ecs_ratio-independent.
-    # Cropping at reference_ecs_ratio (not the run's ecs_ratio) keeps the kept set,
-    # its numbering and synapse seeding identical across ratios, so (seed,
-    # synapse_idx) is the same synapse everywhere; step 1e then scales to the
-    # run's ecs_ratio. shrink_cells and the synapse direction pick are both
-    # centroid-radial, so only cell size (hence ECS volume) changes. Cropping shrunk (vs full-size)
-    # cells also avoids over-packing the box and pinching the ECS apart.
-    geometry = geometry.shrink_cells(1 - geom.reference_ecs_ratio, jitter=0.0)
-
-    minc3, maxc3 = geometry.bounding_box()
-    center = 0.5 * (minc3 + maxc3)
-    half_box = np.array([geom.box_size_x, geom.box_size_y, geom.box_size_z]) / 2.0
-    min_box = np.maximum(minc3, center - half_box)
-    max_box = np.minimum(maxc3, center + half_box)
-
-    geometry = geometry.keep_cells_within(
-        min_coords=min_box,
-        max_coords=max_box,
-        inside_threshold=0.1
-    )
-    n_cells = len(geometry.cells)
-    print(f"  Cells after keep_cells_within (reference ecs={geom.reference_ecs_ratio}): "
-          f"{n_cells}")
-    if n_cells == 0:
-        raise RuntimeError(
-            "No cells remain after keep_cells_within. "
-            "Increase one of box_size_x/y/z or relax inside_threshold."
-        )
-
-    # Scale the fixed cell set to this run's ECS ratio (grows it for smaller ratios)
-    geometry = geometry.shrink_cells(
-        (1 - geom.ecs_ratio) / (1 - geom.reference_ecs_ratio), jitter=0.0
-    )
-    print(f"  Cells scaled to ecs_ratio={geom.ecs_ratio}: {n_cells} cells")
-
-    # Name cells and membranes, then generate the NGSolve mesh
-    cell_names = [f"cell_{i}" for i in range(n_cells)]
-    bnd_names = [f"membrane_{i}" for i in range(n_cells)]
-
-    print("Building mesh...")
-    tissue_mesh: ngs.Mesh = geometry.to_ngs_mesh(
-        mesh_size=geom.mesh_size,
-        min_coords=min_box,
-        max_coords=max_box,
-        projection_tol=0.02,
-        cell_names=cell_names,
-        cell_bnd_names=bnd_names,
-    )
+    # --- Load the tissue mesh (make_geometry.py) ---
+    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio)
+    print(f"Loading geometry {path}...")
+    tissue_mesh, meta = load_tissue_mesh(path)
+    with open(result_dir / "geometry.json", "w") as f:
+        json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()}}, f, indent=1)
+    n_cells = len(tissue_mesh.GetMaterials()) - 1
+    coords = np.array(tissue_mesh.ngmesh.Coordinates())
+    min_box, max_box = coords.min(axis=0), coords.max(axis=0)
+    print(f"  {n_cells} cells in a {' x '.join(f'{s:g}' for s in max_box - min_box)} um box, "
+          f"ECS fraction {meta['ecs_fraction']:.4f} (target {meta['ecs_ratio']}, gap w = {meta['w']:.4f} um)")
     for _ in range(geom.n_refine):
         tissue_mesh.Refine()
     print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices "
           f"(n_refine={geom.n_refine})")
+    cell_names = [f"cell_{i}" for i in range(n_cells)]
+    bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
-    # ECS must be a single connected region (to_ngs_mesh names a disconnected one
-    # "ecs:region_0", "ecs:region_1", ...). Fail fast: it's unphysical, and the
-    # seed-independent geometry would break every seed identically.
-    ecs_regions = {m for m in tissue_mesh.GetMaterials() if m.split(":")[0] == "ecs"}
-    if len(ecs_regions) != 1:
-        raise RuntimeError(
-            f"ECS split into {len(ecs_regions)} disconnected regions "
-            f"{sorted(ecs_regions)} at ecs_ratio={geom.ecs_ratio}; raise "
-            f"reference_ecs_ratio (now {geom.reference_ecs_ratio}) toward it."
-        )
+    # Derived parameter: boundary permeability from tortuosity if not set
+    boundary_permeability = diff.boundary_permeability
+    if boundary_permeability is None:
+        l_char = float(np.max(max_box - min_box)) / 2.0 * u.um
+        boundary_permeability = diff.diffusivity_ecs / diff.tortuosity**2 / l_char
 
     # --- Set up simulation ---
     print("Setting up simulation...")
@@ -345,7 +276,7 @@ def run(cfg: Config) -> None:
         raise ValueError("ecm.local_width needs synapse patches; unset synapse.uniform_cell")
 
     if syn.uniform_cell:
-        centroids = np.array([cell.points.mean(axis=0) for cell in geometry.cells])
+        centroids = np.array([_boundary_vertices(tissue_mesh, b).mean(axis=0) for b in bnd_names])
         i_center = int(np.argmin(np.linalg.norm(centroids - 0.5 * (min_box + max_box), axis=1)))
         print(f"  Uniform sink on cell_{i_center} (whole membrane, "
               f"{membranes[i_center].area:.2f} um^2)")
@@ -358,32 +289,20 @@ def run(cfg: Config) -> None:
         membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
         synapses_per_cell[:] = 0  # skip the patch loop below
 
-    # Synapse centers are picked on the *geometry* vertices of each cell (not the
-    # mesh), so they are exactly ecs_ratio-invariant (shrink_cells is centroid-
-    # radial, and so is the direction pick), then snapped to the nearest membrane
-    # mesh vertex so the narrow flux Gaussian sits on a DOF. The snapped centers
-    # are what the flux and the local ECM buffer use, and what gets saved.
-    # in_plane: the box is thin in z, so full-sphere directions pile synapses
-    # onto the top/bottom faces; in-plane directions keep them near the
-    # mid-plane of the slab.
-    synapse_centers = {}  # cell index -> (n_syn, 3) snapped centers
-    max_snap = 0.0
-    for i, (n_syn, cell) in enumerate(zip(synapses_per_cell, geometry.cells)):
+    # Synapse centers are membrane mesh vertices (the narrow flux Gaussian sits on
+    # a DOF), picked along random directions from the cell's centroid. The cells of
+    # one geometry seed are the same at every ecs_ratio, only eroded by the gap, so
+    # (seed, synapse index) is nearly the same membrane spot across ratios.
+    synapse_centers = {}  # cell index -> (n_syn, 3) centers
+    for i, n_syn in enumerate(synapses_per_cell):
         if n_syn == 0:
             continue
-        picked = cf.select_directional_points(
-            cell.points, n_syn, rng, exclude_outer_box, in_plane=True
-        )
         vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
-        dists = np.linalg.norm(vertices[None, :, :] - cell.points[picked][:, None, :], axis=2)
-        nearest = dists.argmin(axis=1)
-        max_snap = max(max_snap, float(dists[np.arange(len(picked)), nearest].max()))
-        synapse_centers[i] = vertices[nearest]
+        synapse_centers[i] = vertices[cf.select_directional_points(vertices, n_syn, rng, exclude_outer_box)]
     all_centers = (np.concatenate(list(synapse_centers.values()))
                    if synapse_centers else np.empty((0, 3)))
     np.save(result_dir / "synapse_centers.npy", all_centers)
-    print(f"  Synapse centers snapped to membrane vertices, max shift {max_snap:.3f} um "
-          f"-> {result_dir / 'synapse_centers.npy'}")
+    print(f"  Synapse centers on membrane vertices -> {result_dir / 'synapse_centers.npy'}")
 
     flux_centers = synapse_centers
     if syn.active is not None:

@@ -24,8 +24,8 @@ cluster:
 
 base:
   geometry:
-    box_size_x: 6.0
-    box_size_y: 6.0
+    # make_geometry.py --box 6 6 1 --ecs-ratio 0.1 --out data/tissue_6x6x1
+    mesh_dir: data/tissue_6x6x1
   synapse:
     uniform_cell: true
     n_synapses: 36   # 400 * (6x6)/(20x20): same areal density as the production box
