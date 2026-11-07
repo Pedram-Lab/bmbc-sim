@@ -178,7 +178,8 @@ class Simulation:
             t = start_time.copy()
             try:
                 for _ in trange(n_steps):
-                    # Strang splitting: mechanics → (D+P)/2 → (E, R, T) → (D+P)/2, P = ProportionalFlux
+                    # Lie splitting: mechanics → electrostatics → diffusion + transport → reactions
+                    # (stiff reactions last, so recorded fields are close to chemical equilibrium)
 
                     # 1. Mechanics — deform mesh before geometry-dependent steps
                     if self.mechanics:
@@ -190,18 +191,18 @@ class Simulation:
                     for solver in self._diffusion.values():
                         solver.prepare()
 
-                    # Time-dependent fluxes at the step midpoint (used by both half-steps)
+                    # Time-dependent fluxes at the step midpoint
                     for membrane in self.simulation_geometry.membranes.values():
                         for _, _, _, transport in membrane.get_transport():
                             transport.update_flux(t + time_step / 2)
 
-                    # 2. Diffusion half-step (implicit, with drift and ProportionalFlux)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].diffusion_half_step(c)
-
-                    # 3. Electrostatics (if applicable)
+                    # 2. Electrostatics (if applicable)
                     if self.electrostatics:
                         self._pnp.step()
+
+                    # 3. Diffusion, drift and membrane transport (one implicit solve)
+                    for species, c in self._concentrations.items():
+                        self._diffusion[species].diffusion_step(c)
 
                     # 4. Reactions (implicit Newton)
                     old_concentrations = np.stack(
@@ -223,15 +224,6 @@ class Simulation:
                             "Consider increasing the number of iterations or decreasing the time step.",
                             max_newton_iterations,
                         )
-
-                    # 5. Transport (explicit membrane transport; ProportionalFlux is
-                    #    implicit inside the diffusion half-steps)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].transport_step(c)
-
-                    # 6. Diffusion half-step (implicit, with drift)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].diffusion_half_step(c)
 
                     t += time_step
                     recorder.record(current_time=t)

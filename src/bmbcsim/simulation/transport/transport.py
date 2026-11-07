@@ -22,27 +22,29 @@ class Transport(abc.ABC):
         self._spatial_coefficients: dict[str, ngs.CoefficientFunction] = {}
 
 
-    def flux(
+    def linearize(
             self,
             source: ngs.CoefficientFunction | None,
             target: ngs.CoefficientFunction | None
-    ) -> ngs.CoefficientFunction | None:
-        """Compute the flux density through the membrane evaluated at current
-        concentrations. The flux is assumed to be the total flux across the
-        membrane. In case a flux density is readily available, it should be
-        multiplied by :code:`membrane.area`.
-        All of the arguments can be None, in which case the flux is assumed to
-        connect the domain to the outside.
+    ) -> tuple[ngs.CoefficientFunction | None, ...]:
+        """Linearize the flux density through the membrane for an implicit step.
 
-        :param source: Coefficient function representing the concentration in
-            the source compartment.
-        :param target: Coefficient function representing the concentration in
-            the target compartment.
-        :return: Coefficient function representing the flux across the membrane
-            from source to target, or None if no flux contribution.
+        The flux from source to target is written as
+        :code:`J = a_s * c_s - a_t * c_t + b`, where :code:`c_s` and :code:`c_t`
+        are the (new) concentrations in the source and target compartments.
+        The coefficients may depend on the current concentrations (lagged), but
+        :code:`a_s` and :code:`a_t` must be nonnegative so that the implicit
+        step preserves positivity. The flux is the total flux across the
+        membrane; area normalization is handled in :meth:`finalize_coefficients`.
+        Either compartment can be None, in which case the membrane connects
+        the domain to the outside.
+
+        :param source: Current concentration in the source compartment.
+        :param target: Current concentration in the target compartment.
+        :return: Tuple :code:`(a_s, a_t, b)`; terms that vanish are None.
         """
         del source, target  # Unused in default implementation
-        return None
+        return None, None, None
 
 
     def update_flux(self, t: u.Quantity) -> None:
@@ -125,6 +127,16 @@ class Transport(abc.ABC):
         self._coefficient_specs[attr_name] = (coeff, physical_name, temporal, normalize_by_area)
 
 
+def _linear_exchange(permeability, outside_concentration, source, target):
+    """Linearization of :code:`J = P * (c_s - c_t)`, where a missing side is
+    replaced by the (fixed) outside concentration."""
+    if source is None:
+        return None, permeability, permeability * outside_concentration
+    if target is None:
+        return permeability, None, -permeability * outside_concentration
+    return permeability, permeability, None
+
+
 class Passive(Transport):
     """Passive transport mechanism that computes the flux as a linear function
     of the concentration difference across the membrane.
@@ -157,10 +169,8 @@ class Passive(Transport):
             )
 
 
-    def flux(self, source, target):
-        s = source if source is not None else self.outside_concentration
-        t = target if target is not None else self.outside_concentration
-        return self.permeability * (s - t)
+    def linearize(self, source, target):
+        return _linear_exchange(self.permeability, self.outside_concentration, source, target)
 
 
 class Active(Transport):
@@ -189,9 +199,12 @@ class Active(Transport):
         self._register_coefficient("km", km, "molar concentration")
 
 
-    def flux(self, source, target):
+    def linearize(self, source, target):
+        # Picard linearization v_max * c^{n+1} / (km + c^n) keeps a_s >= 0
         del target  # Unused
-        return self.v_max * source / (self.km + source)
+        if source is None:
+            raise ValueError("Active transport requires a source compartment.")
+        return self.v_max / (self.km + source), None, None
 
 
 class GeneralFlux(Transport):
@@ -216,9 +229,9 @@ class GeneralFlux(Transport):
                                     normalize_by_area=True)
 
 
-    def flux(self, source, target):
+    def linearize(self, source, target):
         del source, target  # Flux is independent of the concentrations
-        return self.flux_value
+        return None, None, self.flux_value
 
 
 class ProportionalFlux(Transport):
@@ -255,21 +268,10 @@ class ProportionalFlux(Transport):
         self._register_coefficient("depletion", depletion, "molar concentration")
 
 
-    def flux(self, source, target):
-        del target  # Unused
-        if source is None:
-            raise ValueError("ProportionalFlux requires a source compartment.")
-        proportionality_range = self.saturation - self.depletion
-        scale = ngs.IfPos(
-            source - self.saturation,
-            1.0,
-            ngs.IfPos(
-                source - self.depletion,
-                (source - self.depletion) / proportionality_range,
-                0.0,
-            ),
+    def linearize(self, source, target):
+        raise NotImplementedError(
+            "ProportionalFlux is treated by the DiffusionSolver directly (lagged clipping)."
         )
-        return self.flux_value * scale
 
 
 class Transparent(Transport):
@@ -310,7 +312,5 @@ class Transparent(Transport):
                 "outside_concentration", outside_concentration, "molar concentration"
             )
 
-    def flux(self, source, target):
-        s = source if source is not None else self.outside_concentration
-        t = target if target is not None else self.outside_concentration
-        return self.permeability * (s - t)
+    def linearize(self, source, target):
+        return _linear_exchange(self.permeability, self.outside_concentration, source, target)
