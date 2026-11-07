@@ -124,8 +124,6 @@ class Simulation:
         :param record_interval: The interval at which to record data. If None, a record
             is taken every 10 time steps.
         :param n_threads: The number of threads to use for the simulation.
-        :param chemical_substeps: The number of substeps to use for the chemical
-            reactions within each time step.
         :param newton_tol: The tolerance for the Newton solver used in the reaction
             kinetics.
         :param max_newton_iterations: The maximum number of iterations for the Newton
@@ -180,32 +178,29 @@ class Simulation:
             t = start_time.copy()
             try:
                 for _ in trange(n_steps):
-                    # Strang splitting: mechanics → (D+P)/2 → (E, R, T) → (D+P)/2, P = ProportionalFlux
+                    # Lie splitting: electrostatics → diffusion + transport → reactions → mechanics
+                    # (stiff reactions after transport, so recorded fields are close to chemical
+                    # equilibrium; mechanics last, so the recorded mesh matches the recorded
+                    # concentrations)
 
-                    # 1. Mechanics — deform mesh before geometry-dependent steps
-                    if self.mechanics:
-                        self._mechanics.step()
-                        self._mechanics.adjust_concentrations(self._concentrations)
-                        self.simulation_geometry.update_measures()
-
-                    # Reassemble diffusion operators once per timestep (after mesh deformation)
+                    # Reassemble diffusion operators on the mesh left by the previous step
                     for solver in self._diffusion.values():
                         solver.prepare()
 
-                    # Time-dependent fluxes at the step midpoint (used by both half-steps)
+                    # Time-dependent fluxes at the step midpoint
                     for membrane in self.simulation_geometry.membranes.values():
                         for _, _, _, transport in membrane.get_transport():
                             transport.update_flux(t + time_step / 2)
 
-                    # 2. Diffusion half-step (implicit, with drift and ProportionalFlux)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].diffusion_half_step(c)
-
-                    # 3. Electrostatics (if applicable)
+                    # 1. Electrostatics (if applicable)
                     if self.electrostatics:
                         self._pnp.step()
 
-                    # 4. Reactions (implicit Newton)
+                    # 2. Diffusion, drift and membrane transport (one implicit solve)
+                    for species, c in self._concentrations.items():
+                        self._diffusion[species].diffusion_step(c)
+
+                    # 3. Reactions (implicit Newton)
                     old_concentrations = np.stack(
                         [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
                     )
@@ -226,14 +221,11 @@ class Simulation:
                             max_newton_iterations,
                         )
 
-                    # 5. Transport (explicit membrane transport; ProportionalFlux is
-                    #    implicit inside the diffusion half-steps)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].transport_step(c)
-
-                    # 6. Diffusion half-step (implicit, with drift)
-                    for species, c in self._concentrations.items():
-                        self._diffusion[species].diffusion_half_step(c)
+                    # 4. Mechanics: equilibrium for the new concentrations, then dilute them
+                    if self.mechanics:
+                        self._mechanics.step()
+                        self._mechanics.adjust_concentrations(self._concentrations)
+                        self.simulation_geometry.update_measures()
 
                     t += time_step
                     recorder.record(current_time=t)

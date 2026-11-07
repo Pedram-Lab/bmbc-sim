@@ -14,6 +14,15 @@ from bmbcsim.simulation.transport import ProportionalFlux
 from bmbcsim.units import to_simulation_units
 
 
+# Vertex quadrature on boundary elements: lumps boundary bilinear forms onto the
+# vertices (exact row sums for P1), so membrane coupling only connects the source
+# and target unknowns at the same vertex and keeps the system an M-matrix
+_VERTEX_RULES = {
+    ngs.TRIG: ngs.IntegrationRule(points=[(0, 0), (1, 0), (0, 1)], weights=[1 / 6] * 3),
+    ngs.SEGM: ngs.IntegrationRule(points=[(0,), (1,)], weights=[1 / 2] * 2),
+}
+
+
 def ngs_to_csr(mat: ngs.Matrix) -> sps.csr_matrix:
     """Convert an NGSolve matrix to a SciPy CSR matrix."""
     # Extract the matrix data
@@ -29,7 +38,7 @@ class DiffusionSolver:
             self,
             mass_form,
             stiffness_form,
-            transport_form,
+            transport_forms,
             drift,
             dt,
             reassemble,
@@ -37,7 +46,7 @@ class DiffusionSolver:
     ):
         self._mass_form = mass_form
         self._stiffness_form = stiffness_form
-        self._transport_form = transport_form
+        self._transport_forms = transport_forms
         self._sink_forms = sink_forms
         self._drift = drift
         self._dt = dt
@@ -46,7 +55,6 @@ class DiffusionSolver:
         # Operators are (optionally) rebuilt on every step when reassemble=True
         self._stiffness = None
         self._lumped_mass = None
-        self._m_star = None
         self._preconditioner = None
         self._prepare_operators()
 
@@ -101,9 +109,12 @@ class DiffusionSolver:
             # Set up mass matrix
             mass += trial * test * ngs.dx
 
-        # Handle membrane transport terms
-        transport_form = ngs.LinearForm(fes)
-        # ProportionalFlux is treated implicitly (IMEX) in the diffusion half-steps:
+        # Membrane transport J = a_s c_s - a_t c_t + b is implicit in the diffusion
+        # step: the a-terms enter a lumped bilinear form (coefficients lagged), b the rhs
+        transport_lhs = ngs.BilinearForm(fes, check_unused=False)
+        transport_rhs = ngs.LinearForm(fes)
+        has_transport = False
+        # ProportionalFlux is treated implicitly (IMEX) in the diffusion step:
         # its linear branch f (c - depletion) / (saturation - depletion) enters the
         # system as a lumped diagonal; clipping the gate to [0, 1] is lagged.
         # The lumped forms are row sums over the source test functions: full flux a,
@@ -147,19 +158,26 @@ class DiffusionSolver:
                     has_sinks = True
                     continue
 
-                # Calculate the flux density through the membrane
+                # Linearized flux density through the membrane
                 # Note: area normalization is handled in Transport.finalize_coefficients
-                flux_density = transport.flux(src_c, trg_c)
+                a_s, a_t, b = transport.linearize(src_c, trg_c)
+                flux_lhs = 0
+                if a_s is not None:
+                    flux_lhs += a_s.Compile() * trial_and_test[compartment_to_index[source]][0]
+                if a_t is not None:
+                    flux_lhs -= a_t.Compile() * trial_and_test[compartment_to_index[target]][0]
+                # The source loses J, the target gains J
+                for test, sign in ((src_test, 1), (trg_test, -1)):
+                    if test is None:
+                        continue
+                    if a_s is not None or a_t is not None:
+                        vertex_ds = ngs.ds(membrane.name, intrules=_VERTEX_RULES)
+                        transport_lhs += sign * flux_lhs * test * vertex_ds
+                    if b is not None:
+                        transport_rhs += -sign * b.Compile() * test * ngs.ds(membrane.name)
+                    has_transport = True
 
-                if flux_density is not None:
-                    flux_density = flux_density.Compile()
-                    ds = ngs.ds(membrane.name)
-                    if src_test is not None:
-                        transport_form += -flux_density * src_test * ds
-                    if trg_test is not None:
-                        transport_form += flux_density * trg_test * ds
-
-        # Handle potential terms (electrostatic drift; implicit in diffusion half-step)
+        # Handle potential terms (electrostatic drift; implicit in diffusion step)
         drift = None
         if potential is not None and species.valence != 0:
             drift = ngs.BilinearForm(fes, check_unused=False)
@@ -184,7 +202,7 @@ class DiffusionSolver:
         return cls(
             mass,
             stiffness,
-            transport_form,
+            (transport_lhs, transport_rhs) if has_transport else None,
             drift,
             dt,
             reassemble,
@@ -200,61 +218,59 @@ class DiffusionSolver:
         self._mass_form.Assemble()
         self._lumped_mass = np.asarray(ngs_to_csr(self._mass_form.mat).sum(axis=1)).flatten()
 
-        # M* uses dt/2 for Strang splitting half-steps
         # Use lumped (diagonal) mass to preserve the discrete maximum principle
-        half_dt = self._dt / 2
-        m_star = sps.diags(self._lumped_mass) + half_dt * self._stiffness
+        m_star = sps.diags(self._lumped_mass) + self._dt * self._stiffness
         m_ilu = spla.spilu(m_star.T, fill_factor=5)
         self._preconditioner = spla.LinearOperator(
             m_star.shape, matvec=m_ilu.solve, dtype=np.float64
         )
-        self._m_star = m_star
 
     def prepare(self):
         """Reassemble diffusion operators if needed (e.g., after mesh deformation).
 
-        Call once per timestep from the simulation loop, before the first
-        diffusion half-step.
+        Call once per timestep from the simulation loop, before the diffusion step.
         """
         if self._reassemble:
             self._prepare_operators()
 
-    def diffusion_half_step(self, concentration: ngs.GridFunction):
-        """Apply a half-step of implicit diffusion (with drift if applicable),
-        including the implicit ProportionalFlux sinks."""
-        half_dt = self._dt / 2
-        c = concentration.vec.FV().NumPy().copy()
+    def diffusion_step(self, concentration: ngs.GridFunction):
+        """Apply one implicit Euler step of diffusion together with drift and
+        membrane transport (all implicit, lumped; ProportionalFlux with lagged
+        clipping).
 
-        sink = np.zeros_like(c)
+        Solves :code:`(M_L + dt L) dc = dt (f - L c)`, where the operator
+        :code:`L = K - D + A + diag(alpha)` collects stiffness, drift, linearized
+        transport and ProportionalFlux sinks, and :code:`f` the explicit sources.
+        The preconditioner only covers :code:`M_L + dt K`.
+        """
+        dt = self._dt
+        c = concentration.vec.FV().NumPy().copy()
+        operator = self._stiffness
+        source = np.zeros_like(c)
+
+        if self._drift is not None:
+            # Assemble drift (potential may have been updated since last call)
+            self._drift.Assemble()
+            operator = operator - ngs_to_csr(self._drift.mat.DeleteZeroElements(1e-10))
+
+        if self._transport_forms is not None:
+            lhs, rhs = self._transport_forms
+            lhs.Assemble()
+            rhs.Assemble()
+            operator = operator + ngs_to_csr(lhs.mat.DeleteZeroElements(1e-15))
+            source += rhs.vec.FV().NumPy()
+
         if self._sink_forms is not None:
             full, rate, offset, gain, gate = self._sink_forms
             for form in (full, rate, offset):
                 form.Assemble()
             a, alpha, s = (form.vec.FV().NumPy() for form in (full, rate, offset))
-            sink = alpha
-
-        if self._drift is not None:
-            # Assemble drift (potential may have been updated since last call)
-            self._drift.Assemble()
-            drift_csr = ngs_to_csr(self._drift.mat.DeleteZeroElements(1e-10))
-
-            rhs = half_dt * (drift_csr @ c - self._stiffness @ c)
-            system = spla.LinearOperator(
-                self._m_star.shape,
-                matvec=lambda x: self._m_star @ x + half_dt * (sink * x - drift_csr @ x),
-                dtype=np.float64,
-            )
-        else:
-            rhs = -half_dt * (self._stiffness @ c)
-            system = self._m_star if self._sink_forms is None \
-                else self._m_star + half_dt * sps.diags(sink)
-
-        if self._sink_forms is not None:
-            rhs += half_dt * (s - alpha * c)
+            operator = operator + sps.diags(alpha)
+            source += s
 
         solution, info = spla.gmres(
-            system,
-            rhs,
+            sps.diags(self._lumped_mass) + dt * operator,
+            dt * (source - operator @ c),
             M=self._preconditioner,
             rtol=1e-6,
             atol=1e-12,
@@ -272,19 +288,11 @@ class DiffusionSolver:
             # target side receives exactly what the source lost
             loss = alpha * c - s
             clipped = np.clip(loss, 0, a)
-            c += half_dt * (loss - clipped) / self._lumped_mass
+            c += dt * (loss - clipped) / self._lumped_mass
             gate.vec.FV().NumPy()[:] = np.divide(clipped, a, out=np.zeros_like(a), where=a > 0)
             gain.Assemble()
-            c += half_dt * gain.vec.FV().NumPy() / self._lumped_mass
+            c += dt * gain.vec.FV().NumPy() / self._lumped_mass
         concentration.vec.FV().NumPy()[:] = c
-
-    def transport_step(self, concentration: ngs.GridFunction):
-        """Apply explicit membrane transport using lumped mass."""
-        self._transport_form.Assemble()
-
-        c = concentration.vec.FV().NumPy()
-        rhs = self._dt * self._transport_form.vec.FV().NumPy()
-        c[:] += rhs / self._lumped_mass
 
 
 class ReactionSolver:
