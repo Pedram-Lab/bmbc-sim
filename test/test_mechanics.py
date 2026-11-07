@@ -205,7 +205,7 @@ def test_mechanics_with_dynamic_species(tmp_path):
 
     # Final concentration should be higher due to volume contraction
     # (smaller as in the previous test since influx scales with boundary area)
-    assert ca_values.isel(time=-1) == pytest.approx(1.027, rel=1e-2)
+    assert ca_values.isel(time=-1) == pytest.approx(1.042, rel=1e-2)
 
 
 if __name__ == "__main__":

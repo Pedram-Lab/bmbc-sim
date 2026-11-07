@@ -178,16 +178,12 @@ class Simulation:
             t = start_time.copy()
             try:
                 for _ in trange(n_steps):
-                    # Lie splitting: mechanics → electrostatics → diffusion + transport → reactions
-                    # (stiff reactions last, so recorded fields are close to chemical equilibrium)
+                    # Lie splitting: electrostatics → diffusion + transport → reactions → mechanics
+                    # (stiff reactions after transport, so recorded fields are close to chemical
+                    # equilibrium; mechanics last, so the recorded mesh matches the recorded
+                    # concentrations)
 
-                    # 1. Mechanics — deform mesh before geometry-dependent steps
-                    if self.mechanics:
-                        self._mechanics.step()
-                        self._mechanics.adjust_concentrations(self._concentrations)
-                        self.simulation_geometry.update_measures()
-
-                    # Reassemble diffusion operators once per timestep (after mesh deformation)
+                    # Reassemble diffusion operators on the mesh left by the previous step
                     for solver in self._diffusion.values():
                         solver.prepare()
 
@@ -196,15 +192,15 @@ class Simulation:
                         for _, _, _, transport in membrane.get_transport():
                             transport.update_flux(t + time_step / 2)
 
-                    # 2. Electrostatics (if applicable)
+                    # 1. Electrostatics (if applicable)
                     if self.electrostatics:
                         self._pnp.step()
 
-                    # 3. Diffusion, drift and membrane transport (one implicit solve)
+                    # 2. Diffusion, drift and membrane transport (one implicit solve)
                     for species, c in self._concentrations.items():
                         self._diffusion[species].diffusion_step(c)
 
-                    # 4. Reactions (implicit Newton)
+                    # 3. Reactions (implicit Newton)
                     old_concentrations = np.stack(
                         [c.vec.FV().NumPy() for _, c in self._concentrations.items()]
                     )
@@ -224,6 +220,12 @@ class Simulation:
                             "Consider increasing the number of iterations or decreasing the time step.",
                             max_newton_iterations,
                         )
+
+                    # 4. Mechanics: equilibrium for the new concentrations, then dilute them
+                    if self.mechanics:
+                        self._mechanics.step()
+                        self._mechanics.adjust_concentrations(self._concentrations)
+                        self.simulation_geometry.update_measures()
 
                     t += time_step
                     recorder.record(current_time=t)
