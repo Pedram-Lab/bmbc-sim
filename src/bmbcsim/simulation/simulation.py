@@ -124,8 +124,6 @@ class Simulation:
         :param record_interval: The interval at which to record data. If None, a record
             is taken every 10 time steps.
         :param n_threads: The number of threads to use for the simulation.
-        :param chemical_substeps: The number of substeps to use for the chemical
-            reactions within each time step.
         :param newton_tol: The tolerance for the Newton solver used in the reaction
             kinetics.
         :param max_newton_iterations: The maximum number of iterations for the Newton
