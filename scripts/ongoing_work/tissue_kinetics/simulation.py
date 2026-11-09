@@ -55,7 +55,6 @@ class Diffusion(ConfigGroup):
     diffusivity_cyto: Quantity("um2 / ms") = "0.22 um2 / ms"
     tortuosity: float = 1.6
     boundary_permeability: Quantity("um / ms") | None = None  # from tortuosity if None
-    depletion: Quantity("mM") = "0.47 mM"
 
 
 class Synapse(ConfigGroup):
@@ -68,6 +67,11 @@ class Synapse(ConfigGroup):
     i_channel: Quantity("pA") = "0.5 pA"
     tau1: Quantity("ms") = "10 ms"
     tau2: Quantity("ms") = "3 ms"
+    # Influx law (ProportionalFlux): zero at ECS Ca <= depletion, full at >= saturation,
+    # linear in between. saturation None = diffusion.ca_ecs (full influx at rest); pin it
+    # to compare different baths under one channel law.
+    depletion: Quantity("mM") = "0.47 mM"
+    saturation: Quantity("mM") | None = None
     pulse_times: list[Quantity("ms")] = ["100 ms", "110 ms", "120 ms", "130 ms", "140 ms"]
     # Indices into synapse_centers.npy that carry flux; None = all of them. The other
     # synapses are still placed and saved (so indices stay comparable across runs), they
@@ -351,8 +355,8 @@ def run(cfg: Config) -> None:
               f"{membranes[i_center].area:.2f} um^2)")
         uniform_flux = transport.ProportionalFlux(
             flux=synapses_per_cell.sum() * q_per_synapse,
-            saturation=diff.ca_ecs,
-            depletion=diff.depletion,
+            saturation=diff.ca_ecs if syn.saturation is None else syn.saturation,
+            depletion=syn.depletion,
             temporal=nmdar_waveform,
         )
         membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
@@ -406,8 +410,8 @@ def run(cfg: Config) -> None:
         )
         synapse_flux = transport.ProportionalFlux(
             flux=synapse_distribution,
-            saturation=diff.ca_ecs,
-            depletion=diff.depletion,
+            saturation=diff.ca_ecs if syn.saturation is None else syn.saturation,
+            depletion=syn.depletion,
             temporal=nmdar_waveform,
         )
         membranes[i].add_transport(ca, synapse_flux, ecs, cells[i])

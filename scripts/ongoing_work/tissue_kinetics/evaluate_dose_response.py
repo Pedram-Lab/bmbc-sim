@@ -68,7 +68,7 @@ def evaluate_run(run, targets):
     cfg = yaml.safe_load(open(os.path.join(run, "config.yaml")))
     ecm, syn, diff = cfg["ecm"], cfg["synapse"], cfg["diffusion"]
     pulses = np.array([_mm(t) for t in syn["pulse_times"]])
-    ca0, floor = _mm(diff["ca_ecs"]), _mm(diff["depletion"]) + FLOOR_EPS
+    ca0, floor = _mm(diff["ca_ecs"]), _mm(syn["depletion"]) + FLOOR_EPS
     local_width = None if ecm["local_width"] is None else _mm(ecm["local_width"])
     active = syn.get("active")  # None = every synapse carries flux
     if not ecm["enabled"]:
