@@ -444,8 +444,10 @@ def surface_mesh(cells, box, h, workers=8):
         out = tr.triangulate(dict(vertices=V2, segments=S, segment_markers=marks), f"pq30Ya{0.6 * h * h:.6f}")
         sub = out["segments"][out["segment_markers"].ravel() >= 2]
         if len(sub) and np.linalg.norm(out["vertices"][sub[:, 0]] - out["vertices"][sub[:, 1]], axis=1).min() < h / 4:
-            # refinement cascade along an outline (shallow crossing): no outline splits on this wall
-            out = tr.triangulate(dict(vertices=V2, segments=S, segment_markers=marks), f"pq30YYa{0.6 * h * h:.6f}")
+            # refinement cascade along an outline (shallow crossing or thin ECS gap): no outline splits on this
+            # wall; with YY, an angle bound (q30, even q20) makes Triangle reject the points near outlines and leave
+            # large fans (up to 3.6 um^2), so refine by area only
+            out = tr.triangulate(dict(vertices=V2, segments=S, segment_markers=marks), f"pYYa{0.6 * h * h:.6f}")
             n_yy += 1
         W, T = out["vertices"], out["triangles"]
         if len(W) < len(gids) or not np.allclose(W[:len(gids)], V2):
