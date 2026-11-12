@@ -8,7 +8,7 @@ buffer and mechanics. Run from the repository root.
 
 1. Generate the tissue meshes. `make_geometry.py` bisects the gap `w` between the
    cells until the ECS volume fraction reaches the target, then writes one mesh per
-   (seed, ECS ratio) to `data/tissue/tissue_s{seed}_ecs{NN}.vtu`, where `NN` is the
+   (seed, ECS ratio) to `data/cells/tissue_s{seed}_ecs{NN}.vtu`, where `NN` is the
    ECS ratio in percent:
 
    ```sh
@@ -21,8 +21,8 @@ buffer and mechanics. Run from the repository root.
    ratios of one seed have the same cells, only eroded by different gaps. The meshes
    are not in git; regenerate them with the command above.
 
-   `--cells tube` makes tube-shaped (dendrite-like) cells instead, written as
-   `tube_s{seed}_ecs{NN}.vtu` (defaults `--d 2 --r 0.25 --h 0.25`; about 100 cells and
+   `--cells tube` makes tube-shaped (dendrite-like) cells instead, written to
+   `data/tubes` with the same file names (defaults `--d 2 --r 0.25 --h 0.25`; about 100 cells and
    450k tets in the default box, 7 min per mesh).
 
 2. Run simulations. `simulation.py` runs one config, `sweep.py` runs a sweep config
@@ -32,8 +32,8 @@ buffer and mechanics. Run from the repository root.
    uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name ecs_ratio_sweep cluster=janelia
    ```
 
-   A run loads the mesh named by `geometry.mesh_dir`, `geometry.cells` (`round` or
-   `tube`), `geometry.seed` and `geometry.ecs_ratio`. If that mesh is missing, the run fails; generate it first
+   A run loads the mesh named by `geometry.mesh_dir` (`data/cells` or `data/tubes`),
+   `geometry.seed` and `geometry.ecs_ratio`. If that mesh is missing, the run fails; generate it first
    (step 1). Each run writes `geometry.json` with the mesh file, the measured ECS
    fraction and `w`, next to its `config.yaml`.
 

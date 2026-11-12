@@ -9,7 +9,6 @@ over a parameter grid.
 """
 import json
 import math
-from typing import Literal
 
 import numpy as np
 
@@ -33,14 +32,14 @@ from bmbcsim.config import (
 
 
 class Geometry(ConfigGroup):
-    """Tissue mesh from make_geometry.py, identified by (cells, seed, ecs_ratio).
+    """Tissue mesh from make_geometry.py, identified by (mesh_dir, seed, ecs_ratio).
 
     The cell set and numbering depend only on the seed, so the meshes of one seed
     at different ecs_ratio have the same cells. The box is set by the mesh.
     """
 
-    mesh_dir: str = "data/tissue"
-    cells: Literal["round", "tube"] = "round"
+    # data/cells (round cells) or data/tubes (tube-shaped cells)
+    mesh_dir: str = "data/cells"
     seed: int = 0
     # Target ECS volume fraction (a whole percentage); the measured one is in geometry.json
     ecs_ratio: float = 0.1
@@ -204,7 +203,7 @@ def run(cfg: Config) -> None:
     print(f"Results and config -> {result_dir}")
 
     # --- Load the tissue mesh (make_geometry.py) ---
-    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio, geom.cells)
+    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio)
     print(f"Loading geometry {path}...")
     tissue_mesh, meta = load_tissue_mesh(path)
     with open(result_dir / "geometry.json", "w") as f:
