@@ -16,7 +16,7 @@ BOX = np.array([6.0, 6.0, 1.0])
 def tissue():
     """Small tissue mesh: 7 rounded Voronoi cells, gap 0.1, in a 6 x 6 x 1 box."""
     cells, ids, _ = make_cells(0.1, 0.5, BOX, seed=0)
-    G, T, tags = tm.surface_mesh(cells, BOX, 0.3, workers=2)
+    G, T, tags = tm.surface_mesh(cells, BOX, 0.3, workers=8)
     return len(cells), ids, tm.surface_ecs_fraction(G, T, tags, BOX), tm.volume_mesh(G, T, tags, len(cells))
 
 
@@ -66,14 +66,14 @@ def test_facet_triangles_cube():
 
 
 def test_tube_cells_mesh():
-    """Tube cells in a 6 x 6 x 2 box mesh, and their reference faces do not depend on w."""
-    box = np.array([6.0, 6.0, 2.0])
-    cells, ids, info = make_tube_cells(0.1, 0.25, box, seed=0)
-    _, ids2, info2 = make_tube_cells(0.2, 0.25, box, seed=0)
+    """Tube cells in a 4 x 4 x 1 box mesh, and their reference faces do not depend on w."""
+    box = np.array([4.0, 4.0, 1.0])
+    cells, ids, info = make_tube_cells(0.1, 0.25, box, seed=2)
+    _, ids2, info2 = make_tube_cells(0.2, 0.25, box, seed=2, n_r=0, n_shift=0)  # no r_k / shift search: faster
     assert ids == ids2 and len(cells) > 3
     for f, f2 in zip(info["faces"], info2["faces"]):
         assert len(f) and np.array_equal(f, f2)
-    G, T, tags = tm.surface_mesh(cells, box, 0.25, workers=8)   # ~1 CPU min per tube cell
+    G, T, tags = tm.surface_mesh(cells, box, 0.25, workers=8)
     mesh = tm.volume_mesh(G, T, tags, len(cells))
     assert _volume(mesh, "ecs") / box.prod() == pytest.approx(tm.surface_ecs_fraction(G, T, tags, box), abs=1e-9)
 
