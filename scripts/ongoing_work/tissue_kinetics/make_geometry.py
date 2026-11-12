@@ -1,11 +1,15 @@
-"""Generate tissue meshes (rounded Voronoi cells) with a target ECS volume fraction.
+"""Generate tissue meshes (round or tube-shaped cells) with a target ECS volume fraction.
 
 For each (seed, ecs_ratio), bisects the gap w between the cells until the ECS fraction of the surface mesh is
-within ``--tol`` of the target, then builds the tet mesh once and writes ``tissue_s{seed}_ecs{100 * ratio:02d}.vtu``
+within ``--tol`` of the target, then builds the tet mesh once and writes ``{tissue|tube}_s{seed}_ecs{NN}.vtu``
 (see ``geometry_file``). The cell set and numbering depend only on the seed, not on w, so all ratios of one seed
-have the same cells. Simulations identify the geometry by (seed, ecs_ratio).
+have the same cells. Simulations identify the geometry by (cells, seed, ecs_ratio).
+
+The mesh also stores each cell's raw Voronoi faces (``ref_faces``, rows of 9 coordinates, and their cell
+``ref_cell``), which do not depend on w; the simulation places synapses on them.
 
     uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --ecs-ratio 0.1 0.19 --seed 0 1
+    uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --cells tube --ecs-ratio 0.1
 """
 import argparse
 import logging
@@ -15,12 +19,16 @@ import time
 import numpy as np
 
 
-def geometry_file(mesh_dir, seed, ecs_ratio):
-    """Path of the mesh for this geometry seed and target ECS ratio (a whole percentage)."""
+PREFIX = {"round": "tissue", "tube": "tube"}
+DEFAULTS = {"round": dict(d=4.0, r=0.5, h=0.3), "tube": dict(d=2.0, r=0.25, h=0.25)}
+
+
+def geometry_file(mesh_dir, seed, ecs_ratio, cells="round"):
+    """Path of the mesh for this cell type, geometry seed and target ECS ratio (a whole percentage)."""
     percent = round(100 * ecs_ratio)
     if abs(100 * ecs_ratio - percent) > 1e-6:
         raise ValueError(f"ecs_ratio must be a whole percentage, got {ecs_ratio}")
-    return os.path.join(mesh_dir, f"tissue_s{seed}_ecs{percent:02d}.vtu")
+    return os.path.join(mesh_dir, f"{PREFIX[cells]}_s{seed}_ecs{percent:02d}.vtu")
 
 
 def radius_ratio(X):
@@ -37,14 +45,16 @@ def radius_ratio(X):
 def make_geometry(seed, ecs_ratio, args):
     import ngsolve as ngs
     from bmbcsim.geometry.rounded_voronoi import make_cells
+    from bmbcsim.geometry.tube_cells import make_tube_cells
     from bmbcsim.logging import logger
     from bmbcsim.meshing import tissue_mesher as tm
 
     box = np.array(args.box, float)
+    make = make_tube_cells if args.cells == "tube" else make_cells
     lo, hi = args.w_bracket
     for it in range(args.max_iter):
         w = (lo + hi) / 2
-        cells, ids, info = make_cells(w, args.r, box, d=args.d, seed=seed)
+        cells, ids, info = make(w, args.r, box, d=args.d, seed=seed)
         G, T, tags = tm.surface_mesh(cells, box, args.h, workers=args.workers)
         alpha = tm.surface_ecs_fraction(G, T, tags, box)
         logger.info(f"seed {seed}, target {ecs_ratio}: w = {w:.5f} -> ECS fraction {alpha:.4f}")
@@ -65,9 +75,12 @@ def make_geometry(seed, ecs_ratio, args):
                 f"{info['n_bad']} below the wall margin), {mesh.ne} tets, radius ratio min {q.min():.1e}, "
                 f"0.1 % quantile {np.quantile(q, 1e-3):.3f}, median {np.median(q):.3f}")
 
-    path = geometry_file(args.out, seed, ecs_ratio)
+    path = geometry_file(args.out, seed, ecs_ratio, args.cells)
+    faces = info["faces"]
     tm.save_tissue_mesh(path, mesh, ecs_ratio=ecs_ratio, ecs_fraction=alpha_mesh, w=w, seed=seed, box=box,
-                        cell_diam=args.d, rounding=args.r, mesh_size=args.h, seed_ids=ids)
+                        cell_diam=args.d, rounding=args.r, mesh_size=args.h, seed_ids=ids,
+                        ref_faces=np.concatenate(faces).reshape(-1, 9),
+                        ref_cell=np.repeat(np.arange(len(faces)), [len(f) for f in faces]))
     logger.info(f"-> {path}")
 
 
@@ -77,20 +90,24 @@ def main():
     p.add_argument("--seed", type=int, nargs="+", default=[0], help="geometry seed(s)")
     p.add_argument("--out", default="data/tissue", help="output directory")
     p.add_argument("--box", type=float, nargs=3, default=[14.0, 14.0, 7.0], help="box size (um)")
-    p.add_argument("--d", type=float, default=4.0, help="target cell diameter (um)")
-    p.add_argument("--r", type=float, default=0.5, help="nominal rounding radius of the cells (um)")
-    p.add_argument("--h", type=float, default=0.3, help="surface mesh size (um)")
+    p.add_argument("--cells", choices=PREFIX, default="round", help="cell shape")
+    p.add_argument("--d", type=float, help="cell diameter (um); default 4 (round), 2 (tube)")
+    p.add_argument("--r", type=float, help="nominal rounding radius of the cells (um); default 0.5 / 0.25")
+    p.add_argument("--h", type=float, help="surface mesh size (um); default 0.3 / 0.25")
     p.add_argument("--w-bracket", type=float, nargs=2, default=[0.03, 0.5], help="bisection bracket for w (um)")
     p.add_argument("--tol", type=float, default=1e-3, help="tolerance on the ECS fraction")
     p.add_argument("--max-iter", type=int, default=20)
     p.add_argument("--workers", type=int, default=8, help="processes for the per-cell membranes")
     args = p.parse_args()
+    for k, v in DEFAULTS[args.cells].items():
+        if getattr(args, k) is None:
+            setattr(args, k, v)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     os.makedirs(args.out, exist_ok=True)
     for seed in args.seed:
         for ecs_ratio in args.ecs_ratio:
-            geometry_file(args.out, seed, ecs_ratio)    # fail on a bad ratio before any meshing
+            geometry_file(args.out, seed, ecs_ratio, args.cells)    # fail on a bad ratio before any meshing
     for seed in args.seed:
         for ecs_ratio in args.ecs_ratio:
             t0 = time.time()

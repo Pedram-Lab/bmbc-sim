@@ -9,6 +9,7 @@ over a parameter grid.
 """
 import json
 import math
+from typing import Literal
 
 import numpy as np
 
@@ -32,13 +33,14 @@ from bmbcsim.config import (
 
 
 class Geometry(ConfigGroup):
-    """Tissue mesh from make_geometry.py, identified by (seed, ecs_ratio).
+    """Tissue mesh from make_geometry.py, identified by (cells, seed, ecs_ratio).
 
     The cell set and numbering depend only on the seed, so the meshes of one seed
     at different ecs_ratio have the same cells. The box is set by the mesh.
     """
 
     mesh_dir: str = "data/tissue"
+    cells: Literal["round", "tube"] = "round"
     seed: int = 0
     # Target ECS volume fraction (a whole percentage); the measured one is in geometry.json
     ecs_ratio: float = 0.1
@@ -170,6 +172,16 @@ def _boundary_vertices(mesh: ngs.Mesh, name: str) -> np.ndarray:
     return coords[sorted(idx)]
 
 
+def _sample_triangles(tris: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """n points (n, 3) drawn uniformly by area on the triangles tris (M, 3, 3)."""
+    a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
+    area = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    k = rng.choice(len(tris), size=n, p=area / area.sum())
+    s, t = rng.random((2, n))
+    s = np.sqrt(s)
+    return (1 - s)[:, None] * a[k] + (s * (1 - t))[:, None] * b[k] + (s * t)[:, None] * c[k]
+
+
 def _volume_centroid(mesh: ngs.Mesh, material: str) -> np.ndarray:
     """Volume centroid of the named region (does not depend on how the mesh resolves it)."""
     region = mesh.Materials(material)
@@ -192,7 +204,7 @@ def run(cfg: Config) -> None:
     print(f"Results and config -> {result_dir}")
 
     # --- Load the tissue mesh (make_geometry.py) ---
-    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio)
+    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio, geom.cells)
     print(f"Loading geometry {path}...")
     tissue_mesh, meta = load_tissue_mesh(path)
     with open(result_dir / "geometry.json", "w") as f:
@@ -296,25 +308,35 @@ def run(cfg: Config) -> None:
         membranes[i_center].add_transport(ca, uniform_flux, ecs, cells[i_center])
         synapses_per_cell[:] = 0  # skip the patch loop below
 
-    # Synapse centers: for each random direction (from the seeded rng), the membrane
-    # vertex seen from the cell's volume centroid closest to that direction; it lies
-    # within ~h of where the ray hits the membrane (the cells are convex), and the
-    # narrow flux Gaussian sits on a DOF. Neither the direction nor the centroid
-    # depends on the mesh, and the cells of one geometry seed are the same at every
-    # ecs_ratio, only eroded by the gap, so (seed, synapse index) is the same membrane
-    # spot across ratios up to the mesh size.
+    # Synapse centers: anchors drawn uniformly by area (seeded rng) on the cell's raw
+    # Voronoi faces, which make_geometry.py stores and which do not depend on the gap w,
+    # each snapped to the nearest free membrane vertex (so the narrow flux Gaussian sits
+    # on a DOF). The cells of one geometry seed are the same at every ecs_ratio, so
+    # (seed, synapse index) is the same membrane spot across ratios up to the gap and
+    # the mesh size.
+    if "ref_faces" not in meta:
+        raise ValueError(f"{path} has no reference faces for the synapses; regenerate it with make_geometry.py")
+    ref_faces, ref_cell = meta["ref_faces"].reshape(-1, 3, 3), meta["ref_cell"]
     synapse_centers = {}  # cell index -> (n_syn, 3) centers
+    max_snap = 0.0
     for i, n_syn in enumerate(synapses_per_cell):
         if n_syn == 0:
             continue
+        anchors = _sample_triangles(ref_faces[ref_cell == i], n_syn, rng)
         vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
-        picked = cf.select_directional_points(vertices, n_syn, rng, exclude_outer_box,
-                                              center=_volume_centroid(tissue_mesh, cell_names[i]))
+        dist = np.linalg.norm(anchors[:, None] - vertices[None], axis=2)
+        dist[:, exclude_outer_box(vertices)] = np.inf
+        picked = []
+        for row in dist:
+            row[picked] = np.inf
+            picked.append(int(np.argmin(row)))
+            max_snap = max(max_snap, row[picked[-1]])
         synapse_centers[i] = vertices[picked]
     all_centers = (np.concatenate(list(synapse_centers.values()))
                    if synapse_centers else np.empty((0, 3)))
     np.save(result_dir / "synapse_centers.npy", all_centers)
-    print(f"  Synapse centers on membrane vertices -> {result_dir / 'synapse_centers.npy'}")
+    print(f"  Synapse centers on membrane vertices, max snap {max_snap:.3f} um "
+          f"-> {result_dir / 'synapse_centers.npy'}")
 
     flux_centers = synapse_centers
     if syn.active is not None:

@@ -21,6 +21,10 @@ buffer and mechanics. Run from the repository root.
    ratios of one seed have the same cells, only eroded by different gaps. The meshes
    are not in git; regenerate them with the command above.
 
+   `--cells tube` makes tube-shaped (dendrite-like) cells instead, written as
+   `tube_s{seed}_ecs{NN}.vtu` (defaults `--d 2 --r 0.25 --h 0.25`; about 100 cells and
+   450k tets in the default box, 7 min per mesh).
+
 2. Run simulations. `simulation.py` runs one config, `sweep.py` runs a sweep config
    from `configs/`:
 
@@ -28,8 +32,8 @@ buffer and mechanics. Run from the repository root.
    uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name ecs_ratio_sweep cluster=janelia
    ```
 
-   A run loads the mesh named by `geometry.mesh_dir`, `geometry.seed` and
-   `geometry.ecs_ratio`. If that mesh is missing, the run fails; generate it first
+   A run loads the mesh named by `geometry.mesh_dir`, `geometry.cells` (`round` or
+   `tube`), `geometry.seed` and `geometry.ecs_ratio`. If that mesh is missing, the run fails; generate it first
    (step 1). Each run writes `geometry.json` with the mesh file, the measured ECS
    fraction and `w`, next to its `config.yaml`.
 
@@ -42,9 +46,10 @@ buffer and mechanics. Run from the repository root.
   Voronoi geometry, `ecs_ratio` was a cell-shrink parameter: 0.04, 0.1 and 0.19
   gave about 10, 17 and 25 % ECS.
 - `seed` (top level) seeds the synapse placement; `geometry.seed` seeds the cells.
-- Each synapse sits on the membrane vertex closest to a random direction from the
-  cell's volume centroid. For one `seed`, synapse index `i` is therefore the same
-  membrane spot at every ECS ratio, up to the mesh size.
+- Each synapse sits on the free membrane vertex closest to an anchor drawn uniformly
+  by area on the cell's raw Voronoi faces. The mesh stores these faces, and they do
+  not depend on the gap `w`. For one `seed`, synapse index `i` is therefore the same
+  membrane spot at every ECS ratio, up to the gap and the mesh size.
 - The synapse density is 1 per um^3 (`synapse.n_synapses` = 1372 for the default
   box), and the fraction `synapse.f_active` of them carry flux.
 - The convergence sweep uses its own 6 x 6 x 1 um meshes in `data/tissue_6x6x1`
