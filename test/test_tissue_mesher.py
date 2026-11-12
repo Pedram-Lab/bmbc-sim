@@ -76,3 +76,12 @@ def test_tube_cells_mesh():
     G, T, tags = tm.surface_mesh(cells, box, 0.25, workers=8)   # ~1 CPU min per tube cell
     mesh = tm.volume_mesh(G, T, tags, len(cells))
     assert _volume(mesh, "ecs") / box.prod() == pytest.approx(tm.surface_ecs_fraction(G, T, tags, box), abs=1e-9)
+
+
+def test_merge_outside_edge_point_past_corner():
+    """A point on the box edge x+/z- that lies past the y- wall, without a corner neighbour, becomes the corner."""
+    B = np.array([14.0, 14.0, 7.0])
+    P = np.array([[14.0, -0.015, 0.0], [14.0, 0.3, 0.2], [13.8, 0.2, 0.0]])
+    mask = np.array([0b010010, 0b000010, 0b010000])
+    P, F, mask = tm._merge_outside(P, np.array([[0, 1, 2]]), mask, B)
+    assert np.array_equal(P[0], [14.0, 0.0, 0.0]) and mask[0] == 0b010110 and len(F) == 1

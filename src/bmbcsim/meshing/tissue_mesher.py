@@ -55,6 +55,12 @@ def _merge_outside(P, F, mask, B, tol=1e-9):
         j = out[0]
         nb = np.unique(F[np.any(F == j, axis=1)])
         corners = [i for i in nb if i != j and bin(mask[i]).count("1") > 1]
+        if not corners and bin(mask[j]).count("1") > 1:    # a box-edge point past the corner: it becomes the corner
+            for k in range(6):
+                a, val = k // 2, (0.0 if k % 2 == 0 else B[k // 2])
+                if (P[j, a] < -tol) if k % 2 == 0 else (P[j, a] > B[a] + tol):
+                    P[j, a] = val; mask[j] |= 1 << k
+            continue
         if not corners:
             raise RuntimeError(f"membrane point outside the box without a corner neighbour: {P[j]}")
         i = min(corners, key=lambda c: np.linalg.norm(P[c] - P[j]))
@@ -447,7 +453,8 @@ def surface_mesh(cells, box, h, workers=8):
         owner.update({i + off: kc for i in np.nonzero(mask)[0]})
 
     # box edges: corners and membrane points on the edge, gaps filled at spacing ~h
-    corner_id, chain = {}, {}
+    corner_id = {tuple(G[g]): g for g, m, _ in border_pts if bin(m).count("1") == 3}  # membrane point on a corner
+    chain = {}
     for c in range(3):
         ea, eb = [x for x in range(3) if x != c]
         for va in (0.0, B[ea]):
@@ -459,8 +466,7 @@ def surface_mesh(cells, box, h, workers=8):
                     if tuple(X) not in corner_id:
                         corner_id[tuple(X)] = len(G); G.append(X)
                     pts.append((t, corner_id[tuple(X)]))
-                pts += [(G[g][c], g) for g, m, _ in border_pts if (m & bits) == bits]
-                pts.sort()
+                pts = sorted(set(pts + [(G[g][c], g) for g, m, _ in border_pts if (m & bits) == bits]))
                 ids = [pts[0][1]]
                 for (ta, ga), (tb, gb) in zip(pts[:-1], pts[1:]):
                     nfill = max(int(round((tb - ta) / h)), 1)
