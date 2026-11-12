@@ -5,7 +5,8 @@ import pytest
 for module in ("pymeshlab", "triangle", "tetgen"):
     pytest.importorskip(module)
 
-from bmbcsim.geometry.rounded_voronoi import make_cells
+from bmbcsim.geometry.rounded_voronoi import _box_hs, facet_triangles, make_cells
+from bmbcsim.geometry.tube_cells import make_tube_cells
 from bmbcsim.meshing import tissue_mesher as tm
 
 BOX = np.array([6.0, 6.0, 1.0])
@@ -15,7 +16,7 @@ BOX = np.array([6.0, 6.0, 1.0])
 def tissue():
     """Small tissue mesh: 7 rounded Voronoi cells, gap 0.1, in a 6 x 6 x 1 box."""
     cells, ids, _ = make_cells(0.1, 0.5, BOX, seed=0)
-    G, T, tags = tm.surface_mesh(cells, BOX, 0.3, workers=2)
+    G, T, tags = tm.surface_mesh(cells, BOX, 0.3, workers=8)
     return len(cells), ids, tm.surface_ecs_fraction(G, T, tags, BOX), tm.volume_mesh(G, T, tags, len(cells))
 
 
@@ -51,3 +52,36 @@ def test_save_load_round_trip(tissue, tmp_path):
         assert _volume(loaded, name) == pytest.approx(_volume(mesh, name), rel=1e-12)
     for name in set(mesh.GetBoundaries()):
         assert _area(loaded, name) == pytest.approx(_area(mesh, name), rel=1e-12)
+
+
+def _tri_area(tris):
+    return np.linalg.norm(np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]), axis=1).sum() / 2
+
+
+def test_facet_triangles_cube():
+    V = np.array(np.meshgrid([0, 1], [0, 2], [0, 3], indexing="ij")).reshape(3, -1).T.astype(float)
+    tris, k = facet_triangles(V, _box_hs(np.zeros(3), [1, 2, 3]))
+    for j, area in enumerate([6, 6, 3, 3, 2, 2]):
+        assert _tri_area(tris[k == j]) == pytest.approx(area)
+
+
+def test_tube_cells_mesh():
+    """Tube cells in a 4 x 4 x 1 box mesh, and their reference faces do not depend on w."""
+    box = np.array([4.0, 4.0, 1.0])
+    cells, ids, info = make_tube_cells(0.1, 0.25, box, seed=2)
+    _, ids2, info2 = make_tube_cells(0.2, 0.25, box, seed=2, n_r=0, n_shift=0)  # no r_k / shift search: faster
+    assert ids == ids2 and len(cells) > 3
+    for f, f2 in zip(info["faces"], info2["faces"]):
+        assert len(f) and np.array_equal(f, f2)
+    G, T, tags = tm.surface_mesh(cells, box, 0.25, workers=8)
+    mesh = tm.volume_mesh(G, T, tags, len(cells))
+    assert _volume(mesh, "ecs") / box.prod() == pytest.approx(tm.surface_ecs_fraction(G, T, tags, box), abs=1e-9)
+
+
+def test_merge_outside_edge_point_past_corner():
+    """A point on the box edge x+/z- that lies past the y- wall, without a corner neighbour, becomes the corner."""
+    B = np.array([14.0, 14.0, 7.0])
+    P = np.array([[14.0, -0.015, 0.0], [14.0, 0.3, 0.2], [13.8, 0.2, 0.0]])
+    mask = np.array([0b010010, 0b000010, 0b010000])
+    P, F, mask = tm._merge_outside(P, np.array([[0, 1, 2]]), mask, B)
+    assert np.array_equal(P[0], [14.0, 0.0, 0.0]) and mask[0] == 0b010110 and len(F) == 1

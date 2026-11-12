@@ -30,6 +30,35 @@ def voronoi_seeds(box, d, seed, n_lloyd=20):
     return pts
 
 
+def _box_hs(lo, hi):
+    """Halfspaces (6, 4) of the box [lo, hi], rows (n, c) with n . x + c <= 0."""
+    return np.array([[-1, 0, 0, lo[0]], [1, 0, 0, -hi[0]], [0, -1, 0, lo[1]], [0, 1, 0, -hi[1]],
+                     [0, 0, -1, lo[2]], [0, 0, 1, -hi[2]]], float)
+
+
+def _chebyshev(hs):
+    """Chebyshev centre and radius of {x: hs[:, :3] x + hs[:, 3] <= 0}, or None if (nearly) empty."""
+    A, b = hs[:, :3], -hs[:, 3]
+    res = linprog([0, 0, 0, -1], A_ub=np.c_[A, np.linalg.norm(A, axis=1)], b_ub=b,
+                  bounds=[(None, None)] * 3 + [(0, None)])
+    return (res.x[:3], res.x[3]) if res.success and res.x[3] > 1e-3 else None
+
+
+def facet_triangles(V, hs):
+    """Triangulated boundary of the convex polytope with vertices V, cut out by the halfspaces hs.
+
+    Args:
+        V: Vertices (N, 3) of the polytope {x: hs[:, :3] x + hs[:, 3] <= 0}.
+        hs: Halfspaces (K, 4) with unit normals.
+
+    Returns:
+        (tris, k): the triangles (M, 3, 3) and the halfspace (row of hs) each one lies on.
+    """
+    tris = V[ConvexHull(V).simplices]
+    c = tris.mean(1)
+    return tris, np.argmin(np.abs(c @ hs[:, :3].T + hs[:, 3]), axis=1)
+
+
 def closest_on_triangles(X, A, B, C, chunk=4096):
     """Closest point to each X (N, 3) on the union of the triangles (A, B, C), each (M, 3).
 
@@ -149,13 +178,14 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
 
     Returns:
         (cells, ids, info): the `RoundedPolytope` cells, the seed index of each cell, and a dict with the number
-        of shifted cells and of cells that still miss the `delta` margin (`n_bad`).
+        of shifted cells, of cells that still miss the `delta` margin (`n_bad`), and `faces`: per cell, the
+        triangles (M, 3, 3) of its raw Voronoi faces inside the box, a reference surface that does not depend
+        on w (synapse placement).
     """
     B = np.asarray(box, float)
     pts = voronoi_seeds(B, d, seed)
     vor = Voronoi(pts)
-    box_hs = np.array([[-1, 0, 0, 0], [1, 0, 0, -B[0]], [0, -1, 0, 0], [0, 1, 0, -B[1]], [0, 0, -1, 0],
-                       [0, 0, 1, -B[2]]], float)
+    box_hs = _box_hs(np.zeros(3), B)
     cands = r * np.r_[1.0, np.linspace(*r_range, n_r)]
     cands = cands[np.argsort(np.abs(cands - r), kind="stable")]
 
@@ -170,15 +200,14 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         e = np.array([c.extent(h[:3], h[3]) for h in box_hs])    # > 0: crosses the wall
         return min(np.abs(e).min(), _edge_margin(c, B))
 
-    cells, ids, n_bad, n_shifted = [], [], 0, 0
+    cells, ids, faces, n_bad, n_shifted = [], [], [], 0, 0
     for i, p in enumerate(pts):
         hs_in = np.vstack([halfspaces(i, 0.0), box_hs])
-        A_, b_ = hs_in[:, :3], -hs_in[:, 3]                        # Chebyshev centre: an interior point
-        res = linprog([0, 0, 0, -1], A_ub=np.c_[A_, np.linalg.norm(A_, axis=1)], b_ub=b_,
-                      bounds=[(None, None)] * 3 + [(0, None)])
-        if not res.success or res.x[3] < 1e-3:
+        cc = _chebyshev(hs_in)
+        if cc is None:
             continue
-        if ConvexHull(HalfspaceIntersection(hs_in, res.x[:3]).intersections).volume < v_drop:
+        V = HalfspaceIntersection(hs_in, cc[0]).intersections
+        if ConvexHull(V).volume < v_drop:
             continue
         best = None
         for rk in cands:
@@ -213,4 +242,6 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         best[1].max_offset = 0.2 * w   # two neighbours (gap >= w/2 after shifts) never cross after the offset
         cells.append(best[1])
         ids.append(i)
-    return cells, ids, dict(n_bad=n_bad, n_shifted=n_shifted)
+        tris, k = facet_triangles(V, hs_in)
+        faces.append(tris[k < len(hs_in) - 6])    # not on the box walls
+    return cells, ids, dict(n_bad=n_bad, n_shifted=n_shifted, faces=faces)
