@@ -207,7 +207,8 @@ def run(cfg: Config) -> None:
     print(f"Loading geometry {path}...")
     tissue_mesh, meta = load_tissue_mesh(path)
     with open(result_dir / "geometry.json", "w") as f:
-        json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()}}, f, indent=1)
+        json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()
+                                    if not k.startswith("ref_")}}, f, indent=1)
     n_cells = len(tissue_mesh.GetMaterials()) - 1
     coords = np.array(tissue_mesh.ngmesh.Coordinates())
     min_box, max_box = coords.min(axis=0), coords.max(axis=0)
