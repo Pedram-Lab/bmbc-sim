@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Solitary-synapse reference at ecs_ratio 0.25 (single_reference_sweep.yaml at 0.1): no
 # buffer, one active synapse per run. footprint.py on these runs gives the buffer width
 # for single_buffer_ecs25.yaml. 4 runs.

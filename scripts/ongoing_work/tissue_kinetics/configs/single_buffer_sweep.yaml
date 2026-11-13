@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Dose-response study, step 4/5: solitary synapse, buffer placement. One active synapse
 # per run (one of the 4 evaluation synapses), the same total amount of buffer placed
 # uniformly, on the active synapse (on-target) or on a neighbour ~3 um away

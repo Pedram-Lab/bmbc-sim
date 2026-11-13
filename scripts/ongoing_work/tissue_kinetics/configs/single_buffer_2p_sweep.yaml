@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # single_buffer_sweep with 2 action potentials 10 ms apart. The 1 mM uniform/on/off
 # placements at sigma 2 um are in fewap_buffer_sweep (the 2-AP footprint is 1.3-1.8 um,
 # sigma kept at 2 um for comparability); reference: fewap_reference_sweep.

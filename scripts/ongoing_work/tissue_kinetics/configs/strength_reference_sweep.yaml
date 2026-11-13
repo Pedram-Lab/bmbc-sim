@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Stimulus strength at 5 action potentials: no-buffer references with the channel current at
 # 0.2/0.4/0.6/0.8/2.0 x the default 0.5 pA (default protocol, pulses 10 ms apart from 100 ms,
 # 0.5 s end), all synapses and the 4 solitary targets. Against ap_count_reference_sweep this
