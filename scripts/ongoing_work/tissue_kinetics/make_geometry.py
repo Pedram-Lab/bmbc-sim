@@ -25,7 +25,7 @@ from bmbcsim.geometry.tube_cells import make_tube_cells
 from bmbcsim.logging import logger
 from bmbcsim.meshing import netgen_to_pyvista
 from bmbcsim.meshing import tissue_mesher as tm
-from bmbcsim.meshing.tissue_io import save_tissue_mesh
+from bmbcsim.meshing.tissue_io import load_tissue_mesh, save_tissue_mesh
 
 
 DEFAULTS = {"round": dict(d=4.0, r=0.5, h=0.3, w_bracket=[0.03, 0.5]),
@@ -45,6 +45,30 @@ def geometry_file(mesh_dir, seed, ecs_ratio):
     return os.path.join(mesh_dir, f"tissue_s{seed}_ecs{ecs_percent(ecs_ratio):02d}.vtu")
 
 
+def save_geometry(path, mesh, cell_set, **meta):
+    """Write the mesh, `meta` and the cell set's labels and reference faces (see `load_geometry`)."""
+    faces = cell_set.faces
+    save_tissue_mesh(path, mesh, cell_labels=cell_set.labels, ref_faces=np.concatenate(faces).reshape(-1, 9),
+                     ref_cell=np.repeat(np.arange(len(faces)), [len(f) for f in faces]), **meta)
+
+
+def load_geometry(mesh_dir, seed, ecs_ratio):
+    """The mesh for (mesh_dir, seed, ecs_ratio) written by `make_geometry`.
+
+    Returns:
+        (path, mesh, meta, faces): the metadata (`ecs_fraction`, `w`, `box`, ...) and per cell the triangles
+        (M, 3, 3) of its raw Voronoi faces, which do not depend on w.
+    """
+    path = geometry_file(mesh_dir, seed, ecs_ratio)
+    mesh, meta = load_tissue_mesh(path)
+    if "ref_faces" not in meta:
+        raise ValueError(f"{path} has no reference faces; regenerate it with make_geometry.py")
+    tris = np.reshape(meta.pop("ref_faces"), (-1, 3, 3))
+    cell = np.atleast_1d(meta.pop("ref_cell"))
+    faces = [tris[cell == k] for k in range(len(mesh.GetMaterials()) - 1)]
+    return path, mesh, meta, faces
+
+
 def make_geometry(seed, ecs_ratio, args, pool):
     """Fit w for (seed, ecs_ratio), mesh, and write the mesh file. Returns the cell labels."""
     box = np.array(args.box, float)
@@ -61,11 +85,8 @@ def make_geometry(seed, ecs_ratio, args, pool):
                 f"0.1 % quantile {np.quantile(q, 1e-3):.3f}, median {np.median(q):.3f}")
 
     path = geometry_file(args.out, seed, ecs_ratio)
-    faces = cs.faces
-    save_tissue_mesh(path, mesh, ecs_ratio=ecs_ratio, ecs_fraction=alpha_mesh, w=w, seed=seed, box=box,
-                     cell_diam=args.d, rounding=args.r, mesh_size=args.h, cell_labels=cs.labels,
-                     ref_faces=np.concatenate(faces).reshape(-1, 9),
-                     ref_cell=np.repeat(np.arange(len(faces)), [len(f) for f in faces]))
+    save_geometry(path, mesh, cs, ecs_ratio=ecs_ratio, ecs_fraction=alpha_mesh, w=w, seed=seed, box=box,
+                  cell_diam=args.d, rounding=args.r, mesh_size=args.h)
     logger.info(f"-> {path}")
     return cs.labels
 

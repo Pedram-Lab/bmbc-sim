@@ -49,7 +49,7 @@ buffer and mechanics. Run from the repository root.
   by area on the cell's raw Voronoi faces. The mesh stores these faces, and they do
   not depend on the gap `w`. For one `seed`, synapse index `i` is therefore the same
   membrane spot at every ECS ratio, up to the gap and the mesh size.
-- The synapse density is 1 per um^3 (`synapse.n_synapses` = 1372 for the default
-  box), and the fraction `synapse.f_active` of them carry flux.
+- The synapse density is 1 per um^3 (`synapse.synapse_density`; 1372 synapses in the
+  default box), and the fraction `synapse.f_active` of them carry flux.
 - The convergence sweep uses its own 6 x 6 x 1 um meshes in `data/tissue_6x6x1`
   (see the command in `configs/convergence_sweep.yaml`).

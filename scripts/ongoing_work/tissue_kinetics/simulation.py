@@ -19,10 +19,10 @@ import ngsolve as ngs
 from pydantic import field_validator
 
 import bmbcsim
-from bmbcsim.meshing.tissue_io import WALLS, load_tissue_mesh, tissue_names
+from bmbcsim.meshing.tissue_io import WALLS, tissue_names
 from bmbcsim.simulation import transport
 from bmbcsim.simulation import coefficient_fields as cf
-from make_geometry import ecs_percent, geometry_file
+from make_geometry import ecs_percent, load_geometry
 from bmbcsim.config import (
     SimulationConfig,
     ConfigGroup,
@@ -70,7 +70,8 @@ class Diffusion(ConfigGroup):
 class Synapse(ConfigGroup):
     """Distributed NMDAR synapse patches (Ca2+ sink)."""
 
-    n_synapses: int = 1372   # 1 per um^3 of the 14 x 14 x 7 box, f_active of them carry flux
+    # Synapses per box volume (1372 in the 14 x 14 x 7 um box); f_active of them carry flux
+    synapse_density: Quantity("1 / um3") = "1 / um3"
     n_channels_per_synapse: int = 35
     synapse_diameter: Quantity("um") = "0.25 um"
     f_active: float = 0.15
@@ -210,16 +211,13 @@ def run(cfg: Config) -> None:
     print(f"Results and config -> {result_dir}")
 
     # --- Load the tissue mesh (make_geometry.py) ---
-    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio)
-    print(f"Loading geometry {path}...")
-    tissue_mesh, meta = load_tissue_mesh(path)
+    path, tissue_mesh, meta, ref_faces = load_geometry(geom.mesh_dir, geom.seed, geom.ecs_ratio)
+    print(f"Loaded geometry {path}")
     with open(result_dir / "geometry.json", "w") as f:
-        json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()
-                                    if not k.startswith("ref_")}}, f, indent=1)
+        json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()}}, f, indent=1)
     cell_names, bnd_names = tissue_names(tissue_mesh)
     n_cells = len(cell_names)
-    coords = np.array(tissue_mesh.ngmesh.Coordinates())
-    min_box, max_box = coords.min(axis=0), coords.max(axis=0)
+    min_box, max_box = np.zeros(3), np.asarray(meta["box"], dtype=float)   # the mesh spans [0, box]
     print(f"  {n_cells} cells in a {' x '.join(f'{s:g}' for s in max_box - min_box)} um box, "
           f"ECS fraction {meta['ecs_fraction']:.4f} (target {meta['ecs_ratio']}, gap w = {meta['w']:.4f} um)")
     for _ in range(geom.n_refine):
@@ -283,10 +281,11 @@ def run(cfg: Config) -> None:
 
     # Active synapses, distributed randomly (but reproducibly) across cells
     rng = np.random.default_rng(seed=cfg.seed)
-    base, remainder = divmod(int(syn.n_synapses * syn.f_active), n_cells)
+    n_synapses = round((syn.synapse_density * np.prod(max_box) * u.um**3).decompose().value)
+    base, remainder = divmod(int(n_synapses * syn.f_active), n_cells)
     synapses_per_cell = np.full(n_cells, base)
     synapses_per_cell[rng.choice(n_cells, size=remainder, replace=False)] += 1
-    print(f"  Active synapses: {synapses_per_cell.sum()} (of {syn.n_synapses} total)")
+    print(f"  Active synapses: {synapses_per_cell.sum()} (of {n_synapses} total)")
 
     def nmdar_waveform(t):
         """J(t) = e^(-t/tau1) - e^(-t/tau2), superposition of pulses."""
@@ -320,15 +319,12 @@ def run(cfg: Config) -> None:
     # on a DOF). The cells of one geometry seed are the same at every ecs_ratio, so
     # (seed, synapse index) is the same membrane spot across ratios up to the gap and
     # the mesh size.
-    if "ref_faces" not in meta:
-        raise ValueError(f"{path} has no reference faces for the synapses; regenerate it with make_geometry.py")
-    ref_faces, ref_cell = meta["ref_faces"].reshape(-1, 3, 3), meta["ref_cell"]
     synapse_centers = {}  # cell index -> (n_syn, 3) centers
     max_snap = 0.0
     for i, n_syn in enumerate(synapses_per_cell):
         if n_syn == 0:
             continue
-        anchors = _sample_triangles(ref_faces[ref_cell == i], n_syn, rng)
+        anchors = _sample_triangles(ref_faces[i], n_syn, rng)
         vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
         dist = np.linalg.norm(anchors[:, None] - vertices[None], axis=2)
         dist[:, exclude_outer_box(vertices)] = np.inf
