@@ -60,8 +60,8 @@ def make_geometry(seed, ecs_ratio, args):
     for it in range(args.max_iter):
         w = (lo + hi) / 2
         cs = make(w, args.r, box, d=args.d, seed=seed)
-        G, T, tags = tm.surface_mesh(cs.cells, box, args.h, cs.max_offset, workers=args.workers)
-        alpha = tm.surface_ecs_fraction(G, T, tags, box)
+        surf = tm.surface_mesh(cs.cells, box, args.h, cs.max_offset, workers=args.workers)
+        alpha = surf.ecs_fraction(box)
         logger.info(f"seed {seed}, target {ecs_ratio}: w = {w:.5f} -> ECS fraction {alpha:.4f}")
         if abs(alpha - ecs_ratio) <= args.tol:
             break
@@ -70,7 +70,7 @@ def make_geometry(seed, ecs_ratio, args):
         raise RuntimeError(f"seed {seed}: no w in {args.w_bracket} gives ECS fraction {ecs_ratio} +- {args.tol} "
                            f"after {args.max_iter} bisection steps (last: w = {w:.5f}, {alpha:.4f})")
 
-    mesh = tm.volume_mesh(G, T, tags, len(cs.cells))
+    mesh = tm.volume_mesh(surf)
     alpha_mesh = ngs.Integrate(1, mesh, definedon=mesh.Materials("ecs")) / box.prod()
     if abs(alpha_mesh - ecs_ratio) > args.tol:      # only a merged sealed ECS pocket changes it
         logger.warning(f"seed {seed}: mesh ECS fraction {alpha_mesh:.4f} misses the target {ecs_ratio}")

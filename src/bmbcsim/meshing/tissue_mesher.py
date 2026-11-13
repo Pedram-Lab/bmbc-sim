@@ -14,6 +14,7 @@ file I/O of tissue meshes are in `bmbcsim.meshing.tissue_io`. Meshing needs the 
 triangle, tetgen).
 """
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
@@ -26,6 +27,10 @@ from scipy.sparse.csgraph import connected_components
 from bmbcsim.logging import logger
 from bmbcsim.meshing.tissue_io import (CELL0, ECS, OUTSIDE, WALLS, _face_key, box_walls, membrane_name,
                                        tissue_mesh_from_labels)
+
+
+class MeshingError(RuntimeError):
+    """The mesher could not mesh this geometry (a retry with other mesh parameters may succeed)."""
 
 
 class Cell(Protocol):
@@ -424,89 +429,128 @@ def membrane_robust(cell, box, h, max_offset=np.inf,
 
 # --- walls and closed surface -------------------------------------------------------------------------------------
 
-def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
-    """Closed multi-domain surface mesh of the cells in the box.
+@dataclass
+class SurfaceMesh:
+    """Closed multi-domain surface mesh; each triangle's normal points out of domain `domin` into `domout`.
 
-    Domain numbers: see `bmbcsim.meshing.tissue_io.CELL0`. Each membrane is corrected outward for the
-    volume lost to faceting, by at most `max_offset`, which keeps neighbouring membranes apart (see
-    `bmbcsim.geometry.cells.CellSet`).
-
-    Returns:
-        (points, triangles, tags): tags[t] = (domin, domout, name); each triangle's normal points out of domin.
+    Domain numbers: see `bmbcsim.meshing.tissue_io.CELL0`.
     """
-    import triangle as tr
-    t0 = time.time()
-    B = np.asarray(box, float)
-    if workers > 1:
-        import multiprocessing
-        with multiprocessing.get_context("spawn").Pool(workers) as pool:
-            mems = pool.starmap(membrane_robust, [(c, B, h, max_offset) for c in cells])
-    else:
-        mems = [membrane_robust(c, B, h, max_offset) for c in cells]
-    t_mem = time.time() - t0
+    points: np.ndarray   # (N, 3)
+    tris: np.ndarray     # (M, 3)
+    domin: np.ndarray    # (M,)
+    domout: np.ndarray   # (M,)
 
-    G, tris, tags = [], [], []
-    border_pts = []                   # (point id, wall mask, cell)
-    outline_dir = {}                  # membrane outline edge (sorted) -> (start, end) in membrane orientation
-    owner = {}                        # membrane border point -> cell
-    seg_by_wall = [[] for _ in range(6)]
-    for kc, (P, F, mask, _) in enumerate(mems):
-        off = len(G)
-        G += list(P)
-        tris.append(F + off); tags += [(CELL0 + kc, ECS, membrane_name(kc))] * len(F)
-        E, cnt = _edges(F)
-        bnd = set(map(tuple, E[cnt == 1]))
-        for f in F:
-            for x, y in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])):
-                if (min(x, y), max(x, y)) in bnd:
-                    outline_dir[(min(x, y) + off, max(x, y) + off)] = (x + off, y + off)
-        for i, j in E[cnt == 1]:
-            common = mask[i] & mask[j]
-            for k in range(6):
-                if (common >> k) & 1:
-                    seg_by_wall[k].append((i + off, j + off))
-        border_pts += [(i + off, mask[i], kc) for i in np.nonzero(mask)[0]]
-        owner.update({i + off: kc for i in np.nonzero(mask)[0]})
+    @property
+    def n_cells(self):
+        return int(self.domin.max()) - CELL0 + 1
 
-    # box edges: corners and membrane points on the edge, gaps filled at spacing ~h
-    corner_id = {tuple(G[g]): g for g, m, _ in border_pts if bin(m).count("1") == 3}  # membrane point on a corner
-    chain = {}
-    for c in range(3):
-        ea, eb = [x for x in range(3) if x != c]
-        for va in (0.0, B[ea]):
-            for vb in (0.0, B[eb]):
-                bits = (1 << (2 * ea + (va > 0))) | (1 << (2 * eb + (vb > 0)))
-                pts = []
-                for t in (0.0, B[c]):
-                    X = np.zeros(3); X[c] = t; X[ea] = va; X[eb] = vb
-                    if tuple(X) not in corner_id:
-                        corner_id[tuple(X)] = len(G); G.append(X)
-                    pts.append((t, corner_id[tuple(X)]))
-                pts = sorted(set(pts + [(G[g][c], g) for g, m, _ in border_pts if (m & bits) == bits]))
-                ids = [pts[0][1]]
-                for (ta, ga), (tb, gb) in zip(pts[:-1], pts[1:]):
-                    nfill = max(int(round((tb - ta) / h)), 1)
-                    for s in range(1, nfill):
-                        X = np.zeros(3); X[c] = ta + (tb - ta) * s / nfill; X[ea] = va; X[eb] = vb
-                        ids.append(len(G)); G.append(X)
-                    ids.append(gb)
-                chain[(c, ea, eb, va, vb)] = ids
+    def ecs_fraction(self, box):
+        """ECS volume fraction enclosed by the surface (divergence theorem). `volume_mesh` keeps the surface, so
+        the volume mesh has the same ECS fraction unless it merges a sealed ECS pocket into a cell."""
+        X = self.points[self.tris]
+        vol = np.einsum("ij,ij->i", X[:, 0], np.cross(X[:, 1], X[:, 2])) / 6
+        return (vol[self.domin == ECS].sum() - vol[self.domout == ECS].sum()) / np.prod(box)
 
-    # walls: one CDT per wall; new points on membrane outlines are inserted into the membranes below
-    splits = {}                       # membrane outline edge -> new wall points on it (ordered from its first end)
-    used_new = set()
-    n_yy = 0
-    for k, (a, val, side) in enumerate(box_walls(B)):
+    def open_domains(self):
+        """Domains whose boundary is not closed and consistently oriented: {domain: (open edges, duplicate edges)}."""
+        N = len(self.points)
+        bad = {}
+        for d in np.unique(np.r_[self.domin, self.domout]):
+            if d == OUTSIDE:
+                continue
+            T = np.r_[self.tris[self.domin == d], self.tris[self.domout == d][:, [1, 0, 2]]]
+            E = np.r_[T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]
+            fw, bw = np.unique(E[:, 0] * N + E[:, 1]), np.unique(E[:, 1] * N + E[:, 0])
+            n_open = len(np.setxor1d(fw, bw, assume_unique=True))
+            if n_open or len(fw) != len(E):
+                bad[int(d)] = (n_open, len(E) - len(fw))
+        return bad
+
+
+def _edge_keys(E, n):
+    """Integer key of each undirected edge (rows of E) with point ids below n."""
+    E = np.sort(E, axis=1)
+    return E[:, 0] * n + E[:, 1]
+
+
+class _SurfaceBuilder:
+    """Assembles the closed surface: the membranes, points along the box edges, one CDT per wall, and finally the
+    new wall points on membrane outlines inserted into the membranes."""
+
+    def __init__(self, cells, box, h):
+        self.cells, self.B, self.h = cells, np.asarray(box, float), h
+        self.G = []                       # points
+        self.mem_tris = []                # per cell: membrane triangles
+        self.walls = []                   # wall regions: (triangles, domin, domout)
+        self.border_pts = []              # (point id, wall mask, cell)
+        self.outline_dir = {}             # membrane outline edge (sorted) -> (start, end) in membrane orientation
+        self.owner = {}                   # membrane border point -> cell
+        self.seg_by_wall = [[] for _ in range(6)]
+        self.chain = {}                   # box edge -> point ids along it
+        self.splits = {}                  # membrane outline edge -> new wall points on it (ordered from its first end)
+        self.used_new = set()
+        self.n_yy = 0
+
+    def add_membranes(self, mems):
+        for kc, (P, F, mask, _) in enumerate(mems):
+            off = len(self.G)
+            self.G += list(P)
+            self.mem_tris.append(F + off)
+            E, cnt = _edges(F)
+            bnd = E[cnt == 1]
+            D = np.r_[F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]]
+            for x, y in D[np.isin(_edge_keys(D, len(P)), _edge_keys(bnd, len(P)))]:
+                self.outline_dir[(min(x, y) + off, max(x, y) + off)] = (x + off, y + off)
+            for i, j in bnd:
+                common = mask[i] & mask[j]
+                for k in range(6):
+                    if (common >> k) & 1:
+                        self.seg_by_wall[k].append((i + off, j + off))
+            on_wall = np.nonzero(mask)[0]
+            self.border_pts += [(i + off, mask[i], kc) for i in on_wall]
+            self.owner.update({i + off: kc for i in on_wall})
+
+    def add_box_edges(self):
+        """Corners and membrane points on each box edge, gaps filled at spacing ~h."""
+        G, B, h = self.G, self.B, self.h
+        corner_id = {tuple(G[g]): g for g, m, _ in self.border_pts if bin(m).count("1") == 3}  # membrane point
+        for c in range(3):
+            ea, eb = [x for x in range(3) if x != c]
+            for va in (0.0, B[ea]):
+                for vb in (0.0, B[eb]):
+                    bits = (1 << (2 * ea + (va > 0))) | (1 << (2 * eb + (vb > 0)))
+                    pts = []
+                    for t in (0.0, B[c]):
+                        X = np.zeros(3); X[c] = t; X[ea] = va; X[eb] = vb
+                        if tuple(X) not in corner_id:
+                            corner_id[tuple(X)] = len(G); G.append(X)
+                        pts.append((t, corner_id[tuple(X)]))
+                    pts = sorted(set(pts + [(G[g][c], g) for g, m, _ in self.border_pts if (m & bits) == bits]))
+                    ids = [pts[0][1]]
+                    for (ta, ga), (tb, gb) in zip(pts[:-1], pts[1:]):
+                        nfill = max(int(round((tb - ta) / h)), 1)
+                        for s in range(1, nfill):
+                            X = np.zeros(3); X[c] = ta + (tb - ta) * s / nfill; X[ea] = va; X[eb] = vb
+                            ids.append(len(G)); G.append(X)
+                        ids.append(gb)
+                    self.chain[(c, ea, eb, va, vb)] = ids
+
+    def add_wall(self, k, a, val, side, G0):
+        """CDT of wall k with the membrane outlines and box edges as segments, its regions labelled.
+
+        New points on membrane outlines are recorded in `splits`. G0: the points before any wall was added.
+        """
+        import triangle as tr
+        B, h = self.B, self.h
         u, v = [x for x in range(3) if x != a]
-        segs = list(seg_by_wall[k])
+        segs = list(self.seg_by_wall[k])
         n_out = len(segs)
-        for (c, ea, eb, va, vb), ids in chain.items():
+        for (c, ea, eb, va, vb), ids in self.chain.items():
             if (ea == a and va == val) or (eb == a and vb == val):
                 segs += list(zip(ids[:-1], ids[1:]))
-        Gk = np.asarray(G)
         gids = np.unique(np.array(segs).ravel())
-        loc = np.full(len(G), -1); loc[gids] = np.arange(len(gids))
-        V2 = Gk[gids][:, [u, v]]
+        loc = np.full(len(G0), -1); loc[gids] = np.arange(len(gids))
+        V2 = G0[gids][:, [u, v]]
         S = loc[np.array(segs)]
         marks = np.r_[np.arange(n_out) + 2, np.ones(len(segs) - n_out, int)]
         # new points may split membrane outlines (Y), not box edges, which the neighbouring wall shares
@@ -521,14 +565,13 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
             # wall; with YY, an angle bound (q30, even q20) makes Triangle reject the points near outlines and leave
             # large fans (up to 3.6 um^2), so refine by area only
             out = tr.triangulate(dict(vertices=V2, segments=S, segment_markers=marks), f"pYYa{0.6 * h * h:.6f}")
-            n_yy += 1
+            self.n_yy += 1
         W, T = out["vertices"], out["triangles"]
         if len(W) < len(gids) or not np.allclose(W[:len(gids)], V2):
-            raise RuntimeError(f"wall {WALLS[k]}: triangle moved input points")
-        new = np.zeros((len(W) - len(gids), 3)); new[:, a] = val; new[:, u] = W[len(gids):, 0]
-        new[:, v] = W[len(gids):, 1]
-        g_all = np.r_[gids, len(G) + np.arange(len(new))]
-        G += list(new)
+            raise MeshingError(f"wall {WALLS[k]}: triangle moved input points")
+        X3 = np.zeros((len(W), 3)); X3[:, a] = val; X3[:, u] = W[:, 0]; X3[:, v] = W[:, 1]
+        g_all = np.r_[gids, len(self.G) + np.arange(len(W) - len(gids))]
+        self.G += list(X3[len(gids):])
         S_out, m_out = out["segments"], out["segment_markers"].ravel()
         for mk in np.unique(m_out[m_out >= 2]):
             sub = S_out[m_out == mk]
@@ -537,120 +580,131 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
             gi, gj = segs[mk - 2]
             inner = np.setdiff1d(np.unique(sub), loc[[gi, gj]])
             order = np.argsort(np.linalg.norm(W[inner] - V2[loc[gi]], axis=1))
-            splits[(gi, gj)] = list(g_all[inner[order]])
-            if not used_new.isdisjoint(splits[(gi, gj)]):
-                raise RuntimeError(f"wall {WALLS[k]}: membrane outlines cross near {Gk[gi]}")
-            used_new.update(splits[(gi, gj)])
-        X3 = np.zeros((len(W), 3)); X3[:, a] = val; X3[:, u] = W[:, 0]; X3[:, v] = W[:, 1]
+            self.splits[(gi, gj)] = list(g_all[inner[order]])
+            if not self.used_new.isdisjoint(self.splits[(gi, gj)]):
+                raise MeshingError(f"wall {WALLS[k]}: membrane outlines cross near {G0[gi]}")
+            self.used_new.update(self.splits[(gi, gj)])
         # regions: flood fill across edges that are no segments
         Es = np.sort(np.r_[T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]], axis=1)
         tid = np.tile(np.arange(len(T)), 3)
         o = np.lexsort((Es[:, 1], Es[:, 0])); Es, tid = Es[o], tid[o]
         same = np.all(Es[1:] == Es[:-1], axis=1)
-        seg_set = set(map(tuple, np.sort(S_out, axis=1)))
-        free = np.array([tuple(e) not in seg_set for e in Es[:-1][same]], bool)
+        free = ~np.isin(_edge_keys(Es[:-1][same], len(W)), _edge_keys(S_out, len(W)))
         pa, pb = tid[:-1][same][free], tid[1:][same][free]
         nc, comp = connected_components(coo_matrix((np.ones(len(pa)), (pa, pb)), shape=(len(T),) * 2),
                                         directed=False)
-        C = X3[T].mean(1)
-        cand = sorted({kc for _, m, kc in border_pts if (m >> k) & 1})
         nrm = np.cross(X3[T[:, 1]] - X3[T[:, 0]], X3[T[:, 2]] - X3[T[:, 0]])[:, a]
         T = np.where((side * nrm < 0)[:, None], T[:, [1, 0, 2]], T)     # normal out of the box
         # side of the membrane outlines: a cell's closed surface runs along an outline edge once in the membrane
         # and once, reversed, in its wall patch (normal out of the box); the ECS wall triangle runs along it forwards
-        seg_mark = {(min(x, y), max(x, y)): mk for (x, y), mk in zip(S_out, m_out) if mk >= 2}
+        outline = m_out >= 2
+        mark_of = dict(zip(_edge_keys(S_out[outline], len(W)), m_out[outline]))
+        De = np.stack([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]], axis=1).reshape(-1, 2)
+        ke = _edge_keys(De, len(W))
+        hit = np.nonzero(np.isin(ke, list(mark_of)))[0]
         side_vote = [set() for _ in range(nc)]      # per region: (cell, inside)
-        for t, f in enumerate(T):
-            for x, y in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])):
-                mk = seg_mark.get((min(x, y), max(x, y)))
-                if mk is None:
-                    continue
-                gi, gj = segs[mk - 2]
-                p0, p1 = outline_dir[(min(gi, gj), max(gi, gj))]
-                side_vote[comp[t]].add((owner[p0], float(np.dot(X3[y] - X3[x], Gk[p1] - Gk[p0])) < 0))
+        for e in hit:
+            x, y = De[e]
+            gi, gj = segs[mark_of[ke[e]] - 2]
+            p0, p1 = self.outline_dir[(min(gi, gj), max(gi, gj))]
+            side_vote[comp[e // 3]].add((self.owner[p0], float(np.dot(X3[y] - X3[x], G0[p1] - G0[p0])) < 0))
+        C = X3[T].mean(1)
+        cand = sorted({kc for _, m, kc in self.border_pts if (m >> k) & 1})
         for ci in range(nc):
             idx = np.nonzero(comp == ci)[0]
             if side_vote[ci]:
                 votes = sorted({kc for kc, inside in side_vote[ci] if inside})
                 if votes and any(not inside for _, inside in side_vote[ci]):
-                    raise RuntimeError(f"wall {WALLS[k]}: region inside and outside of membrane outlines")
+                    raise MeshingError(f"wall {WALLS[k]}: region inside and outside of membrane outlines")
             else:                                   # no outline on the boundary: inside test
-                votes = [kc for kc in cand if np.mean(cells[kc].phi(C[idx]) < 0) > 0.5]
+                votes = [kc for kc in cand if np.mean(self.cells[kc].phi(C[idx]) < 0) > 0.5]
             if len(votes) > 1:
-                raise RuntimeError(f"wall {WALLS[k]}: region claimed by cells {votes}")
-            tris.append(g_all[T[idx]])
-            tags += [(CELL0 + votes[0], OUTSIDE, "cell_boundary") if votes else (ECS, OUTSIDE, WALLS[k])] * len(idx)
+                raise MeshingError(f"wall {WALLS[k]}: region claimed by cells {votes}")
+            self.walls.append((g_all[T[idx]], CELL0 + votes[0], OUTSIDE) if votes else (g_all[T[idx]], ECS, OUTSIDE))
 
-    # insert the new wall points on membrane outlines into the membrane triangles (fan from the opposite point)
-    M = [list(f) for f in np.concatenate(tris[:len(cells)])]
-    nm = len(M)
-    mtags = tags[:nm]
-    edge_tri = {}
+    def insert_splits(self):
+        """Insert the new wall points on membrane outlines into the membrane triangles (fan from the opposite point).
 
-    def register(t):
-        f = M[t]
-        for x in range(3):
-            edge_tri[(min(f[x], f[(x + 1) % 3]), max(f[x], f[(x + 1) % 3]))] = t
+        Returns:
+            The membrane triangles and the cell of each.
+        """
+        M = [list(f) for f in np.concatenate(self.mem_tris)]
+        cell_of = list(np.repeat(np.arange(len(self.mem_tris)), [len(F) for F in self.mem_tris]))
+        edge_tri = {}
 
-    for t in range(nm):
-        register(t)
-    for (gi, gj), pts in splits.items():   # one at a time: a triangle can have two split outline edges
-        t = edge_tri[(min(gi, gj), max(gi, gj))]
-        f = M[t]
-        x = [y for y in range(3) if {f[y], f[(y + 1) % 3]} == {gi, gj}][0]
-        uu, vv, q = f[x], f[(x + 1) % 3], f[(x + 2) % 3]
-        ch = [uu] + (pts if uu == gi else pts[::-1]) + [vv]
-        M[t] = [ch[0], ch[1], q]
-        register(t)
-        for s in range(1, len(ch) - 1):
-            M.append([ch[s], ch[s + 1], q]); mtags.append(mtags[t])
-            register(len(M) - 1)
-    G = np.asarray(G)
-    tris = np.concatenate([np.array(M, np.int64)] + tris[len(cells):])
-    tags = mtags + tags[nm:]
-    bad = check_closed(G, tris, tags)
+        def register(t):
+            f = M[t]
+            for x in range(3):
+                edge_tri[(min(f[x], f[(x + 1) % 3]), max(f[x], f[(x + 1) % 3]))] = t
+
+        for t in range(len(M)):
+            register(t)
+        for (gi, gj), pts in self.splits.items():   # one at a time: a triangle can have two split outline edges
+            t = edge_tri[(min(gi, gj), max(gi, gj))]
+            f = M[t]
+            x = [y for y in range(3) if {f[y], f[(y + 1) % 3]} == {gi, gj}][0]
+            uu, vv, q = f[x], f[(x + 1) % 3], f[(x + 2) % 3]
+            ch = [uu] + (pts if uu == gi else pts[::-1]) + [vv]
+            M[t] = [ch[0], ch[1], q]
+            register(t)
+            for s in range(1, len(ch) - 1):
+                M.append([ch[s], ch[s + 1], q]); cell_of.append(cell_of[t])
+                register(len(M) - 1)
+        return np.array(M, np.int64), np.array(cell_of)
+
+    def build(self, mems):
+        self.add_membranes(mems)
+        self.add_box_edges()
+        G0 = np.asarray(self.G)
+        for k, (a, val, side) in enumerate(box_walls(self.B)):
+            self.add_wall(k, a, val, side, G0)
+        M, cell_of = self.insert_splits()
+        sizes = [len(T) for T, _, _ in self.walls]
+        return SurfaceMesh(np.asarray(self.G), np.concatenate([M] + [T for T, _, _ in self.walls]),
+                           np.r_[CELL0 + cell_of, np.repeat([d for _, d, _ in self.walls], sizes)],
+                           np.r_[np.full(len(M), ECS), np.repeat([d for _, _, d in self.walls], sizes)])
+
+
+def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
+    """Closed multi-domain surface mesh of the cells in the box.
+
+    Each membrane is corrected outward for the volume lost to faceting, by at most `max_offset`, which keeps
+    neighbouring membranes apart (see `bmbcsim.geometry.cells.CellSet`).
+
+    Returns:
+        The `SurfaceMesh`.
+    """
+    t0 = time.time()
+    B = np.asarray(box, float)
+    if workers > 1:
+        import multiprocessing
+        with multiprocessing.get_context("spawn").Pool(workers) as pool:
+            mems = pool.starmap(membrane_robust, [(c, B, h, max_offset) for c in cells])
+    else:
+        mems = [membrane_robust(c, B, h, max_offset) for c in cells]
+    t_mem = time.time() - t0
+    builder = _SurfaceBuilder(cells, B, h)
+    surf = builder.build(mems)
+    bad = surf.open_domains()
     if bad:
-        raise RuntimeError(f"open or inconsistent domain boundaries (domain: open, duplicate edges): {bad}")
-    logger.info(f"surface: {len(cells)} cells, {len(tris)} triangles, {len(G)} points, {n_yy} walls without "
-                f"outline splits, {sum(m[3] for m in mems)} membrane retries (membranes {t_mem:.0f} s, "
-                f"total {time.time() - t0:.0f} s)")
-    return G, tris, tags
-
-
-def check_closed(G, tris, tags):
-    """Domains whose boundary is not closed and consistently oriented: {domain: (open edges, duplicate edges)}."""
-    dom = np.array([(a, b) for a, b, _ in tags])
-    bad = {}
-    for d in np.unique(dom):
-        if d == OUTSIDE:
-            continue
-        T = np.r_[tris[dom[:, 0] == d], tris[dom[:, 1] == d][:, [1, 0, 2]]]
-        E = np.r_[T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]
-        fw = set(map(tuple, E)); bw = set(map(tuple, E[:, ::-1]))
-        if len(fw ^ bw) or len(fw) != len(E):
-            bad[int(d)] = (len(fw ^ bw), len(E) - len(fw))
-    return bad
-
-
-def surface_ecs_fraction(G, tris, tags, box):
-    """ECS volume fraction enclosed by the surface mesh (divergence theorem); TetGen keeps the surface, so this is
-    also the ECS fraction of the volume mesh."""
-    X = G[tris]
-    vol = np.einsum("ij,ij->i", X[:, 0], np.cross(X[:, 1], X[:, 2])) / 6
-    din = np.array([t[0] for t in tags]); dout = np.array([t[1] for t in tags])
-    return (vol[din == ECS].sum() - vol[dout == ECS].sum()) / np.prod(box)
+        raise MeshingError(f"open or inconsistent domain boundaries (domain: open, duplicate edges): {bad}")
+    logger.info(f"surface: {len(cells)} cells, {len(surf.tris)} triangles, {len(surf.points)} points, "
+                f"{builder.n_yy} walls without outline splits, {sum(m[3] for m in mems)} membrane retries "
+                f"(membranes {t_mem:.0f} s, total {time.time() - t0:.0f} s)")
+    return surf
 
 
 # --- volume -------------------------------------------------------------------------------------------------------
 
-def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5):
-    """Tet mesh of a closed surface mesh from `surface_mesh`: TetGen, then netgen optimization of the interior.
+def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5):
+    """Tet mesh of a `SurfaceMesh`: TetGen, then netgen optimization of the interior.
 
     Tets are grouped into connected components across faces that are not surface triangles; each component is
     labelled by the oriented surface triangles around it.
     """
     import tetgen
     t0 = time.time()
+    G, tris, din, dout, n_cells = surface.points, surface.tris, surface.domin, surface.domout, surface.n_cells
     tg = tetgen.TetGen(np.ascontiguousarray(G), np.ascontiguousarray(tris, np.int32))
     nodes, elem, _, _ = tg.tetrahedralize(plc=True, quality=True, nobisect=True,
                                           minratio=minratio, mindihedral=mindihedral, maxvolume=maxvol)
@@ -672,7 +726,6 @@ def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=1
     nrm = np.cross(Y[:, 1] - Y[:, 0], Y[:, 2] - Y[:, 0])
     j0 = np.searchsorted(fk, sk)
     votes = np.zeros((nc, CELL0 + n_cells))
-    din = np.array([t[0] for t in tags]); dout = np.array([t[1] for t in tags])
     for off in (0, 1):
         jj = np.minimum(j0 + off, len(fk) - 1)
         ok = fk[jj] == sk
