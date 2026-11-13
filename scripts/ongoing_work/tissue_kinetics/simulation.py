@@ -16,12 +16,13 @@ from astropy import units as u
 from astropy import constants as const
 
 import ngsolve as ngs
+from pydantic import field_validator
 
 import bmbcsim
 from bmbcsim.meshing.tissue_mesher import load_tissue_mesh
 from bmbcsim.simulation import transport
 from bmbcsim.simulation import coefficient_fields as cf
-from make_geometry import geometry_file
+from make_geometry import ecs_percent, geometry_file
 from bmbcsim.config import (
     SimulationConfig,
     ConfigGroup,
@@ -47,6 +48,12 @@ class Geometry(ConfigGroup):
     # on the *same* geometry, which maxh cannot guarantee once the cell-surface
     # triangulation dominates h. For convergence tests.
     n_refine: int = 0
+
+    @field_validator("ecs_ratio")
+    @classmethod
+    def _whole_percentage(cls, ecs_ratio: float) -> float:
+        ecs_percent(ecs_ratio)   # mesh files are named by it; fail before a sweep submits
+        return ecs_ratio
 
 
 class Diffusion(ConfigGroup):

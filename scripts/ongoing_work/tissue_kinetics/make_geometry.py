@@ -23,12 +23,17 @@ DEFAULTS = {"round": dict(d=4.0, r=0.5, h=0.3, w_bracket=[0.03, 0.5]),
             "tube": dict(d=2.0, r=0.25, h=0.25, w_bracket=[0.03, 0.3])}
 
 
-def geometry_file(mesh_dir, seed, ecs_ratio):
-    """Path of the mesh for this geometry seed and target ECS ratio (a whole percentage)."""
+def ecs_percent(ecs_ratio):
+    """The ECS ratio in percent; a ValueError unless it is a whole percentage."""
     percent = round(100 * ecs_ratio)
     if abs(100 * ecs_ratio - percent) > 1e-6:
         raise ValueError(f"ecs_ratio must be a whole percentage, got {ecs_ratio}")
-    return os.path.join(mesh_dir, f"tissue_s{seed}_ecs{percent:02d}.vtu")
+    return percent
+
+
+def geometry_file(mesh_dir, seed, ecs_ratio):
+    """Path of the mesh for this geometry seed and target ECS ratio (a whole percentage)."""
+    return os.path.join(mesh_dir, f"tissue_s{seed}_ecs{ecs_percent(ecs_ratio):02d}.vtu")
 
 
 def radius_ratio(X):
@@ -106,9 +111,8 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     os.makedirs(args.out, exist_ok=True)
-    for seed in args.seed:
-        for ecs_ratio in args.ecs_ratio:
-            geometry_file(args.out, seed, ecs_ratio)    # fail on a bad ratio before any meshing
+    for ecs_ratio in args.ecs_ratio:
+        ecs_percent(ecs_ratio)    # fail on a bad ratio before any meshing
     for seed in args.seed:
         for ecs_ratio in args.ecs_ratio:
             t0 = time.time()
