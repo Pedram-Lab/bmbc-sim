@@ -33,9 +33,11 @@ def tissue_names(mesh):
     return [cell_name(k) for k in range(n)], [membrane_name(k) for k in range(n)]
 
 
-def _face_key(F, N):
-    F = np.sort(F, axis=1).astype(np.int64)
-    return (F[:, 0] * N + F[:, 1]) * N + F[:, 2]
+def _face_keys(*faces):
+    """Integer key of each triangle (rows of each array): equal for the same three points in any order."""
+    F = np.sort(np.concatenate(faces), axis=1)
+    key = np.unique(F, axis=0, return_inverse=True)[1].ravel()
+    return np.split(key, np.cumsum([len(f) for f in faces])[:-1])
 
 
 def tissue_mesh_from_labels(nodes, tets, cell_id):
@@ -48,14 +50,13 @@ def tissue_mesh_from_labels(nodes, tets, cell_id):
     tets = np.asarray(tets, np.int64).copy()
     treg = np.asarray(cell_id, np.int64) + CELL0     # cell_id -1 = ECS
     lo, hi = nodes.min(0), nodes.max(0)
-    N = len(nodes)
     X = nodes[tets]
     sv = np.einsum("ij,ij->i", np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0]), X[:, 3] - X[:, 0])
     tets[sv > 0] = tets[sv > 0][:, [1, 0, 2, 3]]     # netgen orientation
     faces = np.r_[tets[:, [1, 2, 3]], tets[:, [0, 2, 3]], tets[:, [0, 1, 3]], tets[:, [0, 1, 2]]]
     opp = np.r_[tets[:, 0], tets[:, 1], tets[:, 2], tets[:, 3]]
     freg = np.tile(treg, 4)
-    fk = _face_key(faces, N)
+    fk, = _face_keys(faces)
     o = np.lexsort((freg, fk))
     faces, fk, opp, freg = faces[o], fk[o], opp[o], freg[o]
     pair = np.r_[fk[1:] == fk[:-1], False]

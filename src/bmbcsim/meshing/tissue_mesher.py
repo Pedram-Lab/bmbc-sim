@@ -25,7 +25,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from bmbcsim.logging import logger
-from bmbcsim.meshing.tissue_io import (CELL0, ECS, OUTSIDE, WALLS, _face_key, box_walls, membrane_name,
+from bmbcsim.meshing.tissue_io import (CELL0, ECS, OUTSIDE, WALLS, _face_keys, box_walls, membrane_name,
                                        tissue_mesh_from_labels)
 
 
@@ -80,12 +80,12 @@ def _merge_outside(P, F, mask, B, tol=1e-9):
                     P[j, a] = val; mask[j] |= 1 << k
             continue
         if not corners:
-            raise RuntimeError(f"membrane point outside the box without a corner neighbour: {P[j]}")
+            raise MeshingError(f"membrane point outside the box without a corner neighbour: {P[j]}")
         i = min(corners, key=lambda c: np.linalg.norm(P[c] - P[j]))
         F = F[~(np.any(F == i, axis=1) & np.any(F == j, axis=1))]
         F[F == j] = i
         P, F, mask = _compact(P, F, mask)
-    raise RuntimeError("could not merge the membrane points outside the box")
+    raise MeshingError("could not merge the membrane points outside the box")
 
 
 def _drop_in_wall(P, F, mask):
@@ -289,7 +289,7 @@ def _insert_corners(P, F, mask):
     """Split the triangle at each border edge whose ends share no wall (it cuts across a box edge)."""
     E, cnt = _edges(F)
     if np.any(cnt > 2):
-        raise RuntimeError("non-manifold membrane")
+        raise MeshingError("non-manifold membrane")
     F = [list(f) for f in F]
     tri_of = {}
     for t, f in enumerate(F):
@@ -313,7 +313,7 @@ def _check_outlines(P, F, mask):
     E, cnt = _edges(F)
     inner = E[cnt == 2]
     if np.any(mask[inner[:, 0]] & mask[inner[:, 1]]):
-        raise RuntimeError("inner membrane edge on a wall (membrane touches the wall across a neck)")
+        raise MeshingError("inner membrane edge on a wall (membrane touches the wall across a neck)")
     bnd = E[cnt == 1]
     cr = lambda x, y: x[..., 0] * y[..., 1] - x[..., 1] * y[..., 0]
     for k in range(6):
@@ -331,7 +331,7 @@ def _check_outlines(P, F, mask):
         share = (S[:, None, :, None] == S[None, :, None, :]).any((2, 3))
         hit = (t > 1e-9) & (t < 1 - 1e-9) & (s > 1e-9) & (s < 1 - 1e-9) & ~share & (np.abs(den) > 1e-15)
         if hit.any():
-            raise RuntimeError(f"membrane outline on wall {WALLS[k]} crosses itself")
+            raise MeshingError(f"membrane outline on wall {WALLS[k]} crosses itself")
 
 
 def _split_wall_edges(P, F, mask, cell, B):
@@ -346,7 +346,7 @@ def _split_wall_edges(P, F, mask, cell, B):
         i, j = hit[0]
         m = cell.project(((P[i] + P[j]) / 2)[None])[0]
         if np.any(m < 1e-9) or np.any(m > B - 1e-9):
-            raise RuntimeError("inner membrane edge on a wall: its midpoint projects onto or outside the wall")
+            raise MeshingError("inner membrane edge on a wall: its midpoint projects onto or outside the wall")
         k = len(P)
         P = np.vstack([P, m]); mask = np.r_[mask, 0]
         out = []
@@ -410,7 +410,7 @@ def membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
     if np.sum(s < 0) > len(F) / 2:
         F = F[:, [1, 0, 2]]; s = -s
     if np.any(s <= 0):
-        raise RuntimeError(f"membrane has {np.sum(s <= 0)} flipped triangles")
+        raise MeshingError(f"membrane has {np.sum(s <= 0)} flipped triangles")
     _check_outlines(P, F, mask)
     return P, F, mask
 
@@ -422,9 +422,9 @@ def membrane_robust(cell, box, h, max_offset=np.inf,
     for attempt, (fh, snap) in enumerate(variants):
         try:
             return (*membrane(cell, box, h * fh, max_offset, snap=snap), attempt)
-        except Exception as e:
+        except (MeshingError, ValueError) as e:     # ValueError: a point on a cell's core (cell.project)
             err = e
-    raise RuntimeError(f"membrane failed in all {len(variants)} variants: {err}")
+    raise MeshingError(f"membrane failed in all {len(variants)} variants: {err}")
 
 
 # --- walls and closed surface -------------------------------------------------------------------------------------
@@ -696,11 +696,13 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
 
 # --- volume -------------------------------------------------------------------------------------------------------
 
-def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5):
+def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5, max_pocket=1.0):
     """Tet mesh of a `SurfaceMesh`: TetGen, then netgen optimization of the interior.
 
     Tets are grouped into connected components across faces that are not surface triangles; each component is
-    labelled by the oriented surface triangles around it.
+    labelled by the oriented surface triangles around it. The ECS must be connected, except for sealed pockets
+    (e.g. at a box corner that a cell crosses on all three walls): an ECS component other than the largest one
+    joins the cell around it if its volume is at most `max_pocket`, else this raises.
     """
     import tetgen
     t0 = time.time()
@@ -709,15 +711,13 @@ def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5
     nodes, elem, _, _ = tg.tetrahedralize(plc=True, quality=True, nobisect=True,
                                           minratio=minratio, mindihedral=mindihedral, maxvolume=maxvol)
     if len(nodes) < len(G) or not np.allclose(nodes[:len(G)], G):
-        raise RuntimeError("TetGen moved surface points")
+        raise MeshingError("TetGen moved surface points")
     Tet = elem.astype(np.int64)
-    N = len(nodes)
     faces = np.r_[Tet[:, [1, 2, 3]], Tet[:, [0, 2, 3]], Tet[:, [0, 1, 3]], Tet[:, [0, 1, 2]]]
     opp = np.r_[Tet[:, 0], Tet[:, 1], Tet[:, 2], Tet[:, 3]]
     ft = np.tile(np.arange(len(Tet)), 4)
-    fk = _face_key(faces, N)
+    fk, sk = _face_keys(faces, tris)
     o = np.argsort(fk, kind="stable"); fk, ft, opp = fk[o], ft[o], opp[o]
-    sk = _face_key(tris, N)
     inner = np.nonzero((fk[1:] == fk[:-1]) & ~np.isin(fk[1:], sk))[0]
     nc, comp = connected_components(coo_matrix((np.ones(len(inner)), (ft[inner], ft[inner + 1])),
                                                shape=(len(Tet),) * 2), directed=False)
@@ -733,23 +733,24 @@ def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5
         np.add.at(votes, (comp[ft[jj[ok]]], np.where(side < 0, din, dout)[ok]), 1)
     reg = votes.argmax(1)
     purity = votes.max(1) / np.maximum(votes.sum(1), 1)
-    if np.any(reg == OUTSIDE) or purity.min() < 0.99:
-        raise RuntimeError(f"tet regions: {np.sum(reg == OUTSIDE)} unlabelled components, min purity {purity.min():.3f}")
+    if np.any(reg == OUTSIDE) or purity.min() < 1:       # mixed votes: two domains leak into each other
+        raise MeshingError(f"tet regions: {np.sum(reg == OUTSIDE)} unlabelled components, min purity {purity.min():.3f}")
     ecs = np.nonzero(reg == ECS)[0]
     if len(ecs) > 1:
-        # sealed ECS pockets (e.g. at a box corner that a cell crosses on all three walls) join the cell around them
         X = nodes[Tet]
         vol = np.bincount(comp, np.abs(np.einsum("ij,ij->i", np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0]),
                                                  X[:, 3] - X[:, 0])) / 6, nc)
         pair = (fk[1:] == fk[:-1]) & np.isin(fk[1:], sk)            # the two tets at each interior surface triangle
         ca, cb = comp[ft[:-1][pair]], comp[ft[1:][pair]]
         for c in ecs[np.argsort(vol[ecs])[:-1]]:
+            if vol[c] > max_pocket:
+                raise MeshingError(f"the ECS splits: a separate ECS component of {vol[c]:.3g} um^3")
             nb = np.r_[cb[ca == c], ca[cb == c]]
             reg[c] = np.bincount(reg[nb], minlength=CELL0 + n_cells).argmax()
             logger.warning(f"sealed ECS pocket of {vol[c]:.2g} um^3 added to cell_{reg[c] - CELL0}")
     treg = reg[comp]
     if set(np.unique(treg)) != set(range(ECS, CELL0 + n_cells)):
-        raise RuntimeError("a domain received no tets")
+        raise MeshingError("a domain received no tets")
     t1 = time.time()
     mesh = tissue_mesh_from_labels(nodes, Tet, treg - CELL0)   # keep alive: its ngmesh dies with it
     mesh.ngmesh.OptimizeVolumeMesh(MeshingParameters(optsteps3d=optsteps))
