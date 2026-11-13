@@ -329,8 +329,11 @@ def run(cfg: Config) -> None:
         picked = []
         for row in dist:
             row[picked] = np.inf
-            picked.append(int(np.argmin(row)))
-            max_snap = max(max_snap, row[picked[-1]])
+            j = int(np.argmin(row))
+            if not np.isfinite(row[j]):
+                raise ValueError(f"cell_{i}: {len(picked)} free membrane vertices for {n_syn} synapses")
+            picked.append(j)
+            max_snap = max(max_snap, row[j])
         synapse_centers[i] = vertices[picked]
     all_centers = (np.concatenate(list(synapse_centers.values()))
                    if synapse_centers else np.empty((0, 3)))
