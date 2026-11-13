@@ -227,7 +227,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         the raw Voronoi faces between its pieces and those of other cells.
     """
     B = np.asarray(box, float)
-    rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(1)[0])   # independent of the seeds' stream
+    rng = np.random.default_rng(seed)
     pts = voronoi_seeds(B, d, seed)
 
     def adjacency(pts):

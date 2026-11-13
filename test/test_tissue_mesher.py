@@ -142,7 +142,7 @@ def test_tube_cells_mesh(pool):
     box = np.array([4.0, 4.0, 1.0])
     cs = make_tube_cells(0.1, 0.25, box, seed=2)
     cs2 = make_tube_cells(0.2, 0.25, box, seed=2, n_r=0, n_shift=0)  # no r_k / shift search: faster
-    assert len(cs.cells) == 4 and np.array_equal(cs.labels, cs2.labels)
+    assert len(cs.cells) == 5 and np.array_equal(cs.labels, cs2.labels)
     for f, f2 in zip(cs.faces, cs2.faces):
         assert len(f) and np.array_equal(f, f2)
     surf = tm.surface_mesh(cs.cells, box, 0.25, cs.max_offset, pool)
