@@ -66,11 +66,11 @@ def make_rounded_voronoi_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05,
         cell, sc, shifted = fit
         n_shifted += shifted
         n_bad += any(sc)
-        cell.max_offset = 0.2 * w   # two neighbours (gap >= w/2 after shifts) never cross after the offset
         cells.append(cell)
         ids.append(i)
         tris, k = facet_triangles(V, hs_in)
         faces.append(tris[k < len(hs_in) - 6])    # not on the box walls
     if not cells:
         raise ValueError(f"no cell has a volume of at least {v_drop} in the box")
-    return CellSet(cells, np.array(ids), faces, dict(n_bad=n_bad, n_shifted=n_shifted))
+    # two neighbours (gap >= w/2 after shifts) never cross after the offset
+    return CellSet(cells, np.array(ids), faces, 0.2 * w, dict(n_bad=n_bad, n_shifted=n_shifted))

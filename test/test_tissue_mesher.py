@@ -17,7 +17,7 @@ BOX = np.array([6.0, 6.0, 1.0])
 def tissue():
     """Small tissue mesh: 7 rounded Voronoi cells, gap 0.1, in a 6 x 6 x 1 box."""
     cs = make_rounded_voronoi_cells(0.1, 0.5, BOX, seed=0)
-    G, T, tags = tm.surface_mesh(cs.cells, BOX, 0.3, workers=8)
+    G, T, tags = tm.surface_mesh(cs.cells, BOX, 0.3, cs.max_offset, workers=8)
     alpha = tm.surface_ecs_fraction(G, T, tags, BOX)
     return len(cs.cells), cs.labels, alpha, tm.volume_mesh(G, T, tags, len(cs.cells))
 
@@ -75,7 +75,7 @@ def test_tube_cells_mesh():
     assert np.array_equal(cs.labels, cs2.labels) and len(cs.cells) > 3
     for f, f2 in zip(cs.faces, cs2.faces):
         assert len(f) and np.array_equal(f, f2)
-    G, T, tags = tm.surface_mesh(cs.cells, box, 0.25, workers=8)
+    G, T, tags = tm.surface_mesh(cs.cells, box, 0.25, cs.max_offset, workers=8)
     mesh = tm.volume_mesh(G, T, tags, len(cs.cells))
     assert _volume(mesh, "ecs") / box.prod() == pytest.approx(tm.surface_ecs_fraction(G, T, tags, box), abs=1e-9)
 

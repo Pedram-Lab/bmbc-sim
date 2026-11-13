@@ -19,11 +19,14 @@ class CellSet:
         cells: Objects with the cell interface of `bmbcsim.meshing.tissue_mesher.Cell`.
         labels: A label of each cell that identifies it across w (seed index, or chain component for tubes).
         faces: Per cell, the triangles (M, 3, 3) of its raw Voronoi faces inside the box and off the walls.
+        max_offset: Bound for the mesher's volume correction (secant offset) that keeps neighbouring membranes
+            apart, see `bmbcsim.meshing.tissue_mesher.surface_mesh`.
         stats: Diagnostics of the generator.
     """
     cells: list
     labels: np.ndarray
     faces: list
+    max_offset: float = np.inf
     stats: dict = field(default_factory=dict)
 
 
@@ -140,10 +143,10 @@ class RoundedPolytope:
         return (X @ self.hs[:, :3].T + self.hs[:, 3]).max(1)
 
     def phi(self, X, band=np.inf):
-        """Signed distance (negative inside); exact where the plane bound is below `band`, else that lower bound."""
+        """Signed distance (negative inside); exact below `band`, elsewhere a lower bound of at least `band`."""
         g = self._plane(X)
         d = g.copy()
-        out = (g > 0) & (g < band)
+        out = (g > 0) & (g < band + self.r)
         if out.any():
             d[out] = np.linalg.norm(X[out] - closest_on_triangles(X[out], self.A, self.B, self.C), axis=1)
         return d - self.r

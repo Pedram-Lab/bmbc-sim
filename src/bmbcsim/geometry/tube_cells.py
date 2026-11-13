@@ -83,11 +83,10 @@ def link_chains(pts, nbrs, rng, max_turn=45.0, len_range=(4, 16), min_len=3, noi
 
 
 class UnionCell:
-    """Union of `RoundedPolytope` pieces with a common r; the tissue-mesher cell interface."""
+    """Union of `RoundedPolytope` pieces; the tissue-mesher cell interface."""
 
-    def __init__(self, pieces, max_offset=np.inf):
-        self.pieces, self.max_offset = pieces, max_offset
-        self.r = max(p.r for p in pieces)
+    def __init__(self, pieces):
+        self.pieces = pieces
         self.lo = np.array([p.bounds()[0] for p in pieces])
         self.hi = np.array([p.bounds()[1] for p in pieces])
 
@@ -101,7 +100,7 @@ class UnionCell:
 
     def translated(self, t):
         """The cell translated by t."""
-        return UnionCell([p.translated(t) for p in self.pieces], self.max_offset)
+        return UnionCell([p.translated(t) for p in self.pieces])
 
     def _near(self, X, k, pad):
         return np.all((X > self.lo[k] - pad) & (X < self.hi[k] + pad), axis=1)
@@ -126,7 +125,7 @@ class UnionCell:
 
     def _closest(self, X):
         """Closest surface point and the piece it lies on, for X near the surface."""
-        D = self._phi_all(X, 1.0, band=1.0 + self.r)
+        D = self._phi_all(X, 1.0, band=1.0)
         Q = np.full_like(X, np.nan)
         best = np.full(len(X), np.inf)
         kq = np.full(len(X), -1)
@@ -136,7 +135,7 @@ class UnionCell:
                 continue
             idx = np.nonzero(s)[0]
             q = p.project(X[idx])
-            other = self._phi_all(q, 1e-6, band=self.r)      # only the sign matters
+            other = self._phi_all(q, 1e-6, band=0.0)         # only the sign matters
             other[:, k] = np.inf
             ok = other.min(1) >= -1e-9                                # not inside another piece
             dist = np.linalg.norm(q - X[idx], axis=1)
@@ -147,7 +146,7 @@ class UnionCell:
             k = int(np.argmin(np.where(D[i] > -np.array([p.r for p in self.pieces]), np.abs(D[i]), np.inf)))
             q = self.pieces[k].project(x)
             for _ in range(50):
-                dq = self._phi_all(q, 1e-6, band=self.r)[0]
+                dq = self._phi_all(q, 1e-6, band=0.0)[0]
                 j = int(np.argmin(dq))
                 if dq[j] >= -1e-9:
                     break
@@ -161,7 +160,7 @@ class UnionCell:
     def normal(self, X, blend=0.1):
         """Outward unit normal; near a crease (pieces within `blend` of the nearest) the piece normals are blended."""
         Q, kq = self._closest(X)
-        D = self._phi_all(Q, blend, band=blend + self.r)
+        D = self._phi_all(Q, blend, band=blend)
         r = np.array([p.r for p in self.pieces])
         Wt = np.clip(1 - (D - D.min(1, keepdims=True)) / blend, 0, None)
         Wt[D <= -r + 1e-9] = 0                          # Q inside that piece's core: no normal there
@@ -195,7 +194,7 @@ def wall_defects(cell, B, delta, hg=0.025):
             continue
         X = np.zeros((len(gu) * len(gv), 3)); X[:, a] = val
         X[:, u], X[:, v] = (g.ravel() for g in np.meshgrid(gu, gv, indexing="ij"))
-        f = cell.phi(X, band=cell.r + 2 * delta).reshape(len(gu), len(gv))
+        f = cell.phi(X, band=2 * delta).reshape(len(gu), len(gv))
         n = [label(f < t)[1] for t in (-delta, 0.0, delta)]
         bad += abs(n[0] - n[1]) + abs(n[2] - n[1])
     return bad
@@ -300,7 +299,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     def assemble(members, rk):
         """The cell of pieces rounded by rk (pieces with an empty core left out), or None if all are empty."""
         ok = [p for p in (piece(i, rk) for i in members) if p is not None]
-        return UnionCell(ok, max_offset=0.2 * w) if ok else None
+        return UnionCell(ok) if ok else None
 
     def score(cell):
         return wall_defects(cell, B, delta), max(delta - edge_margin(cell, B), 0.0)
@@ -332,4 +331,4 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     stats = dict(n_seeds=n, n_chains=chain.max() + 1, n_cells=len(cells), n_bad=n_bad, n_shifted=n_shifted,
                  pieces_lost=n_lost, pieces=np.percentile(n_pieces, [0, 25, 50, 75, 100]).tolist(),
                  volume_median=float(np.median(vols)))
-    return CellSet(cells, np.array(ids), faces, stats)
+    return CellSet(cells, np.array(ids), faces, 0.2 * w, stats)   # max_offset: see make_rounded_voronoi_cells

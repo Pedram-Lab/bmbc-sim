@@ -9,8 +9,7 @@ Pipeline (see `surface_mesh` and `volume_mesh`):
 3. Volume: TetGen fills the closed multi-domain surface without changing it, the tets are labelled per domain, and
    netgen optimizes the interior.
 
-A cell is any object with `phi(X, band)`, `project(X)`, `normal(X)`, `bounds()`, `r` and `max_offset`, e.g.
-`bmbcsim.geometry.rounded_voronoi.RoundedPolytope`. Region names: `ecs`, `cell_k`; boundary names: `membrane_k`,
+A cell is any object with the `Cell` interface, e.g. `bmbcsim.geometry.cells.RoundedPolytope`. Region names: `ecs`, `cell_k`; boundary names: `membrane_k`,
 `cell_boundary`, `left`, `right`, `top`, `bottom`, `front`, `back` (x-, x+, y-, y+, z-, z+).
 
 `save_tissue_mesh` / `load_tissue_mesh` store the mesh as a .vtu file with one `cell_id` per tet (-1 = ECS) and
@@ -18,6 +17,7 @@ rebuild the boundary names on load. Meshing needs the `geometry` extra (pymeshla
 does not.
 """
 import time
+from typing import Protocol
 
 import numpy as np
 import ngsolve as ngs
@@ -29,6 +29,23 @@ from scipy.sparse.csgraph import connected_components
 from bmbcsim.logging import logger
 
 WALLS = ["left", "right", "top", "bottom", "front", "back"]  # x-, x+, y-, y+, z-, z+
+
+
+class Cell(Protocol):
+    """A closed cell surface given by an exact signed distance function."""
+
+    def phi(self, X: np.ndarray, band: float = np.inf) -> np.ndarray:
+        """Signed distance (N,) of the points X (N, 3), negative inside; exact below `band`, elsewhere a lower
+        bound of at least `band`."""
+
+    def project(self, X: np.ndarray) -> np.ndarray:
+        """Closest surface points (N, 3)."""
+
+    def normal(self, X: np.ndarray) -> np.ndarray:
+        """Outward unit normals (N, 3) of the surface at the closest points."""
+
+    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """Corners (lo, hi) of a box that contains the cell."""
 
 
 # --- membranes --------------------------------------------------------------------------------------------------
@@ -240,12 +257,12 @@ def _project_border(P, mask, planes, cell):
     return P
 
 
-def _secant_offset(P, F, mask, cell, B, h):
+def _secant_offset(P, F, mask, cell, B, h, max_offset):
     """Move points outward so that the faceted membrane encloses the exact cell volume.
 
     The gap of a triangle to the surface is the mean of -phi at its edge midpoints (exact on average for a
     quadratic surface); each point moves by the area-weighted mean gap of its triangles, at most
-    `cell.max_offset`. Points on walls move within their wall plane(s); no point moves towards a wall.
+    `max_offset`. Points on walls move within their wall plane(s); no point moves towards a wall.
     """
     E = np.r_[F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]]
     gap_t = -cell.phi((P[E[:, 0]] + P[E[:, 1]]) / 2).reshape(3, -1).mean(0)
@@ -253,7 +270,7 @@ def _secant_offset(P, F, mask, cell, B, h):
     area = np.linalg.norm(np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0]), axis=1) / 2
     wsum = np.bincount(F.ravel(), np.repeat(area, 3), len(P))
     gap_v = np.bincount(F.ravel(), np.repeat(area * gap_t, 3), len(P)) / np.maximum(wsum, 1e-30)
-    gap_v = np.clip(gap_v, -cell.max_offset, cell.max_offset)
+    gap_v = np.clip(gap_v, -max_offset, max_offset)
     d = gap_v[:, None] * cell.normal(P)
     for k in range(6):
         a, val, side = k // 2, (0.0 if k % 2 == 0 else B[k // 2]), (-1.0 if k % 2 == 0 else 1.0)
@@ -347,13 +364,14 @@ def _split_wall_edges(P, F, mask, cell, B):
     return P, F, mask
 
 
-def membrane(cell, box, h, iters=10, snap=0.3, collapse=0.3):
+def membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
     """Triangle mesh of one cell's surface inside the box.
 
     Args:
         cell: The cell (see the module docstring).
         box: Box size (3,).
         h: Target edge length.
+        max_offset: Bound for the volume correction (see `surface_mesh`).
         iters: Remeshing iterations.
         snap: Points within snap * h of a wall move onto it before the cut.
         collapse: Border edges shorter than collapse * h are collapsed.
@@ -367,7 +385,7 @@ def membrane(cell, box, h, iters=10, snap=0.3, collapse=0.3):
     lo, hi = cell.bounds()
     lo, hi = lo - 2 * hg, hi + 2 * hg
     img = pv.ImageData(dimensions=np.ceil((hi - lo) / hg).astype(int) + 1, spacing=(hg,) * 3, origin=lo)
-    img.point_data["phi"] = cell.phi(np.asarray(img.points), band=cell.r + 3 * hg)
+    img.point_data["phi"] = cell.phi(np.asarray(img.points), band=3 * hg)
     s = img.contour([0.0], scalars="phi", method="flying_edges").triangulate().clean()
     P, F = _remesh(cell.project(np.asarray(s.points, float)), s.regular_faces, h, iters)  # closed: no border issues
     P, F = _fix_flips(cell.project(P), F, cell)
@@ -387,7 +405,7 @@ def membrane(cell, box, h, iters=10, snap=0.3, collapse=0.3):
     P, F, mask = _drop_in_wall(*_collapse_border(P, F, mask, collapse * h, cell))  # projection can reorder points
     P = _project_border(P, mask, planes, cell)
     P, F, mask = _split_wall_edges(P, F, mask, cell, B)
-    P = _secant_offset(P, F, mask, cell, B, h)
+    P = _secant_offset(P, F, mask, cell, B, h, max_offset)
     s = _orientation(P, F, cell)
     if np.sum(s < 0) > len(F) / 2:
         F = F[:, [1, 0, 2]]; s = -s
@@ -397,12 +415,13 @@ def membrane(cell, box, h, iters=10, snap=0.3, collapse=0.3):
     return P, F, mask
 
 
-def membrane_robust(cell, box, h, variants=((1.0, 0.3), (0.95, 0.3), (1.05, 0.25), (0.9, 0.35), (1.1, 0.2))):
+def membrane_robust(cell, box, h, max_offset=np.inf,
+                    variants=((1.0, 0.3), (0.95, 0.3), (1.05, 0.25), (0.9, 0.35), (1.1, 0.2))):
     """`membrane` with retries at a slightly different h and snap distance. Returns (P, F, mask, attempt)."""
     err = None
     for attempt, (fh, snap) in enumerate(variants):
         try:
-            return (*membrane(cell, box, h * fh, snap=snap), attempt)
+            return (*membrane(cell, box, h * fh, max_offset, snap=snap), attempt)
         except Exception as e:
             err = e
     raise RuntimeError(f"membrane failed in all {len(variants)} variants: {err}")
@@ -410,10 +429,12 @@ def membrane_robust(cell, box, h, variants=((1.0, 0.3), (0.95, 0.3), (1.05, 0.25
 
 # --- walls and closed surface -------------------------------------------------------------------------------------
 
-def surface_mesh(cells, box, h, workers=8):
+def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
     """Closed multi-domain surface mesh of the cells in the box.
 
-    Domain numbers: 0 = outside the box, 1 = ECS, k + 2 = cell k.
+    Domain numbers: 0 = outside the box, 1 = ECS, k + 2 = cell k. Each membrane is corrected outward for the
+    volume lost to faceting, by at most `max_offset`, which keeps neighbouring membranes apart (see
+    `bmbcsim.geometry.cells.CellSet`).
 
     Returns:
         (points, triangles, tags): tags[t] = (domin, domout, name); each triangle's normal points out of domin.
@@ -424,9 +445,9 @@ def surface_mesh(cells, box, h, workers=8):
     if workers > 1:
         import multiprocessing
         with multiprocessing.get_context("spawn").Pool(workers) as pool:
-            mems = pool.starmap(membrane_robust, [(c, B, h) for c in cells])
+            mems = pool.starmap(membrane_robust, [(c, B, h, max_offset) for c in cells])
     else:
-        mems = [membrane_robust(c, B, h) for c in cells]
+        mems = [membrane_robust(c, B, h, max_offset) for c in cells]
     t_mem = time.time() - t0
 
     G, tris, tags = [], [], []

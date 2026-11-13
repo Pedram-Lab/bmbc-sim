@@ -60,7 +60,7 @@ def make_geometry(seed, ecs_ratio, args):
     for it in range(args.max_iter):
         w = (lo + hi) / 2
         cs = make(w, args.r, box, d=args.d, seed=seed)
-        G, T, tags = tm.surface_mesh(cs.cells, box, args.h, workers=args.workers)
+        G, T, tags = tm.surface_mesh(cs.cells, box, args.h, cs.max_offset, workers=args.workers)
         alpha = tm.surface_ecs_fraction(G, T, tags, box)
         logger.info(f"seed {seed}, target {ecs_ratio}: w = {w:.5f} -> ECS fraction {alpha:.4f}")
         if abs(alpha - ecs_ratio) <= args.tol:
