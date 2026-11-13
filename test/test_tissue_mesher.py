@@ -5,7 +5,8 @@ import pytest
 for module in ("pymeshlab", "triangle", "tetgen"):
     pytest.importorskip(module)
 
-from bmbcsim.geometry.rounded_voronoi import _box_hs, facet_triangles, make_cells
+from bmbcsim.geometry.cells import box_halfspaces, facet_triangles
+from bmbcsim.geometry.rounded_voronoi import make_cells
 from bmbcsim.geometry.tube_cells import make_tube_cells
 from bmbcsim.meshing import tissue_mesher as tm
 
@@ -60,7 +61,7 @@ def _tri_area(tris):
 
 def test_facet_triangles_cube():
     V = np.array(np.meshgrid([0, 1], [0, 2], [0, 3], indexing="ij")).reshape(3, -1).T.astype(float)
-    tris, k = facet_triangles(V, _box_hs(np.zeros(3), [1, 2, 3]))
+    tris, k = facet_triangles(V, box_halfspaces(np.zeros(3), [1, 2, 3]))
     for j, area in enumerate([6, 6, 3, 3, 2, 2]):
         assert _tri_area(tris[k == j]) == pytest.approx(area)
 

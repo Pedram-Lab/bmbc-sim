@@ -12,8 +12,8 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import ConvexHull, HalfspaceIntersection, Voronoi, cKDTree
 
-from bmbcsim.geometry.rounded_voronoi import (RoundedPolytope, _box_hs, _chebyshev, _edge_margin, facet_triangles,
-                                              voronoi_seeds)
+from bmbcsim.geometry.cells import (box_halfspaces, chebyshev_center, edge_margin, facet_triangles,
+                                    fit_rounding_and_shift, rounded_polytope, rounding_radii, voronoi_seeds)
 
 
 def link_chains(pts, nbrs, rng, max_turn=45.0, len_range=(4, 16), min_len=3, noise=0.3):
@@ -94,8 +94,14 @@ class UnionCell:
     def bounds(self):
         return self.lo.min(0), self.hi.max(0)
 
-    def extent(self, nrm, off):
-        return max(p.extent(nrm, off) for p in self.pieces)
+    @property
+    def face_normals(self):
+        """Outward normals of all pieces' faces."""
+        return np.vstack([p.face_normals for p in self.pieces])
+
+    def translated(self, t):
+        """The cell translated by t."""
+        return UnionCell([p.translated(t) for p in self.pieces], self.max_offset)
 
     def _near(self, X, k, pad):
         return np.all((X > self.lo[k] - pad) & (X < self.hi[k] + pad), axis=1)
@@ -195,15 +201,6 @@ def wall_defects(cell, B, delta, hg=0.025):
     return bad
 
 
-def shifted(cell, t):
-    """The cell translated by t."""
-    pcs = []
-    for p in cell.pieces:
-        hs = p.hs.copy(); hs[:, 3] -= hs[:, :3] @ t
-        pcs.append(RoundedPolytope(hs, p.p + t, p.r))
-    return UnionCell(pcs, cell.max_offset)
-
-
 def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1.3), n_r=13, n_mid=1,
                     max_shift=0.05, n_shift=100, **chain_kw):
     """Tube cells with gap w inside the box [0, box].
@@ -215,7 +212,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     union has.
 
     Wall crossings (see `wall_defects`) are made robust by one r_k for the whole cell from r * r_range, then by a
-    translation by at most `max_shift`.
+    translation (see `fit_rounding_and_shift`).
 
     `n_mid` extra seeds on each link (same cell) make the tubes smoother and the creases between pieces shallower.
 
@@ -252,8 +249,8 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         chain = np.r_[chain, np.repeat(chain[L[:, 0]], n_mid)]
         vor, nbrs = adjacency(pts)
     n = len(pts)
-    big = _box_hs(-2 * d * np.ones(3), B + 2 * d)
-    box_hs = _box_hs(np.zeros(3), B)
+    big = box_halfspaces(-2 * d * np.ones(3), B + 2 * d)
+    box_hs = box_halfspaces(np.zeros(3), B)
 
     def vor_hs(i, js):
         q = pts[js]
@@ -265,7 +262,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     for i in range(n):
         nrm, off = vor_hs(i, nbrs[i])
         hs = np.vstack([np.c_[nrm, -off], box_hs])
-        cc = _chebyshev(hs)
+        cc = chebyshev_center(hs)
         if cc is None:
             continue
         V = HalfspaceIntersection(hs, cc[0]).intersections
@@ -288,9 +285,8 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     cell_of[kept] = comp
 
     tree = cKDTree(pts[kept])
-    cands = r * np.r_[1.0, np.linspace(*r_range, n_r)]
-    cands = cands[np.argsort(np.abs(cands - r), kind="stable")]
-    r_max = cands.max()
+    radii = rounding_radii(r, r_range, n_r)
+    r_max = radii.max()
 
     def piece(i, rk):
         """Piece i rounded by rk (None if its core is empty)."""
@@ -300,18 +296,15 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
                and np.linalg.norm(pts[c] - pts[i]) < rho[i] + rho[c] + w + 2 * r_max]
         nrm, off = vor_hs(i, js)
         foreign = np.array([cell_of[j] != cell_of[i] and (in_box[j] or chain[j] != chain[i]) for j in js])
-        hs = np.vstack([np.c_[nrm, -(off - foreign * (w / 2 + rk))], big])
-        cc = _chebyshev(hs)
-        return None if cc is None else RoundedPolytope(hs, cc[0], rk)
+        return rounded_polytope(np.c_[nrm, -(off - foreign * (w / 2 + rk))], big, rk)
 
     def assemble(members, rk):
-        ps = [piece(i, rk) for i in members]
-        ok = [p for p in ps if p is not None]
-        return (UnionCell(ok, max_offset=0.2 * w), len(ps) - len(ok)) if ok else (None, len(ps))
+        """The cell of pieces rounded by rk (pieces with an empty core left out), or None if all are empty."""
+        ok = [p for p in (piece(i, rk) for i in members) if p is not None]
+        return UnionCell(ok, max_offset=0.2 * w) if ok else None
 
     def score(cell):
-        """(wall defects, -edge margin): lower is better; good if (0, <= -delta)."""
-        return wall_defects(cell, B, delta), -min(_edge_margin(cell, B), delta)
+        return wall_defects(cell, B, delta), max(delta - edge_margin(cell, B), 0.0)
 
     cells, ids, faces, n_bad, n_lost, n_shifted, vols = [], [], [], 0, 0, 0, []
     for c in range(nc):
@@ -319,36 +312,15 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         vol = sum(ConvexHull(clip_V[i]).volume for i in members)
         if vol < v_drop:
             continue
-        best = None
-        for rk in cands:                          # 1. r_k for the whole cell
-            cell, lost = assemble(members, rk)
-            if cell is None:
-                continue
-            sc = score(cell)
-            if best is None or sc < best[0]:
-                best = (sc, cell, lost)
-            if sc == (0, -delta):
-                break
-        if best is None:                          # dropping it would renumber the cells at this w only
+        fit = fit_rounding_and_shift(lambda rk: assemble(members, rk), score, radii, w,
+                                     np.random.default_rng([seed, c]), max_shift, n_shift)
+        if fit is None:                           # dropping it would renumber the cells at this w only
             raise ValueError(f"cell {c}: every piece's eroded core is empty at w = {w}; w is too large")
-        if best[0] != (0, -delta):                # 2. translate the cell, approaching no neighbour by > w/4
-            srng = np.random.default_rng([seed, c])
-            c0 = best[1]
-            N = np.vstack([p.hs[:-6, :3] for p in c0.pieces])     # all but the far-away bounding box
-            for _ in range(n_shift):
-                t = srng.uniform(-max_shift, max_shift, 3)
-                if np.max(N @ t) > w / 4:
-                    continue
-                cell = shifted(c0, t)
-                sc = score(cell)
-                if sc < best[0]:
-                    best = (sc, cell, best[2])
-                if sc == (0, -delta):
-                    break
-            n_shifted += 1
-        n_bad += best[0] != (0, -delta)
-        n_lost += best[2]
-        cells.append(best[1]); ids.append(c); vols.append(vol)
+        cell, sc, shifted = fit
+        n_shifted += shifted
+        n_bad += any(sc)
+        n_lost += len(members) - len(cell.pieces)
+        cells.append(cell); ids.append(c); vols.append(vol)
         tri = []
         for i in members:
             t, k = facet_triangles(clip_V[i], clip_hs[i])
