@@ -82,13 +82,5 @@ def netgen_to_pyvista(
     :param mesh: The netgen mesh to convert.
     :return: The pyvista mesh.
     """
-    points = mesh.Coordinates()
-
-    # Extract the cells from the netgen mesh (wich are stored in an internal
-    # structure of 1-based point IDs)
-    elements = [[point_id.nr for point_id in el.vertices]
-                for el in mesh.Elements3D()]
-    cells = np.full((len(elements), 5), 4)
-    cells[:, 1:] = np.array(elements) - 1
-    celltypes = [pv.CellType.TETRA] * len(cells)
-    return pv.UnstructuredGrid(cells, celltypes, points)
+    tets = mesh.Elements3D().NumPy()["nodes"][:, :4].astype(np.int64) - 1   # 1-based point ids
+    return pv.UnstructuredGrid({pv.CellType.TETRA: tets}, np.asarray(mesh.Coordinates()))

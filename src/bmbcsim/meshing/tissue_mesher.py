@@ -665,23 +665,26 @@ class _SurfaceBuilder:
                            np.r_[np.full(len(M), ECS), np.repeat([d for _, _, d in self.walls], sizes)])
 
 
-def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
+def surface_mesh(cells, box, h, max_offset=np.inf, pool=None):
     """Closed multi-domain surface mesh of the cells in the box.
 
     Each membrane is corrected outward for the volume lost to faceting, by at most `max_offset`, which keeps
     neighbouring membranes apart (see `bmbcsim.geometry.cells.CellSet`).
+
+    Args:
+        cells: The cells (see `Cell`).
+        box: Box size (3,); the box spans [0, box].
+        h: Target edge length.
+        max_offset: Bound for the volume correction.
+        pool: A `multiprocessing` pool for the membranes (one task per cell), or None to mesh them here.
 
     Returns:
         The `SurfaceMesh`.
     """
     t0 = time.time()
     B = np.asarray(box, float)
-    if workers > 1:
-        import multiprocessing
-        with multiprocessing.get_context("spawn").Pool(workers) as pool:
-            mems = pool.starmap(membrane_robust, [(c, B, h, max_offset) for c in cells])
-    else:
-        mems = [membrane_robust(c, B, h, max_offset) for c in cells]
+    args = [(c, B, h, max_offset) for c in cells]
+    mems = pool.starmap(membrane_robust, args, chunksize=1) if pool else [membrane_robust(*a) for a in args]
     t_mem = time.time() - t0
     builder = _SurfaceBuilder(cells, B, h)
     surf = builder.build(mems)
@@ -692,6 +695,55 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
                 f"{builder.n_yy} walls without outline splits, {sum(m[3] for m in mems)} membrane retries "
                 f"(membranes {t_mem:.0f} s, total {time.time() - t0:.0f} s)")
     return surf
+
+
+def fit_gap_to_ecs_fraction(make_cells, box, h, target, bracket, tol=1e-3, max_iter=20, pool=None):
+    """The gap w in `bracket` at which the surface mesh of the cells has the ECS fraction `target` +- `tol`.
+
+    Bisects until evaluated values of w bracket the target, then uses regula falsi (Illinois). The ECS fraction
+    must grow with w.
+
+    Args:
+        make_cells: w -> `bmbcsim.geometry.cells.CellSet`.
+        box, h, pool: See `surface_mesh`.
+        target: ECS volume fraction.
+        bracket: (lo, hi) for w.
+        tol: Tolerance on the ECS fraction.
+        max_iter: Maximum number of surface meshes.
+
+    Returns:
+        (w, cell set, surface mesh, ECS fraction).
+    """
+    if max_iter < 1:
+        raise ValueError(f"max_iter must be at least 1, got {max_iter}")
+    lo, hi = bracket
+    below = above = None      # evaluated (w, ECS fraction - target) on either side of the target
+    side = 0
+    for _ in range(max_iter):
+        if below and above:
+            (wa, ga), (wb, gb) = below, above
+            w = (wa * gb - wb * ga) / (gb - ga)
+        else:
+            w = (lo + hi) / 2
+        cs = make_cells(w)
+        surf = surface_mesh(cs.cells, box, h, cs.max_offset, pool)
+        alpha = surf.ecs_fraction(box)
+        logger.info(f"w = {w:.5f} -> ECS fraction {alpha:.4f} (target {target})")
+        g = alpha - target
+        if abs(g) <= tol:
+            return w, cs, surf, alpha
+        if g < 0:
+            if side < 0 and above:            # Illinois: an end kept twice in a row pulls half as hard
+                above = (above[0], above[1] / 2)
+            below, lo, side = (w, g), w, -1
+        else:
+            if side > 0 and below:
+                below = (below[0], below[1] / 2)
+            above, hi, side = (w, g), w, 1
+        if not (below and above) and hi - lo < 1e-3 * (bracket[1] - bracket[0]):
+            raise ValueError(f"no w in {list(bracket)} gives ECS fraction {target} (w = {w:.5f}: {alpha:.4f})")
+    raise RuntimeError(f"no w in {list(bracket)} gives ECS fraction {target} +- {tol} after {max_iter} surface "
+                       f"meshes (last: w = {w:.5f}, {alpha:.4f})")
 
 
 # --- volume -------------------------------------------------------------------------------------------------------
