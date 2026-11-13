@@ -6,7 +6,7 @@ buffer and mechanics. Run from the repository root.
 
 ## Workflow
 
-1. Generate the tissue meshes. `make_geometry.py` bisects the gap `w` between the
+1. Generate the tissue meshes. `make_geometry.py` fits the gap `w` between the
    cells until the ECS volume fraction reaches the target, then writes one mesh per
    (seed, ECS ratio) to `data/cells/tissue_s{seed}_ecs{NN}.vtu`, where `NN` is the
    ECS ratio in percent:
