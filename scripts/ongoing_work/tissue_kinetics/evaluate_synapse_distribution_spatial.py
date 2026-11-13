@@ -272,9 +272,9 @@ def below_volume(ecs_tets_local, ecs_points, phi, r):
 # Sphere ∩ box volume (analytic reference volume for normalizing v_local)
 # ---------------------------------------------------------------------------
 # The local ECS volume is normalized by the volume of a Euclidean ball clipped
-# to the simulation box, vol(ball(r) ∩ box), rather than a full sphere: the box
-# is a thin slab, so every ball pokes out of the z-faces and the full-sphere
-# volume is the wrong reference. This is a closed-form primitive (a 1D integral
+# to the simulation box, vol(ball(r) ∩ box), rather than a full sphere: a ball
+# near a box face pokes out of it, and then the full-sphere volume is the wrong
+# reference. This is a closed-form primitive (a 1D integral
 # over the slab axis of the circle–rectangle cross-section), so it does not
 # touch the mesh.
 

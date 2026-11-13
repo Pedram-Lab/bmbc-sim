@@ -1,5 +1,5 @@
-"""ECS-ratio comparison of the dose-response study: the same synapses (the cell set is
-cropped at reference_ecs_ratio, so indices match) at two ECS volume fractions.
+"""ECS-ratio comparison of the dose-response study: the same synapses (the cell set of a
+geometry seed is the same at every ECS ratio, so indices match) at two ECS volume fractions.
 
     uv run scripts/ongoing_work/tissue_kinetics/compare_ecs.py a/dose_response.csv b/dose_response.csv --out plots/
 
@@ -120,7 +120,7 @@ def fig(df, out):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("csvs", nargs=2)
-    p.add_argument("--ecs", nargs=2, type=float, default=[0.1, 0.19],
+    p.add_argument("--ecs", nargs=2, type=float, default=[0.1, 0.25],
                    help="ECS ratios of the two CSVs, used only where the CSV lacks the column")
     p.add_argument("--out", default="plots")
     args = p.parse_args()

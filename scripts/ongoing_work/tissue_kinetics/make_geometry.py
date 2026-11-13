@@ -8,7 +8,7 @@ seed, not on w, so all ratios of one seed have the same cells. Simulations ident
 The mesh also stores each cell's raw Voronoi faces (``ref_faces``, rows of 9 coordinates, and their cell
 ``ref_cell``), which do not depend on w; the simulation places synapses on them.
 
-    uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --ecs-ratio 0.1 0.19 --seed 0 1
+    uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --ecs-ratio 0.1 0.17 0.25 --seed 0 1
     uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --cells tube --ecs-ratio 0.1
 """
 import argparse

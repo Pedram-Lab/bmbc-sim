@@ -15,8 +15,7 @@ buffer and mechanics. Run from the repository root.
    uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --ecs-ratio 0.1 0.17 0.25
    ```
 
-   The default box is 14 x 14 x 7 um, which leaves room around the 10 x 10 x 1 um
-   region in the middle that the analysis evaluates. One mesh takes about 5 min and
+   The default box is 14 x 14 x 7 um. One mesh takes about 5 min and
    has about 200k tets. The cells and their numbering depend only on `--seed`, so all
    ratios of one seed have the same cells, only eroded by different gaps. The meshes
    are not in git; regenerate them with the command above.

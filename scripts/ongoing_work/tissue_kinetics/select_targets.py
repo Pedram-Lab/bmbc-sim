@@ -5,7 +5,7 @@ synapse (heat-method geodesic balls, see evaluate_synapse_distribution_spatial.p
 then
 
 * 2 *restricted* synapses (lowest vfrac) and 2 *connected* ones (highest vfrac),
-  at least ``--min-boundary`` um (in-plane) from the box edge, pairwise at least
+  at least ``--min-boundary`` um from every box face, pairwise at least
   ``--min-separation`` um apart, each alone in its cell (so the cell's Ca content
   is that synapse's uptake);
 * the *buffered half*: half of all active synapses, drawn at random except that
@@ -45,7 +45,7 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("path", help="reference run directory (or a sweep dir holding exactly one run)")
     p.add_argument("--radius", type=float, default=1.0, help="geodesic radius for vfrac (um)")
-    p.add_argument("--min-boundary", type=float, default=2.0, help="min in-plane distance to the box edge (um)")
+    p.add_argument("--min-boundary", type=float, default=2.0, help="min distance to the box faces (um)")
     p.add_argument("--min-separation", type=float, default=5.0, help="min target separation (um)")
     p.add_argument("--seed", type=int, default=0, help="RNG seed for the buffered half")
     args = p.parse_args()
@@ -64,9 +64,9 @@ def main():
         cells, n_in_cell = synapse_cells(h5, centers)
         box_min, box_max = h5["mesh/points"][:].min(axis=0), h5["mesh/points"][:].max(axis=0)
     assert np.array_equal(idx, np.arange(len(centers)))
-    # The slab is 1 um thick, so the geodesic d_boundary is always < 0.5 um via the
-    # top/bottom faces; what matters for edge effects is the in-plane distance.
-    d_lateral = np.minimum(centers[:, :2] - box_min[:2], box_max[:2] - centers[:, :2]).min(axis=1)
+    # Straight-line distance to the nearest box face (the Robin boundary), in all
+    # three directions: the box is no longer a thin slab (named d_lateral in the outputs).
+    d_lateral = np.minimum(centers - box_min, box_max - centers).min(axis=1)
 
     with open(os.path.join(run, "spatial_metrics.csv"), "w", newline="") as f:
         w = csv.writer(f)
