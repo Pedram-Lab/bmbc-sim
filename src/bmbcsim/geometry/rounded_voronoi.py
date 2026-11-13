@@ -92,7 +92,9 @@ def closest_on_triangles(X, A, B, C, chunk=4096):
 
 
 class RoundedPolytope:
-    """The set {x: dist(x, P) <= r} for the convex polytope P = {x: hs[:, :3] x + hs[:, 3] <= 0} around p.
+    """The set {x: dist(x, P) <= r} for the bounded convex polytope P = {x: hs[:, :3] x + hs[:, 3] <= 0}.
+
+    `p` is a point inside P (e.g. its Chebyshev centre).
 
     Attributes:
         max_offset: Upper bound for the mesher's volume correction (secant offset) of this cell.
@@ -186,6 +188,7 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
     pts = voronoi_seeds(B, d, seed)
     vor = Voronoi(pts)
     box_hs = _box_hs(np.zeros(3), B)
+    big = _box_hs(-2 * d * np.ones(3), B + 2 * d)   # bounds the open Voronoi cells of the outermost seeds
     cands = r * np.r_[1.0, np.linspace(*r_range, n_r)]
     cands = cands[np.argsort(np.abs(cands - r), kind="stable")]
 
@@ -194,7 +197,7 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         rp = vor.ridge_points[(vor.ridge_points == i).any(1)]
         q = pts[np.where(rp[:, 0] == i, rp[:, 1], rp[:, 0])]
         nrm = (q - p) / np.linalg.norm(q - p, axis=1)[:, None]
-        return np.c_[nrm, -(np.einsum("ij,ij->i", nrm, (p + q) / 2) - erosion)]
+        return np.vstack([np.c_[nrm, -(np.einsum("ij,ij->i", nrm, (p + q) / 2) - erosion)], big])
 
     def margin(c):
         e = np.array([c.extent(h[:3], h[3]) for h in box_hs])    # > 0: crosses the wall
@@ -202,7 +205,7 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
 
     cells, ids, faces, n_bad, n_shifted = [], [], [], 0, 0
     for i, p in enumerate(pts):
-        hs_in = np.vstack([halfspaces(i, 0.0), box_hs])
+        hs_in = np.vstack([halfspaces(i, 0.0)[:-6], box_hs])
         cc = _chebyshev(hs_in)
         if cc is None:
             continue
@@ -211,26 +214,27 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
             continue
         best = None
         for rk in cands:
-            try:
-                c = RoundedPolytope(halfspaces(i, w / 2 + rk), p, rk)
-            except Exception:
+            hs = halfspaces(i, w / 2 + rk)
+            cc = _chebyshev(hs)
+            if cc is None:
                 continue        # eroded core empty for this r_k
+            c = RoundedPolytope(hs, cc[0], rk)
             m = margin(c)
             if best is None or m > best[0]:
                 best = (m, c)
             if m >= delta:
                 break
-        if best is None:
-            continue
+        if best is None:        # dropping it would renumber the cells at this w only
+            raise ValueError(f"cell of seed {i}: eroded core empty for every r_k at w = {w}; w is too large")
         if best[0] < delta:     # r_k does not help (flat face or box edge): translate the cell
             rng = np.random.default_rng([seed, i])
             c0 = best[1]
             for _ in range(n_shift):
                 t = rng.uniform(-max_shift, max_shift, 3)
-                if np.max(c0.hs[:, :3] @ t) > w / 4:      # approaches a neighbour: keeps the gap >= w/2
+                if np.max(c0.hs[:-6, :3] @ t) > w / 4:    # approaches a neighbour: keeps the gap >= w/2
                     continue
                 hs = c0.hs.copy(); hs[:, 3] -= hs[:, :3] @ t
-                c = RoundedPolytope(hs, p + t, c0.r)
+                c = RoundedPolytope(hs, c0.p + t, c0.r)
                 m = margin(c)
                 if m > best[0]:
                     best = (m, c)
@@ -244,4 +248,6 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         ids.append(i)
         tris, k = facet_triangles(V, hs_in)
         faces.append(tris[k < len(hs_in) - 6])    # not on the box walls
+    if not cells:
+        raise ValueError(f"no cell has a volume of at least {v_drop} in the box")
     return cells, ids, dict(n_bad=n_bad, n_shifted=n_shifted, faces=faces)

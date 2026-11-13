@@ -329,8 +329,8 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
                 best = (sc, cell, lost)
             if sc == (0, -delta):
                 break
-        if best is None:
-            continue
+        if best is None:                          # dropping it would renumber the cells at this w only
+            raise ValueError(f"cell {c}: every piece's eroded core is empty at w = {w}; w is too large")
         if best[0] != (0, -delta):                # 2. translate the cell, approaching no neighbour by > w/4
             srng = np.random.default_rng([seed, c])
             c0 = best[1]
@@ -355,6 +355,8 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
             nb = np.r_[cell_of[nbrs[i]], c]               # the box walls (k >= len(nbrs[i])) count as own
             tri.append(t[nb[np.minimum(k, len(nbrs[i]))] != c])
         faces.append(np.concatenate(tri))
+    if not cells:
+        raise ValueError(f"no cell has a volume of at least {v_drop} in the box")
     n_pieces = np.array([len(c.pieces) for c in cells])
     info = dict(n_seeds=n, n_chains=chain.max() + 1, n_cells=len(cells), n_bad=n_bad, n_shifted=n_shifted,
                 pieces_lost=n_lost, pieces=np.percentile(n_pieces, [0, 25, 50, 75, 100]).tolist(),
