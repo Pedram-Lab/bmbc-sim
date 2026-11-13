@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Dose-response study, step 1: the same total buffer amount (ecm_total = ECS mean)
 # placed uniformly, as Gaussians (sigma = local_width) on every active synapse, or on
 # half of them (local_target from select_targets.py on the reference run: it holds

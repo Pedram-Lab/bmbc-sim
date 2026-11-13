@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Solitary synapse, buffer placement at ecs_ratio 0.25 (single_buffer_sweep.yaml at 0.1).
 # 1 mM only (0.3 mM was far below any threshold at 0.1): uniform, on-target and
 # off-target neighbour at sigma = footprint 1/e radius of single_reference_ecs25

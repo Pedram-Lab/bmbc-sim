@@ -16,12 +16,13 @@ from astropy import units as u
 from astropy import constants as const
 
 import ngsolve as ngs
+from pydantic import field_validator
 
 import bmbcsim
-from bmbcsim.meshing.tissue_mesher import load_tissue_mesh
+from bmbcsim.meshing.tissue_io import WALLS, tissue_names
 from bmbcsim.simulation import transport
 from bmbcsim.simulation import coefficient_fields as cf
-from make_geometry import geometry_file
+from make_geometry import ecs_percent, load_geometry
 from bmbcsim.config import (
     SimulationConfig,
     ConfigGroup,
@@ -48,6 +49,12 @@ class Geometry(ConfigGroup):
     # triangulation dominates h. For convergence tests.
     n_refine: int = 0
 
+    @field_validator("ecs_ratio")
+    @classmethod
+    def _whole_percentage(cls, ecs_ratio: float) -> float:
+        ecs_percent(ecs_ratio)   # mesh files are named by it; fail before a sweep submits
+        return ecs_ratio
+
 
 class Diffusion(ConfigGroup):
     """ECS/cytosol Ca2+ diffusion and the reservoir boundary condition."""
@@ -63,7 +70,8 @@ class Diffusion(ConfigGroup):
 class Synapse(ConfigGroup):
     """Distributed NMDAR synapse patches (Ca2+ sink)."""
 
-    n_synapses: int = 1372   # 1 per um^3 of the 14 x 14 x 7 box, f_active of them carry flux
+    # Synapses per box volume (1372 in the 14 x 14 x 7 um box); f_active of them carry flux
+    synapse_density: Quantity("1 / um3") = "1 / um3"
     n_channels_per_synapse: int = 35
     synapse_diameter: Quantity("um") = "0.25 um"
     f_active: float = 0.15
@@ -203,22 +211,19 @@ def run(cfg: Config) -> None:
     print(f"Results and config -> {result_dir}")
 
     # --- Load the tissue mesh (make_geometry.py) ---
-    path = geometry_file(geom.mesh_dir, geom.seed, geom.ecs_ratio)
-    print(f"Loading geometry {path}...")
-    tissue_mesh, meta = load_tissue_mesh(path)
+    path, tissue_mesh, meta, ref_faces = load_geometry(geom.mesh_dir, geom.seed, geom.ecs_ratio)
+    print(f"Loaded geometry {path}")
     with open(result_dir / "geometry.json", "w") as f:
         json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()}}, f, indent=1)
-    n_cells = len(tissue_mesh.GetMaterials()) - 1
-    coords = np.array(tissue_mesh.ngmesh.Coordinates())
-    min_box, max_box = coords.min(axis=0), coords.max(axis=0)
+    cell_names, bnd_names = tissue_names(tissue_mesh)
+    n_cells = len(cell_names)
+    min_box, max_box = np.zeros(3), np.asarray(meta["box"], dtype=float)   # the mesh spans [0, box]
     print(f"  {n_cells} cells in a {' x '.join(f'{s:g}' for s in max_box - min_box)} um box, "
           f"ECS fraction {meta['ecs_fraction']:.4f} (target {meta['ecs_ratio']}, gap w = {meta['w']:.4f} um)")
     for _ in range(geom.n_refine):
         tissue_mesh.Refine()
     print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices "
           f"(n_refine={geom.n_refine})")
-    cell_names = [f"cell_{i}" for i in range(n_cells)]
-    bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
     # Derived parameter: boundary permeability from tortuosity if not set
     boundary_permeability = diff.boundary_permeability
@@ -276,10 +281,11 @@ def run(cfg: Config) -> None:
 
     # Active synapses, distributed randomly (but reproducibly) across cells
     rng = np.random.default_rng(seed=cfg.seed)
-    base, remainder = divmod(int(syn.n_synapses * syn.f_active), n_cells)
+    n_synapses = round((syn.synapse_density * np.prod(max_box) * u.um**3).decompose().value)
+    base, remainder = divmod(int(n_synapses * syn.f_active), n_cells)
     synapses_per_cell = np.full(n_cells, base)
     synapses_per_cell[rng.choice(n_cells, size=remainder, replace=False)] += 1
-    print(f"  Active synapses: {synapses_per_cell.sum()} (of {syn.n_synapses} total)")
+    print(f"  Active synapses: {synapses_per_cell.sum()} (of {n_synapses} total)")
 
     def nmdar_waveform(t):
         """J(t) = e^(-t/tau1) - e^(-t/tau2), superposition of pulses."""
@@ -313,23 +319,23 @@ def run(cfg: Config) -> None:
     # on a DOF). The cells of one geometry seed are the same at every ecs_ratio, so
     # (seed, synapse index) is the same membrane spot across ratios up to the gap and
     # the mesh size.
-    if "ref_faces" not in meta:
-        raise ValueError(f"{path} has no reference faces for the synapses; regenerate it with make_geometry.py")
-    ref_faces, ref_cell = meta["ref_faces"].reshape(-1, 3, 3), meta["ref_cell"]
     synapse_centers = {}  # cell index -> (n_syn, 3) centers
     max_snap = 0.0
     for i, n_syn in enumerate(synapses_per_cell):
         if n_syn == 0:
             continue
-        anchors = _sample_triangles(ref_faces[ref_cell == i], n_syn, rng)
+        anchors = _sample_triangles(ref_faces[i], n_syn, rng)
         vertices = _boundary_vertices(tissue_mesh, bnd_names[i])
         dist = np.linalg.norm(anchors[:, None] - vertices[None], axis=2)
         dist[:, exclude_outer_box(vertices)] = np.inf
         picked = []
         for row in dist:
             row[picked] = np.inf
-            picked.append(int(np.argmin(row)))
-            max_snap = max(max_snap, row[picked[-1]])
+            j = int(np.argmin(row))
+            if not np.isfinite(row[j]):
+                raise ValueError(f"cell_{i}: {len(picked)} free membrane vertices for {n_syn} synapses")
+            picked.append(j)
+            max_snap = max(max_snap, row[j])
         synapse_centers[i] = vertices[picked]
     all_centers = (np.concatenate(list(synapse_centers.values()))
                    if synapse_centers else np.empty((0, 3)))
@@ -404,7 +410,7 @@ def run(cfg: Config) -> None:
             ecs.add_driving_species(ecm_ca, -mech.ecm_ca_condensation, baseline=ecm_ca_init)
 
     # --- Robin BC: transport from external reservoir into ECS ---
-    for bnd in ["top", "bottom", "left", "right", "front", "back"]:
+    for bnd in WALLS:
         boundary = geo.membranes[bnd]
         boundary_flux = transport.Passive(
             boundary_permeability * boundary.area, diff.ca_ecs

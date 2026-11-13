@@ -36,7 +36,7 @@ base:
     # gives at the 0.7 um2/ms baseline, so it doesn't move with the swept
     # diffusion.diffusivity_ecs below (0.7 / tortuosity^2 / l_char, l_char =
     # half the longest box side = 7 um).
-    boundary_permeability: "0.02734375 um / ms"
+    boundary_permeability: "0.0390625 um / ms"
 
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field. A comma-joined key zips its axes: each value

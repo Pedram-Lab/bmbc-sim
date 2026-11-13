@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Tissue mesh generation (scripts/ongoing_work/tissue_kinetics/make_geometry.py).
+# Tissue mesh generation (bmbcsim.meshing.tissue_mesher); loading tissue meshes does not need it.
 geometry = [
   "pymeshlab>=2025.7",
   "tetgen>=0.8.4",

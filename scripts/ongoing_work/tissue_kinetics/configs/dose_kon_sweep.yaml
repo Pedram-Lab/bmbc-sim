@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Dose-response study, step 3a: does the local-vs-uniform difference survive the
 # buffer on-rate? Kd fixed at 1 mM, kf over 8 decades, sigma 1 um, two doses,
 # uniform vs half-buffered. 9 x 2 x 2 = 36 runs (4 duplicate dose_core_sweep).

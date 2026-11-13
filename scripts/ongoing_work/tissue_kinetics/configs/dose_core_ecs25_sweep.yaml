@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Dose-response study at ecs_ratio 0.25 (the 0.1 study is dose_core_sweep.yaml).
 # The cells of one geometry seed are the same at every ecs_ratio, so the synapse indices
 # (and the buffered half from select_targets.py on the 0.1 reference) denote the same

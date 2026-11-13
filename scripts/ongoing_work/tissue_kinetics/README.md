@@ -6,7 +6,7 @@ buffer and mechanics. Run from the repository root.
 
 ## Workflow
 
-1. Generate the tissue meshes. `make_geometry.py` bisects the gap `w` between the
+1. Generate the tissue meshes. `make_geometry.py` fits the gap `w` between the
    cells until the ECS volume fraction reaches the target, then writes one mesh per
    (seed, ECS ratio) to `data/cells/tissue_s{seed}_ecs{NN}.vtu`, where `NN` is the
    ECS ratio in percent:
@@ -15,8 +15,7 @@ buffer and mechanics. Run from the repository root.
    uv run --extra geometry scripts/ongoing_work/tissue_kinetics/make_geometry.py --ecs-ratio 0.1 0.17 0.25
    ```
 
-   The default box is 14 x 14 x 7 um, which leaves room around the 10 x 10 x 1 um
-   region in the middle that the analysis evaluates. One mesh takes about 5 min and
+   The default box is 14 x 14 x 7 um. One mesh takes about 5 min and
    has about 200k tets. The cells and their numbering depend only on `--seed`, so all
    ratios of one seed have the same cells, only eroded by different gaps. The meshes
    are not in git; regenerate them with the command above.
@@ -50,7 +49,7 @@ buffer and mechanics. Run from the repository root.
   by area on the cell's raw Voronoi faces. The mesh stores these faces, and they do
   not depend on the gap `w`. For one `seed`, synapse index `i` is therefore the same
   membrane spot at every ECS ratio, up to the gap and the mesh size.
-- The synapse density is 1 per um^3 (`synapse.n_synapses` = 1372 for the default
-  box), and the fraction `synapse.f_active` of them carry flux.
+- The synapse density is 1 per um^3 (`synapse.synapse_density`; 1372 synapses in the
+  default box), and the fraction `synapse.f_active` of them carry flux.
 - The convergence sweep uses its own 6 x 6 x 1 um meshes in `data/tissue_6x6x1`
   (see the command in `configs/convergence_sweep.yaml`).

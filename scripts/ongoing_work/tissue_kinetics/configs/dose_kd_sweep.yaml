@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Dose-response study, step 3b: affinity. kf fixed at 1e5 /(mM s), Kd around the
 # resting Ca (plus 0.01 mM: a buffer that is saturated at rest and does nothing).
 # 4 x 2 x 2 = 16 runs (4 duplicate dose_core_sweep).
