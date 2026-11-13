@@ -1,9 +1,12 @@
-# Dose-response study at ecs_ratio 0.19 (~25 % ECS; the 0.1 study is dose_core_sweep.yaml).
-# The cell set is cropped at reference_ecs_ratio = 0.19, so the synapse indices (and the
-# buffered half from select_targets.py on the 0.1 reference) denote the same membrane
-# spots as at 0.1. Trimmed to what mattered at 0.1: no 0.1 mM dose, no sigma 0.5 um.
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
+# Dose-response study at ecs_ratio 0.25 (the 0.1 study is dose_core_sweep.yaml).
+# The cells of one geometry seed are the same at every ecs_ratio, so the synapse indices
+# (and the buffered half from select_targets.py on the 0.1 reference) denote the same
+# membrane spots as at 0.1. Trimmed to what mattered at 0.1: no 0.1 mM dose, no sigma 0.5 um.
 # Row 1 is the no-buffer reference. 1 + 4 doses x (uniform, all, half) = 13 runs.
-# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name dose_core_ecs19_sweep
+# Run: uv run scripts/ongoing_work/tissue_kinetics/sweep.py --config-name dose_core_ecs25_sweep
 defaults:
   - cluster: local
   - _self_
@@ -13,12 +16,12 @@ cluster:
 
 base:
   geometry:
-    ecs_ratio: 0.19
+    ecs_ratio: 0.25
   ecm:
     ecm_kd: "1 mM"
     ecm_kf: "1e5 / (mM s)"
 
-result_root: results/dose-core-ecs19
+result_root: results/dose-core-ecs25
 
 sweep:
   "ecm.enabled, ecm.ecm_total, ecm.local_width, ecm.local_target":

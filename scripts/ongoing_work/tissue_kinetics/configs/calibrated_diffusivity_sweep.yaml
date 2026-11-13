@@ -35,8 +35,8 @@ base:
     # Pin the outer-boundary permeability to the value the tortuosity formula
     # gives at the 0.7 um2/ms baseline, so it doesn't move with the swept
     # diffusion.diffusivity_ecs below (0.7 / tortuosity^2 / l_char, l_char =
-    # max(box_size_x/y/z)/2 = 10 um).
-    boundary_permeability: "0.02734375 um / ms"
+    # half the longest box side = 7 um).
+    boundary_permeability: "0.0390625 um / ms"
 
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field. A comma-joined key zips its axes: each value
@@ -47,5 +47,5 @@ sweep:
   "diffusion.diffusivity_ecs, ecm.enabled":
     - ["0.7 um2 / ms", false]
     - ["0.8847 um2 / ms", true]
-  geometry.ecs_ratio: [0.04, 0.19]
+  geometry.ecs_ratio: [0.1, 0.25]
 seeds: 10

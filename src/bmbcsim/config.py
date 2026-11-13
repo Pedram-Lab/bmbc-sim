@@ -388,9 +388,14 @@ def _run_sim(sim_file: str, config_dict: dict[str, Any]) -> None:
     Runs on a Dask worker (a separate process, possibly a different LSF node), so
     it takes a primitive dict rather than a pydantic instance -- the ``Config``
     class need not be importable to unpickle the payload; the module supplies it.
+    The script's folder goes on ``sys.path``, as for ``python script.py``, so
+    sibling imports in the script resolve.
     """
     import importlib.util
 
+    script_dir = str(Path(sim_file).resolve().parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
     spec = importlib.util.spec_from_file_location("_sweep_sim", sim_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

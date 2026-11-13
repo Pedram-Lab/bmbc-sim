@@ -15,7 +15,5 @@ cluster:
 # Cartesian product of these axes x seeds. Keys are dotted paths into the groups;
 # values are validated per Config field.
 sweep:
-  # The full scan is [0.04, 0.05, ..., 0.19]; some values need nudging to avoid
-  # numerical trouble during meshing (0.11 -> 0.112, 0.13 -> 0.134, 0.14 -> 0.142).
-  geometry.ecs_ratio: [0.04, 0.09, 0.142, 0.19]
+  geometry.ecs_ratio: [0.1, 0.17, 0.25]    # one mesh each, see ../README.md
 seeds: [42]    # the Config default seed: one synapse distribution, as before

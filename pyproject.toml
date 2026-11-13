@@ -37,6 +37,14 @@ dependencies = [
   "pydantic>=2.13.4",
 ]
 
+[project.optional-dependencies]
+# Tissue mesh generation (bmbcsim.meshing.tissue_mesher); loading tissue meshes does not need it.
+geometry = [
+  "pymeshlab>=2025.7",
+  "tetgen>=0.8.4",
+  "triangle>=20250106",
+]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"

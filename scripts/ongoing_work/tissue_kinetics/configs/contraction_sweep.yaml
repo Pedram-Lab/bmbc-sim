@@ -52,7 +52,7 @@ base:
 # numbers are an overestimate here. min J is not: it is a worst-element quantity
 # set by one local hot spot, which this sweep has too.
 #
-# The limit is also ecs_ratio-dependent (thin 0.04 sheets degenerate first), so
+# The limit is also ecs_ratio-dependent (thin 10 % ECS sheets degenerate first), so
 # the same k is not equally safe on both arms of the ratio axis.
 #
 # Top point is 1.25, not the 1.5 the table above rules out. It sits inside the
@@ -61,5 +61,5 @@ base:
 sweep:
   mechanics.ecm_ca_condensation:
     ["0 / mM", "0.25 / mM", "0.5 / mM", "1.0 / mM", "1.25 / mM"]
-  geometry.ecs_ratio: [0.04, 0.19]
+  geometry.ecs_ratio: [0.1, 0.25]
 seeds: 10

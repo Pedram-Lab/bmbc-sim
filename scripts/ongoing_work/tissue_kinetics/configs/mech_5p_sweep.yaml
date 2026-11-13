@@ -1,3 +1,6 @@
+# STALE: the synapse indices in this file were picked by select_targets.py on the old
+# shrunken-cell geometry (400 synapses). On the rounded-Voronoi and tube meshes they name
+# other spots; rerun the reference and select_targets.py before using this config.
 # Mechanics with 5 action potentials at ecs_ratio 0.1 (the dose-response study's ECS):
 # 50 ms startup, pulses at 50-90 ms, 200 ms total (400 steps). ECM 1 mM, Kd 1 mM.
 # Same rows as mech_2p_sweep. Rows 1-4 are the mechanics-off twins (k 0) with the same protocol; k ranges from
