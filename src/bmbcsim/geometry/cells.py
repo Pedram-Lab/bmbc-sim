@@ -46,7 +46,9 @@ def voronoi_seeds(box, d, seed, n_lloyd=20):
     s = rng.uniform(lo, hi, (100 * n, 3))
     for _ in range(n_lloyd):
         lab = cKDTree(pts).query(s)[1]
-        pts = np.array([s[lab == i].mean(0) if np.any(lab == i) else pts[i] for i in range(n)])
+        cnt = np.bincount(lab, minlength=n)[:, None]
+        sums = np.stack([np.bincount(lab, s[:, k], n) for k in range(3)], axis=1)
+        pts = np.where(cnt > 0, sums / np.maximum(cnt, 1), pts)
     return pts
 
 

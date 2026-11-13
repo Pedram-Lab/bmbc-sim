@@ -180,7 +180,10 @@ def _cut(P, F, mask, a, val, side, bit, cell, s_snap):
         X = P[near].copy()
         for _ in range(30):
             X[:, a] = val
-            X = cell.project(X)
+            Y = cell.project(X)
+            X, step = Y, np.abs(Y - X).max()
+            if step < 1e-10:
+                break
         X[:, a] = val
         ok = np.linalg.norm(X - P[near], axis=1) < 1.5 * s_snap    # surface nearly parallel to the wall: no snap
         P0 = P.copy()
@@ -251,7 +254,10 @@ def _project_border(P, mask, planes, cell):
     for _ in range(40):
         for k, (a, val) in enumerate(planes):
             X[(mask[sel] >> k) & 1 == 1, a] = val
-        X = cell.project(X)
+        Y = cell.project(X)
+        X, step = Y, np.abs(Y - X).max(initial=0.0)
+        if step < 1e-10:
+            break
     for k, (a, val) in enumerate(planes):
         X[(mask[sel] >> k) & 1 == 1, a] = val
     P[sel] = X
