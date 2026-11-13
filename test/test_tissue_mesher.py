@@ -8,6 +8,7 @@ for module in ("pymeshlab", "triangle", "tetgen"):
 from bmbcsim.geometry.cells import box_halfspaces, facet_triangles
 from bmbcsim.geometry.rounded_voronoi import make_rounded_voronoi_cells
 from bmbcsim.geometry.tube_cells import make_tube_cells
+from bmbcsim.meshing import tissue_io as tio
 from bmbcsim.meshing import tissue_mesher as tm
 
 BOX = np.array([6.0, 6.0, 1.0])
@@ -33,9 +34,9 @@ def _area(mesh, name):
 def test_tissue_mesh_names_and_volume(tissue):
     n_cells, _, alpha_surface, mesh = tissue
     assert mesh.GetMaterials() == ("ecs", *(f"cell_{k}" for k in range(n_cells)))
-    walls = set(tm.WALLS) | {"cell_boundary"} | {f"membrane_{k}" for k in range(n_cells)}
+    walls = set(tio.WALLS) | {"cell_boundary"} | {f"membrane_{k}" for k in range(n_cells)}
     assert set(mesh.GetBoundaries()) == walls
-    assert sum(_area(mesh, w) for w in tm.WALLS + ["cell_boundary"]) == pytest.approx(2 * (6 * 6 + 2 * 6))
+    assert sum(_area(mesh, w) for w in tio.WALLS + ["cell_boundary"]) == pytest.approx(2 * (6 * 6 + 2 * 6))
     # TetGen and netgen keep the surface, so the mesh encloses the same volumes as the surface mesh
     assert _volume(mesh, "ecs") / BOX.prod() == pytest.approx(alpha_surface, abs=1e-9)
     assert 0.05 < alpha_surface < 0.15
@@ -44,8 +45,8 @@ def test_tissue_mesh_names_and_volume(tissue):
 def test_save_load_round_trip(tissue, tmp_path):
     n_cells, ids, _, mesh = tissue
     path = tmp_path / "tissue.vtu"
-    tm.save_tissue_mesh(path, mesh, w=0.1, seed=0, cell_labels=ids)
-    loaded, meta = tm.load_tissue_mesh(path)
+    tio.save_tissue_mesh(path, mesh, w=0.1, seed=0, cell_labels=ids)
+    loaded, meta = tio.load_tissue_mesh(path)
     assert meta["w"] == 0.1 and meta["seed"] == 0 and np.array_equal(meta["cell_labels"], ids)
     assert (loaded.ne, loaded.nv) == (mesh.ne, mesh.nv)
     assert loaded.GetMaterials() == mesh.GetMaterials()

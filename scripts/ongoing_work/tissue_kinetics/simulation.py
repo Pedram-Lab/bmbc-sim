@@ -19,7 +19,7 @@ import ngsolve as ngs
 from pydantic import field_validator
 
 import bmbcsim
-from bmbcsim.meshing.tissue_mesher import load_tissue_mesh
+from bmbcsim.meshing.tissue_io import WALLS, load_tissue_mesh, tissue_names
 from bmbcsim.simulation import transport
 from bmbcsim.simulation import coefficient_fields as cf
 from make_geometry import ecs_percent, geometry_file
@@ -216,7 +216,8 @@ def run(cfg: Config) -> None:
     with open(result_dir / "geometry.json", "w") as f:
         json.dump({"file": path, **{k: np.asarray(v).tolist() for k, v in meta.items()
                                     if not k.startswith("ref_")}}, f, indent=1)
-    n_cells = len(tissue_mesh.GetMaterials()) - 1
+    cell_names, bnd_names = tissue_names(tissue_mesh)
+    n_cells = len(cell_names)
     coords = np.array(tissue_mesh.ngmesh.Coordinates())
     min_box, max_box = coords.min(axis=0), coords.max(axis=0)
     print(f"  {n_cells} cells in a {' x '.join(f'{s:g}' for s in max_box - min_box)} um box, "
@@ -225,8 +226,6 @@ def run(cfg: Config) -> None:
         tissue_mesh.Refine()
     print(f"  Mesh has {tissue_mesh.ne} elements and {tissue_mesh.nv} vertices "
           f"(n_refine={geom.n_refine})")
-    cell_names = [f"cell_{i}" for i in range(n_cells)]
-    bnd_names = [f"membrane_{i}" for i in range(n_cells)]
 
     # Derived parameter: boundary permeability from tortuosity if not set
     boundary_permeability = diff.boundary_permeability
@@ -415,7 +414,7 @@ def run(cfg: Config) -> None:
             ecs.add_driving_species(ecm_ca, -mech.ecm_ca_condensation, baseline=ecm_ca_init)
 
     # --- Robin BC: transport from external reservoir into ECS ---
-    for bnd in ["top", "bottom", "left", "right", "front", "back"]:
+    for bnd in WALLS:
         boundary = geo.membranes[bnd]
         boundary_flux = transport.Passive(
             boundary_permeability * boundary.area, diff.ca_ecs

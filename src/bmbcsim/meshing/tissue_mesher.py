@@ -9,12 +9,9 @@ Pipeline (see `surface_mesh` and `volume_mesh`):
 3. Volume: TetGen fills the closed multi-domain surface without changing it, the tets are labelled per domain, and
    netgen optimizes the interior.
 
-A cell is any object with the `Cell` interface, e.g. `bmbcsim.geometry.cells.RoundedPolytope`. Region names: `ecs`, `cell_k`; boundary names: `membrane_k`,
-`cell_boundary`, `left`, `right`, `top`, `bottom`, `front`, `back` (x-, x+, y-, y+, z-, z+).
-
-`save_tissue_mesh` / `load_tissue_mesh` store the mesh as a .vtu file with one `cell_id` per tet (-1 = ECS) and
-rebuild the boundary names on load. Meshing needs the `geometry` extra (pymeshlab, triangle, tetgen); loading
-does not.
+A cell is any object with the `Cell` interface, e.g. `bmbcsim.geometry.cells.RoundedPolytope`. The names and the
+file I/O of tissue meshes are in `bmbcsim.meshing.tissue_io`. Meshing needs the `geometry` extra (pymeshlab,
+triangle, tetgen).
 """
 import time
 from typing import Protocol
@@ -22,13 +19,13 @@ from typing import Protocol
 import numpy as np
 import ngsolve as ngs
 import pyvista as pv
-from netgen.meshing import FaceDescriptor, Mesh, MeshingParameters
+from netgen.meshing import MeshingParameters
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from bmbcsim.logging import logger
-
-WALLS = ["left", "right", "top", "bottom", "front", "back"]  # x-, x+, y-, y+, z-, z+
+from bmbcsim.meshing.tissue_io import (CELL0, ECS, OUTSIDE, WALLS, _face_key, box_walls, membrane_name,
+                                       tissue_mesh_from_labels)
 
 
 class Cell(Protocol):
@@ -73,9 +70,8 @@ def _merge_outside(P, F, mask, B, tol=1e-9):
         nb = np.unique(F[np.any(F == j, axis=1)])
         corners = [i for i in nb if i != j and bin(mask[i]).count("1") > 1]
         if not corners and bin(mask[j]).count("1") > 1:    # a box-edge point past the corner: it becomes the corner
-            for k in range(6):
-                a, val = k // 2, (0.0 if k % 2 == 0 else B[k // 2])
-                if (P[j, a] < -tol) if k % 2 == 0 else (P[j, a] > B[a] + tol):
+            for k, (a, val, side) in enumerate(box_walls(B)):
+                if side * (P[j, a] - val) > tol:
                     P[j, a] = val; mask[j] |= 1 << k
             continue
         if not corners:
@@ -272,8 +268,7 @@ def _secant_offset(P, F, mask, cell, B, h, max_offset):
     gap_v = np.bincount(F.ravel(), np.repeat(area * gap_t, 3), len(P)) / np.maximum(wsum, 1e-30)
     gap_v = np.clip(gap_v, -max_offset, max_offset)
     d = gap_v[:, None] * cell.normal(P)
-    for k in range(6):
-        a, val, side = k // 2, (0.0 if k % 2 == 0 else B[k // 2]), (-1.0 if k % 2 == 0 else 1.0)
+    for k, (a, val, side) in enumerate(box_walls(B)):
         d[(mask >> k) & 1 == 1, a] = 0.0
         d[(side * d[:, a] > 0) & (np.abs(P[:, a] - val) < h), a] = 0.0
     s0 = np.sign(np.sum(_orientation(P, F, cell)))
@@ -389,10 +384,10 @@ def membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
     s = img.contour([0.0], scalars="phi", method="flying_edges").triangulate().clean()
     P, F = _remesh(cell.project(np.asarray(s.points, float)), s.regular_faces, h, iters)  # closed: no border issues
     P, F = _fix_flips(cell.project(P), F, cell)
-    planes = [(k // 2, 0.0 if k % 2 == 0 else B[k // 2]) for k in range(6)]
+    walls = box_walls(B)
+    planes = [(a, val) for a, val, _ in walls]
     mask = np.zeros(len(P), np.int64)
-    for k, (a, val) in enumerate(planes):
-        side = -1.0 if k % 2 == 0 else 1.0
+    for k, (a, val, side) in enumerate(walls):
         if np.any(side * (P[:, a] - val) > 0):
             P, F, mask = _cut(P, F, mask, a, val, side, 1 << k, cell, snap * h)
     P, F, mask = _drop_in_wall(P, F, mask)
@@ -432,7 +427,7 @@ def membrane_robust(cell, box, h, max_offset=np.inf,
 def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
     """Closed multi-domain surface mesh of the cells in the box.
 
-    Domain numbers: 0 = outside the box, 1 = ECS, k + 2 = cell k. Each membrane is corrected outward for the
+    Domain numbers: see `bmbcsim.meshing.tissue_io.CELL0`. Each membrane is corrected outward for the
     volume lost to faceting, by at most `max_offset`, which keeps neighbouring membranes apart (see
     `bmbcsim.geometry.cells.CellSet`).
 
@@ -458,7 +453,7 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
     for kc, (P, F, mask, _) in enumerate(mems):
         off = len(G)
         G += list(P)
-        tris.append(F + off); tags += [(kc + 2, 1, f"membrane_{kc}")] * len(F)
+        tris.append(F + off); tags += [(CELL0 + kc, ECS, membrane_name(kc))] * len(F)
         E, cnt = _edges(F)
         bnd = set(map(tuple, E[cnt == 1]))
         for f in F:
@@ -501,8 +496,7 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
     splits = {}                       # membrane outline edge -> new wall points on it (ordered from its first end)
     used_new = set()
     n_yy = 0
-    for k in range(6):
-        a, val = k // 2, (0.0 if k % 2 == 0 else B[k // 2])
+    for k, (a, val, side) in enumerate(box_walls(B)):
         u, v = [x for x in range(3) if x != a]
         segs = list(seg_by_wall[k])
         n_out = len(segs)
@@ -560,7 +554,6 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
                                         directed=False)
         C = X3[T].mean(1)
         cand = sorted({kc for _, m, kc in border_pts if (m >> k) & 1})
-        side = -1.0 if k % 2 == 0 else 1.0
         nrm = np.cross(X3[T[:, 1]] - X3[T[:, 0]], X3[T[:, 2]] - X3[T[:, 0]])[:, a]
         T = np.where((side * nrm < 0)[:, None], T[:, [1, 0, 2]], T)     # normal out of the box
         # side of the membrane outlines: a cell's closed surface runs along an outline edge once in the membrane
@@ -586,7 +579,7 @@ def surface_mesh(cells, box, h, max_offset=np.inf, workers=8):
             if len(votes) > 1:
                 raise RuntimeError(f"wall {WALLS[k]}: region claimed by cells {votes}")
             tris.append(g_all[T[idx]])
-            tags += [(votes[0] + 2, 0, "cell_boundary") if votes else (1, 0, WALLS[k])] * len(idx)
+            tags += [(CELL0 + votes[0], OUTSIDE, "cell_boundary") if votes else (ECS, OUTSIDE, WALLS[k])] * len(idx)
 
     # insert the new wall points on membrane outlines into the membrane triangles (fan from the opposite point)
     M = [list(f) for f in np.concatenate(tris[:len(cells)])]
@@ -629,7 +622,7 @@ def check_closed(G, tris, tags):
     dom = np.array([(a, b) for a, b, _ in tags])
     bad = {}
     for d in np.unique(dom):
-        if d == 0:
+        if d == OUTSIDE:
             continue
         T = np.r_[tris[dom[:, 0] == d], tris[dom[:, 1] == d][:, [1, 0, 2]]]
         E = np.r_[T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]
@@ -645,15 +638,10 @@ def surface_ecs_fraction(G, tris, tags, box):
     X = G[tris]
     vol = np.einsum("ij,ij->i", X[:, 0], np.cross(X[:, 1], X[:, 2])) / 6
     din = np.array([t[0] for t in tags]); dout = np.array([t[1] for t in tags])
-    return (vol[din == 1].sum() - vol[dout == 1].sum()) / np.prod(box)
+    return (vol[din == ECS].sum() - vol[dout == ECS].sum()) / np.prod(box)
 
 
 # --- volume -------------------------------------------------------------------------------------------------------
-
-def _face_key(F, N):
-    F = np.sort(F, axis=1).astype(np.int64)
-    return (F[:, 0] * N + F[:, 1]) * N + F[:, 2]
-
 
 def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5):
     """Tet mesh of a closed surface mesh from `surface_mesh`: TetGen, then netgen optimization of the interior.
@@ -683,7 +671,7 @@ def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=1
     Y = G[tris]
     nrm = np.cross(Y[:, 1] - Y[:, 0], Y[:, 2] - Y[:, 0])
     j0 = np.searchsorted(fk, sk)
-    votes = np.zeros((nc, n_cells + 2))
+    votes = np.zeros((nc, CELL0 + n_cells))
     din = np.array([t[0] for t in tags]); dout = np.array([t[1] for t in tags])
     for off in (0, 1):
         jj = np.minimum(j0 + off, len(fk) - 1)
@@ -692,9 +680,9 @@ def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=1
         np.add.at(votes, (comp[ft[jj[ok]]], np.where(side < 0, din, dout)[ok]), 1)
     reg = votes.argmax(1)
     purity = votes.max(1) / np.maximum(votes.sum(1), 1)
-    if np.any(reg == 0) or purity.min() < 0.99:
-        raise RuntimeError(f"tet regions: {np.sum(reg == 0)} unlabelled components, min purity {purity.min():.3f}")
-    ecs = np.nonzero(reg == 1)[0]
+    if np.any(reg == OUTSIDE) or purity.min() < 0.99:
+        raise RuntimeError(f"tet regions: {np.sum(reg == OUTSIDE)} unlabelled components, min purity {purity.min():.3f}")
+    ecs = np.nonzero(reg == ECS)[0]
     if len(ecs) > 1:
         # sealed ECS pockets (e.g. at a box corner that a cell crosses on all three walls) join the cell around them
         X = nodes[Tet]
@@ -704,98 +692,15 @@ def volume_mesh(G, tris, tags, n_cells, maxvol=0.15, minratio=1.5, mindihedral=1
         ca, cb = comp[ft[:-1][pair]], comp[ft[1:][pair]]
         for c in ecs[np.argsort(vol[ecs])[:-1]]:
             nb = np.r_[cb[ca == c], ca[cb == c]]
-            reg[c] = np.bincount(reg[nb], minlength=n_cells + 2).argmax()
-            logger.warning(f"sealed ECS pocket of {vol[c]:.2g} um^3 added to cell_{reg[c] - 2}")
+            reg[c] = np.bincount(reg[nb], minlength=CELL0 + n_cells).argmax()
+            logger.warning(f"sealed ECS pocket of {vol[c]:.2g} um^3 added to cell_{reg[c] - CELL0}")
     treg = reg[comp]
-    if set(np.unique(treg)) != set(range(1, n_cells + 2)):
+    if set(np.unique(treg)) != set(range(ECS, CELL0 + n_cells)):
         raise RuntimeError("a domain received no tets")
     t1 = time.time()
-    mesh = tissue_mesh_from_labels(nodes, Tet, treg - 2)   # keep alive: its ngmesh dies with it
+    mesh = tissue_mesh_from_labels(nodes, Tet, treg - CELL0)   # keep alive: its ngmesh dies with it
     mesh.ngmesh.OptimizeVolumeMesh(MeshingParameters(optsteps3d=optsteps))
     mesh = ngs.Mesh(mesh.ngmesh.Copy())
     logger.info(f"volume: {mesh.ne} tets, {mesh.nv} points (TetGen {t1 - t0:.0f} s, "
                 f"netgen optimize {time.time() - t1:.0f} s)")
     return mesh
-
-
-def tissue_mesh_from_labels(nodes, tets, cell_id):
-    """NGSolve mesh with the tissue names from labelled tets (cell_id -1 = ECS, k = cell k).
-
-    Interfaces between the ECS and cell k become `membrane_k`; faces on the box (the bounding box of the nodes)
-    become `cell_boundary` (cell side) or the wall name (ECS side).
-    """
-    nodes = np.asarray(nodes, float)
-    tets = np.asarray(tets, np.int64).copy()
-    treg = np.asarray(cell_id, np.int64) + 2         # netgen domain: 1 = ECS, k + 2 = cell k
-    lo, hi = nodes.min(0), nodes.max(0)
-    N = len(nodes)
-    X = nodes[tets]
-    sv = np.einsum("ij,ij->i", np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0]), X[:, 3] - X[:, 0])
-    tets[sv > 0] = tets[sv > 0][:, [1, 0, 2, 3]]     # netgen orientation
-    faces = np.r_[tets[:, [1, 2, 3]], tets[:, [0, 2, 3]], tets[:, [0, 1, 3]], tets[:, [0, 1, 2]]]
-    opp = np.r_[tets[:, 0], tets[:, 1], tets[:, 2], tets[:, 3]]
-    freg = np.tile(treg, 4)
-    fk = _face_key(faces, N)
-    o = np.lexsort((freg, fk))
-    faces, fk, opp, freg = faces[o], fk[o], opp[o], freg[o]
-    pair = np.r_[fk[1:] == fk[:-1], False]
-    first = np.r_[True, ~pair[:-1]]                  # first face of each key
-    single = first & ~pair
-    iface = np.nonzero(pair & (freg != np.r_[freg[1:], -1]))[0]   # faces i, i + 1 in different domains
-    if np.any((freg[iface] > 1) & (freg[iface + 1] > 1)):
-        raise ValueError("cells touch: tissue meshes need ECS between all cells")
-    # interfaces: domin = cell (freg[i + 1], the higher domain), domout = ECS; boundary faces: domout = 0
-    F = np.r_[faces[iface], faces[single]]
-    domin = np.r_[freg[iface + 1], freg[single]]
-    domout = np.r_[freg[iface], np.zeros(single.sum(), np.int64)]
-    opp_in = np.r_[opp[iface + 1], opp[single]]
-    names = [f"membrane_{d - 2}" for d in domin[:len(iface)]]
-    C = nodes[faces[single]].mean(1)
-    tol = 1e-6 * np.max(hi - lo)
-    on = np.c_[np.abs(C - lo) < tol, np.abs(C - hi) < tol][:, [0, 3, 1, 4, 2, 5]]   # WALLS order
-    if not np.all(on.any(1)):
-        raise ValueError("boundary face off the box: the mesh is not a box")
-    names += ["cell_boundary" if d > 1 else WALLS[w] for d, w in zip(domin[len(iface):], on.argmax(1))]
-    Y = nodes[F]
-    s = np.einsum("ij,ij->i", np.cross(Y[:, 1] - Y[:, 0], Y[:, 2] - Y[:, 0]), nodes[opp_in] - Y[:, 0])
-    F[s > 0] = F[s > 0][:, [1, 0, 2]]                # normal out of domin
-
-    m = Mesh(dim=3)
-    m.AddPoints(np.ascontiguousarray(nodes))
-    for d in range(1, treg.max() + 1):
-        m.SetMaterial(d, "ecs" if d == 1 else f"cell_{d - 2}")
-        m.AddElements(dim=3, index=d, data=np.ascontiguousarray(tets[treg == d], np.int32), base=0)
-    groups = {}
-    for i, key in enumerate(zip(domin, domout, names)):
-        groups.setdefault(key, []).append(i)
-    for gi, ((di, do, name), idx) in enumerate(sorted(groups.items())):
-        fd = m.Add(FaceDescriptor(surfnr=gi + 1, domin=int(di), domout=int(do), bc=gi + 1))
-        m.SetBCName(fd - 1, name)
-        m.AddElements(dim=2, index=fd, data=np.ascontiguousarray(F[idx], np.int32), base=0)
-    return ngs.Mesh(m)
-
-
-# --- file I/O -----------------------------------------------------------------------------------------------------
-
-def save_tissue_mesh(path, mesh, **meta):
-    """Write a tissue mesh as .vtu: tets with a `cell_id` (-1 = ECS, k = cell_k); `meta` goes to the field data."""
-    ngm = mesh.ngmesh
-    el = ngm.Elements3D().NumPy()
-    tets = el["nodes"][:, :4].astype(np.int64) - 1
-    names = ["ecs"] + [f"cell_{k}" for k in range(len(mesh.GetMaterials()) - 1)]
-    if list(mesh.GetMaterials()) != names:
-        raise ValueError(f"not a tissue mesh: materials {mesh.GetMaterials()}")
-    grid = pv.UnstructuredGrid({pv.CellType.TETRA: tets}, ngm.Coordinates())
-    grid.cell_data["cell_id"] = el["index"].astype(np.int32) - 2
-    for key, value in meta.items():
-        grid.field_data[key] = np.atleast_1d(value)
-    grid.save(path)
-
-
-def load_tissue_mesh(path):
-    """Read a .vtu file from `save_tissue_mesh`. Returns (mesh, meta), size-1 field data as scalars."""
-    grid = pv.read(path)
-    tets = grid.cells_dict[pv.CellType.TETRA]
-    mesh = tissue_mesh_from_labels(grid.points, tets, grid.cell_data["cell_id"])
-    meta = {k: (v.item() if v.size == 1 else v) for k, v in ((k, grid.field_data[k]) for k in grid.field_data)}
-    return mesh, meta
