@@ -1,4 +1,4 @@
-"""Tube-shaped cells: chains of Voronoi pieces, a dendrite-like alternative to `rounded_voronoi.make_cells`.
+"""Tube-shaped cells: chains of Voronoi pieces, a dendrite-like alternative to `rounded_voronoi.make_rounded_voronoi_cells`.
 
 Lloyd-relaxed seeds at spacing d are linked greedily into chains (turning angle < `max_turn`, random length);
 leftover short chains are attached to a neighbouring chain, which gives branches and spine-like stubs. Every chain
@@ -12,7 +12,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import ConvexHull, HalfspaceIntersection, Voronoi, cKDTree
 
-from bmbcsim.geometry.cells import (box_halfspaces, chebyshev_center, edge_margin, facet_triangles,
+from bmbcsim.geometry.cells import (CellSet, box_halfspaces, chebyshev_center, edge_margin, facet_triangles,
                                     fit_rounding_and_shift, rounded_polytope, rounding_radii, voronoi_seeds)
 
 
@@ -224,9 +224,8 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         seed: Random seed for the seeds and the chains.
 
     Returns:
-        (cells, ids, info): the `UnionCell` cells, a w-independent label of each cell, and a dict with chain/cell
-        statistics and `faces`: per cell, the triangles (M, 3, 3) of the raw Voronoi faces inside the box between
-        its pieces and those of other cells, a reference surface that does not depend on w (synapse placement).
+        The `UnionCell` cells, labelled by chain component, with chain and cell statistics. A cell's faces are
+        the raw Voronoi faces between its pieces and those of other cells.
     """
     B = np.asarray(box, float)
     rng = np.random.default_rng(seed)
@@ -330,7 +329,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     if not cells:
         raise ValueError(f"no cell has a volume of at least {v_drop} in the box")
     n_pieces = np.array([len(c.pieces) for c in cells])
-    info = dict(n_seeds=n, n_chains=chain.max() + 1, n_cells=len(cells), n_bad=n_bad, n_shifted=n_shifted,
-                pieces_lost=n_lost, pieces=np.percentile(n_pieces, [0, 25, 50, 75, 100]).tolist(),
-                volume_median=float(np.median(vols)), faces=faces)
-    return cells, ids, info
+    stats = dict(n_seeds=n, n_chains=chain.max() + 1, n_cells=len(cells), n_bad=n_bad, n_shifted=n_shifted,
+                 pieces_lost=n_lost, pieces=np.percentile(n_pieces, [0, 25, 50, 75, 100]).tolist(),
+                 volume_median=float(np.median(vols)))
+    return CellSet(cells, np.array(ids), faces, stats)

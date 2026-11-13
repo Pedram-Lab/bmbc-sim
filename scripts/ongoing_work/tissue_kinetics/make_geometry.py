@@ -49,18 +49,18 @@ def radius_ratio(X):
 
 def make_geometry(seed, ecs_ratio, args):
     import ngsolve as ngs
-    from bmbcsim.geometry.rounded_voronoi import make_cells
+    from bmbcsim.geometry.rounded_voronoi import make_rounded_voronoi_cells
     from bmbcsim.geometry.tube_cells import make_tube_cells
     from bmbcsim.logging import logger
     from bmbcsim.meshing import tissue_mesher as tm
 
     box = np.array(args.box, float)
-    make = make_tube_cells if args.cells == "tube" else make_cells
+    make = make_tube_cells if args.cells == "tube" else make_rounded_voronoi_cells
     lo, hi = args.w_bracket
     for it in range(args.max_iter):
         w = (lo + hi) / 2
-        cells, ids, info = make(w, args.r, box, d=args.d, seed=seed)
-        G, T, tags = tm.surface_mesh(cells, box, args.h, workers=args.workers)
+        cs = make(w, args.r, box, d=args.d, seed=seed)
+        G, T, tags = tm.surface_mesh(cs.cells, box, args.h, workers=args.workers)
         alpha = tm.surface_ecs_fraction(G, T, tags, box)
         logger.info(f"seed {seed}, target {ecs_ratio}: w = {w:.5f} -> ECS fraction {alpha:.4f}")
         if abs(alpha - ecs_ratio) <= args.tol:
@@ -70,20 +70,20 @@ def make_geometry(seed, ecs_ratio, args):
         raise RuntimeError(f"seed {seed}: no w in {args.w_bracket} gives ECS fraction {ecs_ratio} +- {args.tol} "
                            f"after {args.max_iter} bisection steps (last: w = {w:.5f}, {alpha:.4f})")
 
-    mesh = tm.volume_mesh(G, T, tags, len(cells))
+    mesh = tm.volume_mesh(G, T, tags, len(cs.cells))
     alpha_mesh = ngs.Integrate(1, mesh, definedon=mesh.Materials("ecs")) / box.prod()
     if abs(alpha_mesh - ecs_ratio) > args.tol:      # only a merged sealed ECS pocket changes it
         logger.warning(f"seed {seed}: mesh ECS fraction {alpha_mesh:.4f} misses the target {ecs_ratio}")
     el = mesh.ngmesh.Elements3D().NumPy()["nodes"][:, :4].astype(np.int64) - 1
     q = radius_ratio(np.array(mesh.ngmesh.Coordinates())[el])
-    logger.info(f"seed {seed}, target {ecs_ratio}: {len(cells)} cells ({info['n_shifted']} shifted, "
-                f"{info['n_bad']} below the wall margin), {mesh.ne} tets, radius ratio min {q.min():.1e}, "
+    logger.info(f"seed {seed}, target {ecs_ratio}: {len(cs.cells)} cells ({cs.stats['n_shifted']} shifted, "
+                f"{cs.stats['n_bad']} below the wall margin), {mesh.ne} tets, radius ratio min {q.min():.1e}, "
                 f"0.1 % quantile {np.quantile(q, 1e-3):.3f}, median {np.median(q):.3f}")
 
     path = geometry_file(args.out, seed, ecs_ratio)
-    faces = info["faces"]
+    faces = cs.faces
     tm.save_tissue_mesh(path, mesh, ecs_ratio=ecs_ratio, ecs_fraction=alpha_mesh, w=w, seed=seed, box=box,
-                        cell_diam=args.d, rounding=args.r, mesh_size=args.h, seed_ids=ids,
+                        cell_diam=args.d, rounding=args.r, mesh_size=args.h, cell_labels=cs.labels,
                         ref_faces=np.concatenate(faces).reshape(-1, 9),
                         ref_cell=np.repeat(np.arange(len(faces)), [len(f) for f in faces]))
     logger.info(f"-> {path}")

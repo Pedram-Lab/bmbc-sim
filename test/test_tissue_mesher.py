@@ -6,7 +6,7 @@ for module in ("pymeshlab", "triangle", "tetgen"):
     pytest.importorskip(module)
 
 from bmbcsim.geometry.cells import box_halfspaces, facet_triangles
-from bmbcsim.geometry.rounded_voronoi import make_cells
+from bmbcsim.geometry.rounded_voronoi import make_rounded_voronoi_cells
 from bmbcsim.geometry.tube_cells import make_tube_cells
 from bmbcsim.meshing import tissue_mesher as tm
 
@@ -16,9 +16,10 @@ BOX = np.array([6.0, 6.0, 1.0])
 @pytest.fixture(scope="module")
 def tissue():
     """Small tissue mesh: 7 rounded Voronoi cells, gap 0.1, in a 6 x 6 x 1 box."""
-    cells, ids, _ = make_cells(0.1, 0.5, BOX, seed=0)
-    G, T, tags = tm.surface_mesh(cells, BOX, 0.3, workers=8)
-    return len(cells), ids, tm.surface_ecs_fraction(G, T, tags, BOX), tm.volume_mesh(G, T, tags, len(cells))
+    cs = make_rounded_voronoi_cells(0.1, 0.5, BOX, seed=0)
+    G, T, tags = tm.surface_mesh(cs.cells, BOX, 0.3, workers=8)
+    alpha = tm.surface_ecs_fraction(G, T, tags, BOX)
+    return len(cs.cells), cs.labels, alpha, tm.volume_mesh(G, T, tags, len(cs.cells))
 
 
 def _volume(mesh, name):
@@ -43,9 +44,9 @@ def test_tissue_mesh_names_and_volume(tissue):
 def test_save_load_round_trip(tissue, tmp_path):
     n_cells, ids, _, mesh = tissue
     path = tmp_path / "tissue.vtu"
-    tm.save_tissue_mesh(path, mesh, w=0.1, seed=0, seed_ids=ids)
+    tm.save_tissue_mesh(path, mesh, w=0.1, seed=0, cell_labels=ids)
     loaded, meta = tm.load_tissue_mesh(path)
-    assert meta["w"] == 0.1 and meta["seed"] == 0 and list(meta["seed_ids"]) == ids
+    assert meta["w"] == 0.1 and meta["seed"] == 0 and np.array_equal(meta["cell_labels"], ids)
     assert (loaded.ne, loaded.nv) == (mesh.ne, mesh.nv)
     assert loaded.GetMaterials() == mesh.GetMaterials()
     assert set(loaded.GetBoundaries()) == set(mesh.GetBoundaries())
@@ -69,13 +70,13 @@ def test_facet_triangles_cube():
 def test_tube_cells_mesh():
     """Tube cells in a 4 x 4 x 1 box mesh, and their reference faces do not depend on w."""
     box = np.array([4.0, 4.0, 1.0])
-    cells, ids, info = make_tube_cells(0.1, 0.25, box, seed=2)
-    _, ids2, info2 = make_tube_cells(0.2, 0.25, box, seed=2, n_r=0, n_shift=0)  # no r_k / shift search: faster
-    assert ids == ids2 and len(cells) > 3
-    for f, f2 in zip(info["faces"], info2["faces"]):
+    cs = make_tube_cells(0.1, 0.25, box, seed=2)
+    cs2 = make_tube_cells(0.2, 0.25, box, seed=2, n_r=0, n_shift=0)  # no r_k / shift search: faster
+    assert np.array_equal(cs.labels, cs2.labels) and len(cs.cells) > 3
+    for f, f2 in zip(cs.faces, cs2.faces):
         assert len(f) and np.array_equal(f, f2)
-    G, T, tags = tm.surface_mesh(cells, box, 0.25, workers=8)
-    mesh = tm.volume_mesh(G, T, tags, len(cells))
+    G, T, tags = tm.surface_mesh(cs.cells, box, 0.25, workers=8)
+    mesh = tm.volume_mesh(G, T, tags, len(cs.cells))
     assert _volume(mesh, "ecs") / box.prod() == pytest.approx(tm.surface_ecs_fraction(G, T, tags, box), abs=1e-9)
 
 

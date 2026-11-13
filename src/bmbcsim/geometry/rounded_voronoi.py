@@ -8,12 +8,12 @@ with the same numbering.
 import numpy as np
 from scipy.spatial import ConvexHull, HalfspaceIntersection, Voronoi
 
-from bmbcsim.geometry.cells import (box_halfspaces, chebyshev_center, edge_margin, facet_triangles,
+from bmbcsim.geometry.cells import (CellSet, box_halfspaces, chebyshev_center, edge_margin, facet_triangles,
                                     fit_rounding_and_shift, rounded_polytope, rounding_radii, voronoi_seeds)
 
 
-def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1.3), n_r=25, max_shift=0.05,
-               n_shift=200):
+def make_rounded_voronoi_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1.3), n_r=25,
+                               max_shift=0.05, n_shift=200):
     """Rounded Voronoi cells with gap w inside the box [0, box].
 
     A Voronoi cell is kept if its raw (uneroded) volume inside the box is at least `v_drop`; this does not depend
@@ -29,10 +29,8 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         seed: Random seed for the seeds.
 
     Returns:
-        (cells, ids, info): the `RoundedPolytope` cells, the seed index of each cell, and a dict with the number
-        of shifted cells, of cells that still miss the `delta` margin (`n_bad`), and `faces`: per cell, the
-        triangles (M, 3, 3) of its raw Voronoi faces inside the box, a reference surface that does not depend
-        on w.
+        The `RoundedPolytope` cells, labelled by seed index; stats: the number of shifted cells and of cells that
+        still miss the `delta` margin (`n_bad`).
     """
     B = np.asarray(box, float)
     pts = voronoi_seeds(B, d, seed)
@@ -75,4 +73,4 @@ def make_cells(w, r, box, d=4.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0.7, 1
         faces.append(tris[k < len(hs_in) - 6])    # not on the box walls
     if not cells:
         raise ValueError(f"no cell has a volume of at least {v_drop} in the box")
-    return cells, ids, dict(n_bad=n_bad, n_shifted=n_shifted, faces=faces)
+    return CellSet(cells, np.array(ids), faces, dict(n_bad=n_bad, n_shifted=n_shifted))

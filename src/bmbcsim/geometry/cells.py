@@ -4,9 +4,27 @@ A cell (or a piece of one) is a convex polytope rounded by a radius r: an exact 
 exact closest-point projection, which `bmbcsim.meshing.tissue_mesher` meshes. Halfspaces are rows (n, c) of
 {x: n . x + c <= 0} with unit normals n.
 """
+from dataclasses import dataclass, field
+
 import numpy as np
 from scipy.optimize import linprog
 from scipy.spatial import ConvexHull, HalfspaceIntersection, cKDTree
+
+
+@dataclass
+class CellSet:
+    """The cells from a generator at gap w; `labels` and `faces` do not depend on w.
+
+    Attributes:
+        cells: Objects with the cell interface of `bmbcsim.meshing.tissue_mesher.Cell`.
+        labels: A label of each cell that identifies it across w (seed index, or chain component for tubes).
+        faces: Per cell, the triangles (M, 3, 3) of its raw Voronoi faces inside the box and off the walls.
+        stats: Diagnostics of the generator.
+    """
+    cells: list
+    labels: np.ndarray
+    faces: list
+    stats: dict = field(default_factory=dict)
 
 
 def voronoi_seeds(box, d, seed, n_lloyd=20):
