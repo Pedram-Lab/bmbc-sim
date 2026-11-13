@@ -3,7 +3,8 @@
 For each (seed, ecs_ratio), fits the gap w between the cells until the ECS fraction of the surface mesh is
 within ``--tol`` of the target, then builds the tet mesh once and writes ``tissue_s{seed}_ecs{NN}.vtu``
 (see ``geometry_file``) to ``data/cells`` or ``data/tubes``. The cell set and numbering depend only on the
-seed, not on w, so all ratios of one seed have the same cells. Simulations identify the geometry by (mesh_dir, seed, ecs_ratio).
+seed, not on w, so all ratios of one seed have the same cells. Simulations identify the geometry by
+(mesh_dir, seed, ecs_ratio) and read it with ``load_geometry``.
 
 The mesh also stores each cell's raw Voronoi faces (``ref_faces``, rows of 9 coordinates, and their cell
 ``ref_cell``), which do not depend on w; the simulation places synapses on them.

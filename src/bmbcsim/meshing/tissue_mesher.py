@@ -370,11 +370,11 @@ def _split_wall_edges(P, F, mask, cell, B):
     return P, F, mask
 
 
-def membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
+def _membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
     """Triangle mesh of one cell's surface inside the box.
 
     Args:
-        cell: The cell (see the module docstring).
+        cell: The cell (see `Cell`).
         box: Box size (3,).
         h: Target edge length.
         max_offset: Bound for the volume correction (see `surface_mesh`).
@@ -421,13 +421,13 @@ def membrane(cell, box, h, max_offset=np.inf, iters=10, snap=0.3, collapse=0.3):
     return P, F, mask
 
 
-def membrane_robust(cell, box, h, max_offset=np.inf,
+def _membrane_robust(cell, box, h, max_offset=np.inf,
                     variants=((1.0, 0.3), (0.95, 0.3), (1.05, 0.25), (0.9, 0.35), (1.1, 0.2))):
-    """`membrane` with retries at a slightly different h and snap distance. Returns (P, F, mask, attempt)."""
+    """`_membrane` with retries at a slightly different h and snap distance. Returns (P, F, mask, attempt)."""
     err = None
     for attempt, (fh, snap) in enumerate(variants):
         try:
-            return (*membrane(cell, box, h * fh, max_offset, snap=snap), attempt)
+            return (*_membrane(cell, box, h * fh, max_offset, snap=snap), attempt)
         except (MeshingError, ValueError) as e:     # ValueError: a point on a cell's core (cell.project)
             err = e
     raise MeshingError(f"membrane failed in all {len(variants)} variants: {err}")
@@ -690,7 +690,7 @@ def surface_mesh(cells, box, h, max_offset=np.inf, pool=None):
     t0 = time.time()
     B = np.asarray(box, float)
     args = [(c, B, h, max_offset) for c in cells]
-    mems = pool.starmap(membrane_robust, args, chunksize=1) if pool else [membrane_robust(*a) for a in args]
+    mems = pool.starmap(_membrane_robust, args, chunksize=1) if pool else [_membrane_robust(*a) for a in args]
     t_mem = time.time() - t0
     builder = _SurfaceBuilder(cells, B, h)
     surf = builder.build(mems)
@@ -792,7 +792,8 @@ def volume_mesh(surface, maxvol=0.15, minratio=1.5, mindihedral=10.0, optsteps=5
     reg = votes.argmax(1)
     purity = votes.max(1) / np.maximum(votes.sum(1), 1)
     if np.any(reg == OUTSIDE) or purity.min() < 1:       # mixed votes: two domains leak into each other
-        raise MeshingError(f"tet regions: {np.sum(reg == OUTSIDE)} unlabelled components, min purity {purity.min():.3f}")
+        raise MeshingError(f"tet regions: {np.sum(reg == OUTSIDE)} unlabelled components, "
+                           f"min purity {purity.min():.3f}")
     ecs = np.nonzero(reg == ECS)[0]
     if len(ecs) > 1:
         X = nodes[Tet]

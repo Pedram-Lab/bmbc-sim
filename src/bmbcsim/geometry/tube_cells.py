@@ -1,11 +1,11 @@
-"""Tube-shaped cells: chains of Voronoi pieces, a dendrite-like alternative to `rounded_voronoi.make_rounded_voronoi_cells`.
+"""Tube-shaped cells: chains of Voronoi pieces, a dendrite-like alternative to rounded Voronoi cells.
 
 Lloyd-relaxed seeds at spacing d are linked greedily into chains (turning angle < `max_turn`, random length);
 leftover short chains are attached to a neighbouring chain, which gives branches and spine-like stubs. Every chain
 (split where it leaves and re-enters the box) is one cell: the union of its Voronoi pieces, each eroded by w/2 + r
 only against other cells and rounded by r. Rounding a union equals the union of the rounded pieces, so the cell's
-SDF is the min over its pieces (exact outside), and two cells stay at least w apart (see `make_tube_cells`). As for
-the round cells, the cell set and numbering depend only on the seed, not on w.
+SDF is the min over its pieces (exact outside), and two cells stay at least w apart, w/2 after a shift (see
+`make_tube_cells`). As for the round cells, the cell set and numbering depend only on the seed, not on w.
 """
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -16,7 +16,7 @@ from bmbcsim.geometry.cells import (CellSet, box_halfspaces, chebyshev_center, e
                                     fit_rounding_and_shift, rounded_polytope, rounding_radii, voronoi_seeds)
 
 
-def link_chains(pts, nbrs, rng, max_turn=45.0, len_range=(4, 16), min_len=3, noise=0.3):
+def _link_chains(pts, nbrs, rng, max_turn=45.0, len_range=(4, 16), min_len=3, noise=0.3):
     """Greedy chains through the seed adjacency graph.
 
     Returns:
@@ -173,7 +173,7 @@ class UnionCell:
         return n / np.linalg.norm(n, axis=1)[:, None]
 
 
-def wall_defects(cell, B, delta, hg=0.025):
+def _wall_defects(cell, B, delta, hg=0.025):
     """Topology changes on the box walls: sum over walls of how much the number of connected components of
     {phi < t} differs between t = -delta, 0, delta (0 = every wall crossing is deep or missed by delta).
 
@@ -208,9 +208,9 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
     may come within w + 2 r_max of its own (seed distance below rho_a + rho_c + w + 2 r_max, rho = Voronoi
     circumradius), not only against its Voronoi neighbours. A ball of radius w/2 + r_a around any core point of a
     then stays on a's side of every such bisector, so the two surfaces are at least w apart, whatever shape the
-    union has.
+    union has (at least w/2 where a cell was shifted).
 
-    Wall crossings (see `wall_defects`) are made robust by one r_k for the whole cell from r * r_range, then by a
+    Wall crossings (see `_wall_defects`) are made robust by one r_k for the whole cell from r * r_range, then by a
     translation (see `fit_rounding_and_shift`).
 
     `n_mid` extra seeds on each link (same cell) make the tubes smoother and the creases between pieces shallower.
@@ -238,7 +238,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         return vor, nbrs
 
     vor, nbrs = adjacency(pts)
-    chain, links = link_chains(pts, nbrs, rng, **chain_kw)
+    chain, links = _link_chains(pts, nbrs, rng, **chain_kw)
     if n_mid and links:
         L = np.array(links)
         t = np.arange(1, n_mid + 1) / (n_mid + 1)
@@ -302,7 +302,7 @@ def make_tube_cells(w, r, box, d=2.0, seed=0, v_drop=1.0, delta=0.05, r_range=(0
         return UnionCell(ok) if ok else None
 
     def score(cell):
-        return wall_defects(cell, B, delta), max(delta - edge_margin(cell, B), 0.0)
+        return _wall_defects(cell, B, delta), max(delta - edge_margin(cell, B), 0.0)
 
     cells, ids, faces, n_bad, n_lost, n_shifted, vols = [], [], [], 0, 0, 0, []
     for c in range(nc):
