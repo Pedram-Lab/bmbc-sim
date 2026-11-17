@@ -1,0 +1,12 @@
+# One cell in a bath of 2.0, 1.2 and 0.8 mM Ca2+, 20 APs at 20 Hz from 1 s, 4 s in
+# total (the Config defaults). The influx law is the same in all three: zero at
+# 0.47 mM, full at 2.0 mM. 3 runs.
+# Run: uv run scripts/ongoing_work/neuron_bath/sweep.py
+defaults:
+  - cluster: local
+  - _self_
+
+result_root: results/neuron-bath-sweep
+
+sweep:
+  diffusion.ca_ecs: ["2.0 mM", "1.2 mM", "0.8 mM"]
