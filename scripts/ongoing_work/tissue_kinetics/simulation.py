@@ -40,7 +40,7 @@ class Geometry(ConfigGroup):
     """
 
     # data/cells (round cells) or data/tubes (tube-shaped cells)
-    mesh_dir: str = "data/cells"
+    mesh_dir: str = "data/tubes"
     seed: int = 0
     # Target ECS volume fraction (a whole percentage); the measured one is in geometry.json
     ecs_ratio: float = 0.1
