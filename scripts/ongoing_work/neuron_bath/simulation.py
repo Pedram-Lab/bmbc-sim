@@ -64,9 +64,12 @@ class Uptake(ConfigGroup):
     first_pulse: Quantity("ms") = "1 s"
     n_pulses: int = 20
     frequency: Quantity("Hz") = "20 Hz"
-    # Linear extrusion: cell Ca decays as exp(-t / extrusion_time). Not from the tissue
-    # kinetics (which has no extrusion); fit to the decay of the measured traces.
+    # Extrusion back into the bath (ProportionalFlux): linear in the cell Ca from zero up
+    # to extrusion_saturation, constant above. In the linear range, cell Ca decays as
+    # exp(-t / extrusion_time). Not from the tissue kinetics (which has no extrusion);
+    # fit to the decay of the measured traces.
     extrusion_time: Quantity("ms") = "500 ms"
+    extrusion_saturation: Quantity("mM") = "2.0 mM"
 
 
 class Config(SimulationConfig):
@@ -135,10 +138,12 @@ def run(cfg: Config) -> None:
         temporal=nmdar_waveform,
     )
     membrane.add_transport(ca, uptake, ecs, cell)
-    # ponytail: extruded Ca is removed instead of returned to the bath (< 0.01 mM there);
-    # needs a one-sided linear transport class to send it back.
-    extrusion = transport.Passive(cell.volume / upt.extrusion_time, 0.0 * u.mmol / u.L)
-    membrane.add_transport(ca, extrusion, cell, None)
+    extrusion = transport.ProportionalFlux(
+        flux=upt.extrusion_saturation * cell.volume / upt.extrusion_time,
+        saturation=upt.extrusion_saturation,
+        depletion=0.0 * u.mmol / u.L,
+    )
+    membrane.add_transport(ca, extrusion, cell, ecs)
 
     # --- Robin BC: transport from external reservoir into the bath ---
     boundary_permeability = diff.boundary_permeability
