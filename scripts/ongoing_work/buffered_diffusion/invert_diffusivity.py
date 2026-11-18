@@ -16,9 +16,9 @@ then once with ``ecm.enabled=true`` using the diffusivity this script
 returns. That matches the buffered run's effective ECS diffusivity to the
 unbuffered baseline. The (kf, Kd) constants below are pinned by hand, not
 read from ``simulation.py``'s defaults: this script is the ground truth for
-"the tissue values", and the tissue config has since drifted (its Kd default
-is now 10 mM; its contraction sweeps use kf = 769.23 / (mM s)). Check the
-constants against the tissue config you actually want to match.
+"the tissue values", and the tissue config can drift (they matched its
+defaults on 2026-11-18; its sweeps may override them). Check the constants
+against the tissue config you actually want to match.
 """
 import argparse
 
@@ -40,9 +40,9 @@ DEFAULT_SCENARIO = "replenishment"
 # Mirrors scripts/ongoing_work/tissue_kinetics/simulation.py's defaults.
 TISSUE_DIFFUSIVITY_ECS = 0.7  # um^2/ms, the "diffusion only" baseline to match
 TISSUE_CA_ECS = "1.3 mM"
-TISSUE_ECM_TOTAL = "1.3 mM"
+TISSUE_ECM_TOTAL = "1.0 mM"
 TISSUE_KD = "1.0 mM"
-TISSUE_ECM_KF = "10.0 / (mM s)"
+TISSUE_ECM_KF = "100000.0 / (mM s)"
 
 
 def measure_d_eff(diffusivity, *, scenario=DEFAULT_SCENARIO, result_root=RESULT_ROOT,

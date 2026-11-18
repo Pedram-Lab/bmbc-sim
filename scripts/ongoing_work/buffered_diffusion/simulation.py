@@ -56,9 +56,9 @@ class Buffer(ConfigGroup):
     total match the tissue sim. Its bound fraction at equilibrium follows from
     Kd and whatever [Ca] it equilibrates against."""
 
-    ecm_total: Quantity("mM") = "2.0 mM"
-    ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
-    kd: Quantity("mM") = "1.3 mM"
+    ecm_total: Quantity("mM") = "1.0 mM"
+    ecm_kf: Quantity("1 / (mM s)") = "100000.0 / (mM s)"
+    kd: Quantity("mM") = "1.0 mM"
 
     @property
     def ecm_kr(self) -> u.Quantity:
@@ -195,7 +195,7 @@ def run(cfg: Config) -> None:
     if cfg.has_buffer:
         # The buffer starts in equilibrium with initial_ca (Langmuir binding):
         # ECM_Ca = ecm_total * Ca / (Ca + Kd). So "depleted" (Ca = 0) starts fully
-        # unbound; "saturated"/"replenishment" (Ca = Kd) start half-bound.
+        # unbound; "saturated"/"replenishment" (Ca = ca_source) start partly bound.
         # No add_diffusion call: the buffer does not move.
         bound = buffer_cfg.ecm_total * initial_ca / (initial_ca + buffer_cfg.kd)
         print(
