@@ -1,8 +1,9 @@
 """Visualize and analyze the relationship between min_ca and the spatial metrics.
 
 Loads a spatial_metrics.csv (from evaluate_synapse_distribution_spatial.py) and:
-  1. Plots min_ca vs each predictor (d_boundary, d_neighbor, v_local_*) with a
-     saturating-exponential fit y = a*(1 - exp(-b*(x-c))) and the pseudo R^2.
+  1. Plots min_ca vs each predictor (d_boundary, d_neighbor, v_local_*) with a fit
+     and its R^2. ``--model`` picks the fit: ``linear`` (default) y = a*x + b, or
+     ``exponential`` (saturating) y = a*(1 - exp(-b*(x-c))).
   2. Runs a PCA on the standardized predictor matrix and reports component
      loadings + per-PC and cumulative R^2 of min_ca regressed on the PCs.
 
@@ -28,21 +29,36 @@ def _sat_model(x, a, b, c):
     return a * (1.0 - np.exp(-b * (x - c)))
 
 
-def fit_saturating(x, y):
-    """Fit y = a*(1 - exp(-b*(x-c))). Returns dict(popt, r2) or None on failure."""
+def _lin_model(x, a, b):
+    return a * x + b
+
+
+# --model choices: name -> (function, formula for the printed table)
+MODELS = {
+    "linear": (_lin_model, "a*predictor + b"),
+    "exponential": (_sat_model, "a*(1 - exp(-b*(predictor - c)))"),
+}
+
+
+def fit_model(x, y, model="linear"):
+    """Fit MODELS[model] to (x, y). Returns dict(popt, r2) or None on failure."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     span_x = float(x.max() - x.min())
     if span_x <= 0 or len(x) < 4:
         return None
-    a0 = float(y.max())
-    b0 = 3.0 / span_x
-    c0 = float(x.min()) - 0.5 / b0
-    try:
-        popt, _ = curve_fit(_sat_model, x, y, p0=(a0, b0, c0), maxfev=10000)
-    except (RuntimeError, ValueError):
-        return None
-    y_pred = _sat_model(x, *popt)
+    f = MODELS[model][0]
+    if model == "linear":
+        popt = np.polyfit(x, y, 1)
+    else:
+        a0 = float(y.max())
+        b0 = 3.0 / span_x
+        c0 = float(x.min()) - 0.5 / b0
+        try:
+            popt, _ = curve_fit(f, x, y, p0=(a0, b0, c0), maxfev=10000)
+        except (RuntimeError, ValueError):
+            return None
+    y_pred = f(x, *popt)
     ss_res = float(((y - y_pred) ** 2).sum())
     ss_tot = float(((y - y.mean()) ** 2).sum())
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
@@ -219,7 +235,7 @@ def _on_pick(event, df, save_dir=None):
             kwargs={"save": save}).start()
 
 
-def plot_scatter_grid(df, predictors, out_path, color_sources=False):
+def plot_scatter_grid(df, predictors, out_path, color_sources=False, model="linear"):
     n = len(predictors)
     ncols = 3
     nrows = (n + ncols - 1) // ncols
@@ -230,10 +246,10 @@ def plot_scatter_grid(df, predictors, out_path, color_sources=False):
     for ax, col in zip(axes, predictors):
         x = df[col].values
         sources, color_map = _scatter_by_source(ax, df, x, y, color_sources)
-        fit = fit_saturating(x, y)
+        fit = fit_model(x, y, model)
         if fit is not None:
             xx = np.linspace(x.min(), x.max(), 128)
-            ax.plot(xx, _sat_model(xx, *fit["popt"]), "r-", lw=2,
+            ax.plot(xx, MODELS[model][0](xx, *fit["popt"]), "r-", lw=2,
                     label=fr"$R^2 = {fit['r2']:.3f}$")
         ax.set_xlabel(col)
         ax.set_ylabel("min_ca")
@@ -314,7 +330,7 @@ def pca_analysis(df, predictors):
     }
 
 
-def plot_pca(pca, df, out_path, color_sources=False):
+def plot_pca(pca, df, out_path, color_sources=False, model="linear"):
     n_pred = len(pca["predictors"])
     pc_labels = [f"PC{k + 1}" for k in range(n_pred)]
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
@@ -349,10 +365,10 @@ def plot_pca(pca, df, out_path, color_sources=False):
     x = pca["pcs"][:, 0]
     y = df["min_ca"].to_numpy()
     sources, color_map = _scatter_by_source(ax, df, x, y, color_sources)
-    fit = fit_saturating(x, y)
+    fit = fit_model(x, y, model)
     if fit is not None:
         xx = np.linspace(x.min(), x.max(), 128)
-        ax.plot(xx, _sat_model(xx, *fit["popt"]), "r-", lw=2,
+        ax.plot(xx, MODELS[model][0](xx, *fit["popt"]), "r-", lw=2,
                 label=fr"$R^2 = {fit['r2']:.3f}$")
     ax.set_xlabel(f"PC1 ({pca['explained'][0] * 100:.1f}% of predictor variance)")
     ax.set_ylabel("min_ca")
@@ -390,6 +406,9 @@ def parse_args():
                    help="Output directory for plots (default: same dir as first csv)")
     p.add_argument("--threshold", type=float, default=0.0,
                    help="Threshold for min_ca; rows with min_ca below this value are dropped")
+    p.add_argument("--model", choices=list(MODELS), default="linear",
+                   help="Curve fitted to min_ca vs each predictor and vs PC1 "
+                        "(default: linear)")
     p.add_argument("--color-sources", action="store_true",
                    help="Color points by source (a pooled CSV's group column, else "
                         "the source CSV); otherwise all points are one color")
@@ -434,19 +453,21 @@ def main():
     pca_path = os.path.join(out_dir, "pca_min_ca.png")
 
     figs = [plot_scatter_grid(df, predictors, scatter_path,
-                              color_sources=args.color_sources)]
+                              color_sources=args.color_sources, model=args.model)]
     print(f"Wrote {scatter_path}")
 
     print()
-    print("Saturating-exponential fits  min_ca ~ a*(1 - exp(-b*(predictor - c))):")
-    print(f"  {'predictor':>16s}  {'R^2':>7s}  {'a':>10s}  {'b':>10s}  {'c':>10s}")
+    print(f"{args.model.capitalize()} fits  min_ca ~ {MODELS[args.model][1]}:")
+    n_params = 2 if args.model == "linear" else 3
+    print(f"  {'predictor':>16s}  {'R^2':>7s}  " +
+          "  ".join(f"{name:>10s}" for name in "abc"[:n_params]))
     for col in predictors:
-        fit = fit_saturating(df[col].to_numpy(), df["min_ca"].to_numpy())
+        fit = fit_model(df[col].to_numpy(), df["min_ca"].to_numpy(), args.model)
         if fit is None:
             print(f"  {col:>16s}    (fit failed)")
             continue
-        a, b, c = fit["popt"]
-        print(f"  {col:>16s}  {fit['r2']:7.4f}  {a:10.4g}  {b:10.4g}  {c:10.4g}")
+        print(f"  {col:>16s}  {fit['r2']:7.4f}  " +
+              "  ".join(f"{v:10.4g}" for v in fit["popt"]))
 
     pca = pca_analysis(df, predictors)
     print()
@@ -462,7 +483,8 @@ def main():
     for k in range(len(predictors)):
         print(f"  PC{k + 1:>2d}  {pca['per_pc_r2'][k]:16.4f}  {pca['cumulative_r2'][k]:16.4f}")
 
-    figs.append(plot_pca(pca, df, pca_path, color_sources=args.color_sources))
+    figs.append(plot_pca(pca, df, pca_path, color_sources=args.color_sources,
+                         model=args.model))
     print(f"\nWrote {pca_path}")
 
     if args.save_explore:
