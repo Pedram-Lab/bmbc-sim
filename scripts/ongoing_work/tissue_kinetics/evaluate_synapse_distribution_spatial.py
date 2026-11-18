@@ -43,7 +43,7 @@ from bmbcsim.simulation.result_io import find_run_dirs, run_seed
 from bmbcsim.utils import create_cluster
 from analysis import compute_local_ca, load_synapse_centers
 
-DEFAULT_RADII = (0.25, 0.5, 1.0, 2.0)  # um
+DEFAULT_RADII = (0.4, 1.0, 2.0)  # um
 # Heat time step t = DEFAULT_HEAT_M * h_bar^2. m~30 propagates the heat globally
 # while still resolving cell obstacles; tuned empirically on the
 # synapse_distribution_ecs_25 sweep (median heat-method residual ~0.14 um, max

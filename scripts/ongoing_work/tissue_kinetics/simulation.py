@@ -99,7 +99,7 @@ class ECM(ConfigGroup):
     enabled: bool = False
     # Mean ECM concentration over the ECS; the total amount is the same whether
     # the buffer is uniform or localized.
-    ecm_total: Quantity("mM") = "2.0 mM"
+    ecm_total: Quantity("mM") = "1.0 mM"
     # None: uniform buffer. Otherwise the buffer is a sum of Gaussians (this
     # standard deviation) centered on the synapses, confined to the ECS, scaled
     # so its ECS mean is ecm_total. Keep it at a few mesh edge lengths.
@@ -110,9 +110,9 @@ class ECM(ConfigGroup):
     local_target: list[int] | None = None
     # Parametrized by (kf, Kd) rather than (kf, kr): the on-rate kf is a property of
     # the molecules, while Kd = kr / kf is the affinity the buffer sweeps scan, so kr
-    # is the one to derive. Defaults are unchanged (kr = 100 / s = 0.1 / ms).
-    ecm_kf: Quantity("1 / (mM s)") = "10.0 / (mM s)"
-    ecm_kd: Quantity("mM") = "10.0 mM"
+    # is the one to derive.
+    ecm_kf: Quantity("1 / (mM s)") = "100000.0 / (mM s)"
+    ecm_kd: Quantity("mM") = "1.0 mM"
 
     @property
     def ecm_kr(self) -> u.Quantity:

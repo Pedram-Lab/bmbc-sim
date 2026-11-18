@@ -47,5 +47,5 @@ sweep:
   "diffusion.diffusivity_ecs, ecm.enabled":
     - ["0.7 um2 / ms", false]
     - ["0.8847 um2 / ms", true]
-  geometry.ecs_ratio: [0.1, 0.25]
-seeds: 10
+  geometry.ecs_ratio: [0.1, 0.17, 0.25]
+seeds: 1
