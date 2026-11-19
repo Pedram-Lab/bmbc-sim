@@ -37,10 +37,14 @@ of the sweep root (excluding processed-data/ and plots/), and every simulation r
 found anywhere beneath it is pooled -- so with more than one swept axis, the outer
 axis is the parameter and the inner ones are pooled into it. Parameters are shown in
 natural (numeric) order; ``--order`` takes a permutation of their positions to override it.
+``--split-ecs`` keeps the pooling over seeds but draws one box per ECS ratio (the run's
+``geometry.ecs_ratio``, read from its config, so it works for any directory layout)
+side by side within each parameter.
 
 Output, per sweep: a stacked 3-panel box plot at
-``<sweep>/plots/depletion_kinetics[_<metric>].png`` (no suffix for ``time``) and a
-tidy per-synapse CSV with all metrics at ``<sweep>/processed-data/depletion_kinetics.csv``.
+``<sweep>/plots/depletion_kinetics[_<metric>][_by-ecs].png`` (no metric suffix for
+``time``) and a tidy per-synapse CSV with all metrics and the ECS ratio at
+``<sweep>/processed-data/depletion_kinetics.csv``.
 """
 
 import argparse
@@ -63,12 +67,13 @@ from simulation import Config
 
 
 def protocol(result_path):
-    """(C0, T0) of a run: baseline Ca (mM) and stimulus onset (ms) from its config.yaml."""
+    """(C0, T0, ECS ratio) of a run: baseline Ca (mM), stimulus onset (ms) and
+    ``geometry.ecs_ratio``, from its config.yaml."""
     with open(os.path.join(result_path, "config.yaml"), encoding="utf-8") as f:
         cfg = Config.model_validate(yaml.safe_load(f))
     c0 = float(cfg.diffusion.ca_ecs.to("mM").value)
     t0 = float(min(t.to("ms").value for t in cfg.synapse.pulse_times))
-    return c0, t0
+    return c0, t0, cfg.geometry.ecs_ratio
 
 _RESERVED_DIRS = NON_RUN_DIRS
 
@@ -265,50 +270,76 @@ def trace_metrics(times, ca, c0, t0):
 # ---------------------------------------------------------------------------
 
 def process_seed(result_path):
-    """Return per-synapse metric rows for one seed result directory."""
-    c0, t0 = protocol(result_path)
+    """Return (ECS ratio, per-synapse metric rows) for one seed result directory."""
+    c0, t0, ecs_ratio = protocol(result_path)
     times, local_ca = compute_local_ca(result_path)
-    return [trace_metrics(times, local_ca[:, s], c0, t0) for s in range(local_ca.shape[1])]
+    return ecs_ratio, [trace_metrics(times, local_ca[:, s], c0, t0) for s in range(local_ca.shape[1])]
 
 
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
 
-def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses, metrics):
-    """Stacked box plots: one panel per (key, label) in `metrics`, one box per parameter."""
+_SLOT_INCHES = 1.0  # horizontal space per parameter
+_BOX_WIDTH = 0.12   # box width, in parameter slots (i.e. in inches at the scale above)
+
+
+def plot_sweep(sweep_name, param_labels, data, out_path, n_synapses, metrics, split_ecs=False):
+    """Stacked box plots: one panel per (key, label) in `metrics`, one box per parameter
+    (with `split_ecs`: one box per ECS ratio, side by side within each parameter)."""
     n = len(param_labels)
-    fig_w = max(7.0, 0.55 * n + 2.5)
+    # Fixed x scale (inches per parameter slot) so a box has the same size on paper for
+    # any number of parameters and groups; few parameters just leave room at the sides.
+    fig_w = max(4.5, _SLOT_INCHES * n + 2.0)
     fig, axes = plt.subplots(len(metrics), 1, sharex=True, figsize=(fig_w, 8.0))
     positions = np.arange(n) + 1
 
+    # One box per group within each parameter; a single group (None) pools everything.
+    if split_ecs:
+        groups = sorted({e for label in param_labels for e in data[label]["ecs_ratio"]})
+    else:
+        groups = [None]
+    colors = [f"C{g}" for g in range(len(groups))]  # default colour cycle, in ECS order
+
     for ax, (key, ylabel) in zip(axes, metrics):
-        series = [data[label][key] for label in param_labels]
-        series = [arr[np.isfinite(arr)] for arr in series]
-        bp = ax.boxplot(
-            series, positions=positions, widths=0.6, patch_artist=True,
-            showfliers=False, medianprops=dict(color="black"),
-        )
-        for patch in bp["boxes"]:
-            patch.set(facecolor="#4C72B0", alpha=0.6)
+        handles = []
+        for g, (ecs, color) in enumerate(zip(groups, colors)):
+            series = [
+                data[label][key] if ecs is None
+                else data[label][key][data[label]["ecs_ratio"] == ecs]
+                for label in param_labels
+            ]
+            series = [arr[np.isfinite(arr)] for arr in series]
+            bp = ax.boxplot(
+                series, positions=positions + (g - (len(groups) - 1) / 2) * 1.4 * _BOX_WIDTH,
+                widths=_BOX_WIDTH, patch_artist=True,
+                showfliers=False, medianprops=dict(color="black"),
+            )
+            for patch in bp["boxes"]:
+                patch.set(facecolor=color, alpha=0.7)
+            handles.append(bp["boxes"][0])
         ax.set_ylabel(ylabel)
         ax.grid(True, axis="y", alpha=0.3)
-        ax.margins(x=0.02)
         # Prune top/bottom y ticks so adjacent (touching) panels don't collide.
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=5, prune="both"))
 
     axes[-1].set_xticks(positions)
+    half_span = (0.98 - 0.13) * fig_w / _SLOT_INCHES / 2  # axes width in parameter slots
+    axes[-1].set_xlim((n + 1) / 2 - half_span, (n + 1) / 2 + half_span)
     rot = 90 if n > 6 else 45
     ha = "center" if rot == 90 else "right"
     axes[-1].set_xticklabels(
         param_labels, rotation=rot, ha=ha, rotation_mode="anchor",
         fontsize=8 if n > 12 else 9,
     )
+    pooling = "split by ECS ratio, pooled over seeds" if split_ecs else "pooled over ECS ratios & seeds"
     axes[0].set_title(
-        f"{sweep_name}\n"
-        f"synapse Ca depletion kinetics ({n_synapses} traces, pooled over ECS ratios & seeds)",
+        f"{sweep_name}\nsynapse Ca depletion kinetics ({n_synapses} traces, {pooling})",
         fontsize=10,
     )
+    if split_ecs:
+        axes[0].legend(handles, [f"{e:g}" for e in groups], title="ECS ratio",
+                       loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, title_fontsize=8)
 
     fig.align_ylabels(axes)
     fig.subplots_adjust(hspace=0.0, left=0.13, right=0.98, top=0.94,
@@ -331,10 +362,12 @@ def parse_args():
     p.add_argument("--metric", choices=FAMILIES, default="time",
                    help="Kinetics metric family to plot around the minimum-[Ca] panel "
                         "(the CSV always holds all of them). Default: %(default)s")
+    p.add_argument("--split-ecs", action="store_true",
+                   help="One box per ECS ratio within each parameter instead of pooling them")
     return p.parse_args()
 
 
-def run_sweep(sweep_dir, metric, order=None):
+def run_sweep(sweep_dir, metric, order=None, split_ecs=False):
     sweep_dir = os.path.abspath(sweep_dir)
     sweep_name = os.path.basename(sweep_dir.rstrip("/"))
     params = discover_parameters(sweep_dir)
@@ -350,16 +383,17 @@ def run_sweep(sweep_dir, metric, order=None):
 
     # tidy rows for CSV, plus arrays for plotting
     csv_rows = []
-    collected = {label: {key: [] for key in LABELS} for label, _ in params}
+    collected = {label: {key: [] for key in (*LABELS, "ecs_ratio")} for label, _ in params}
     for label, seed_dirs in params:
         for sd in seed_dirs:
             try:
-                rows = process_seed(sd)
+                ecs_ratio, rows = process_seed(sd)
             except Exception as e:
                 print(f"    {label}/{os.path.basename(sd)}: skipped ({type(e).__name__}: {e})")
                 continue
             for syn, m in enumerate(rows):
-                csv_rows.append((label, os.path.basename(sd), syn, *(m[k] for k in LABELS)))
+                csv_rows.append((label, ecs_ratio, os.path.basename(sd), syn, *(m[k] for k in LABELS)))
+                collected[label]["ecs_ratio"].append(ecs_ratio)
                 for k in LABELS:
                     collected[label][k].append(m[k])
 
@@ -377,12 +411,12 @@ def run_sweep(sweep_dir, metric, order=None):
     csv_path = os.path.join(processed_dir, "depletion_kinetics.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["parameter", "seed_dir", "synapse_idx", *LABELS])
+        w.writerow(["parameter", "ecs_ratio", "seed_dir", "synapse_idx", *LABELS])
         w.writerows(csv_rows)
 
-    suffix = "" if metric == "time" else f"_{metric}"
+    suffix = ("" if metric == "time" else f"_{metric}") + ("_by-ecs" if split_ecs else "")
     plot_path = os.path.join(plots_dir, f"depletion_kinetics{suffix}.png")
-    plot_sweep(sweep_name, param_labels, data, plot_path, n_synapses, panels(metric))
+    plot_sweep(sweep_name, param_labels, data, plot_path, n_synapses, panels(metric), split_ecs)
     print(f"  Wrote {csv_path}")
     print(f"  Wrote {plot_path}")
 
@@ -391,7 +425,7 @@ def main():
     args = parse_args()
     for sweep_dir in args.sweeps:
         print(f"==> {sweep_dir}")
-        run_sweep(sweep_dir, args.metric, args.order)
+        run_sweep(sweep_dir, args.metric, args.order, args.split_ecs)
 
 
 if __name__ == "__main__":
