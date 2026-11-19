@@ -100,14 +100,18 @@ class DiffusionSolver:
         for i, compartment in enumerate(compartments):
             coefficients = compartment.coefficients
             trial, test = trial_and_test[i]
+            # The component only lives on its own compartment; restricting the integrators
+            # to it saves a pass over the whole mesh per compartment on every (re)assembly.
+            regions = "|".join(compartment.get_region_names(full_names=True))
+            dx = ngs.dx(definedon=fes.mesh.Materials(regions))
 
             # Set up diffusion stiffness matrix
             if species in coefficients.diffusion and \
                     (diffusivity := coefficients.diffusion[species]) is not None:
-                stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * ngs.dx
+                stiffness += diffusivity * ngs.grad(trial) * ngs.grad(test) * dx
 
             # Set up mass matrix
-            mass += trial * test * ngs.dx
+            mass += trial * test * dx
 
         # Membrane transport J = a_s c_s - a_t c_t + b is implicit in the diffusion
         # step: the a-terms enter a lumped bilinear form (coefficients lagged), b the rhs
@@ -699,11 +703,15 @@ class MechanicSolver:
         self._direction = self.deformation.vec.CreateVector()
         self._trial = self.deformation.vec.CreateVector()
         self._u_prev = self.deformation.vec.CreateVector()
+        self._inv = None  # last tangent factorisation, reused by :meth:`_newton_solve`
 
         # Set up volume tracking for concentration adjustment
         self._patch_mass = ngs.LinearForm(concentration_fes)
-        for psi in concentration_fes.TestFunction():
-            self._patch_mass += psi * ngs.dx
+        # Each component only lives on its own compartment; restricting its integrator
+        # to it saves a pass over the whole mesh per compartment on every time step.
+        for psi, compartment in zip(concentration_fes.TestFunction(), compartments):
+            regions = "|".join(compartment.get_region_names(full_names=True))
+            self._patch_mass += psi * ngs.dx(definedon=mesh.Materials(regions))
         self._patch_mass.Assemble()
 
         self._prev_mass = self._patch_mass.vec.FV().NumPy().copy()
@@ -768,7 +776,10 @@ class MechanicSolver:
 
         The line search rejects any trial step of non-finite energy -- an
         inverted element, det F <= 0 -- so the tangent is only ever factorised at
-        a valid configuration. Converged means the residual is below ``tol`` *or*
+        a valid configuration. The tangent is a modified-Newton one: its
+        factorisation is kept, also across time steps, while it still contracts
+        the residual, because assembling and factorising it is ~90 % of a solve
+        and one time step barely changes it. Converged means the residual is below ``tol`` *or*
         the Newton decrement is below ``min_decrement``, whichever comes first.
 
         :param u: deformation vector; updated in place, must start finite-energy.
@@ -784,24 +795,31 @@ class MechanicSolver:
             return False
 
         self._stiffness.Apply(u, self._residual)
+        fresh = False  # whether `self._inv` was factorised in this iteration
 
         for _ in range(max_newton):
-            if np.linalg.norm(self._residual.FV().NumPy()) <= tol:
+            norm = np.linalg.norm(self._residual.FV().NumPy())
+            if norm <= tol:
                 return True
 
-            # Newton direction d = K(u)^{-1} r; the update is u <- u - alpha*d.
-            self._stiffness.AssembleLinearization(u)
-            try:
-                inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
-            except Exception as e:
-                logger.debug("Mechanics Newton: tangent not invertible (%s).", e)
-                return False
-            self._direction.data = inv * self._residual
+            # Newton direction d = K^{-1} r; the update is u <- u - alpha*d.
+            if self._inv is None:
+                self._stiffness.AssembleLinearization(u)
+                try:
+                    self._inv = self._stiffness.mat.Inverse(self._fes.FreeDofs())
+                except Exception as e:
+                    logger.debug("Mechanics Newton: tangent not invertible (%s).", e)
+                    return False
+                fresh = True
+            self._direction.data = self._inv * self._residual
 
             # r . K^{-1} r > 0 for an SPD tangent; <= 0 is an indefinite Hessian,
             # so the direction is not a descent direction.
             slope = self._residual.InnerProduct(self._direction)
             if slope <= 0:
+                self._inv = None
+                if not fresh:
+                    continue  # the kept tangent's fault: retry with the current one
                 logger.debug("Mechanics Newton: indefinite tangent (decrement %.3g).", slope)
                 return False
 
@@ -825,13 +843,21 @@ class MechanicSolver:
                     break
                 alpha *= 0.5
             if not accepted:
+                self._inv = None
+                if not fresh:
+                    continue  # the kept tangent's fault: retry with the current one
                 logger.debug("Mechanics Newton: line search failed (decrement %.3g, residual %.3g).",
-                             slope, np.linalg.norm(self._residual.FV().NumPy()))
+                             slope, norm)
                 return False
 
             u.data = self._trial
             energy = trial_energy
             self._stiffness.Apply(u, self._residual)
+            # A kept tangent converges only linearly; refactorise once it stops paying off.
+            # ponytail: fixed contraction threshold, tune if refactorisations dominate.
+            if np.linalg.norm(self._residual.FV().NumPy()) > 0.2 * norm:
+                self._inv = None
+            fresh = False
 
         # Exhausted Newton iterations; converged only if the residual is small.
         return np.linalg.norm(self._residual.FV().NumPy()) <= tol
