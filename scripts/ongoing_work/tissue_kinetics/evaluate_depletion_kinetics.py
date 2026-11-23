@@ -35,7 +35,9 @@ replenishment metrics from the minimum onwards:
 The sweep layout is auto-detected: a "parameter" is an immediate child directory
 of the sweep root (excluding processed-data/ and plots/), and every simulation run
 found anywhere beneath it is pooled -- so with more than one swept axis, the outer
-axis is the parameter and the inner ones are pooled into it. Parameters are shown in
+axis is the parameter and the inner ones are pooled into it. ``--aggregate-level N``
+makes the first N directory levels the parameter instead (e.g. 2 for one x-axis item
+per ``ecm_total=.../local_width=...`` pair). Parameters are shown in
 natural (numeric) order; ``--order`` takes a permutation of their positions to override it.
 ``--split-ecs`` keeps the pooling over seeds but draws one box per ECS ratio (the run's
 ``geometry.ecs_ratio``, read from its config, so it works for any directory layout)
@@ -61,7 +63,7 @@ import numpy as np
 import yaml
 from scipy.optimize import curve_fit
 
-from bmbcsim.simulation.result_io import NON_RUN_DIRS, find_run_dirs
+from bmbcsim.simulation.result_io import find_run_dirs
 from analysis import compute_local_ca
 from simulation import Config
 
@@ -75,7 +77,6 @@ def protocol(result_path):
     t0 = float(min(t.to("ms").value for t in cfg.synapse.pulse_times))
     return c0, t0, cfg.geometry.ecs_ratio
 
-_RESERVED_DIRS = NON_RUN_DIRS
 
 # csv/key name -> axis label, in CSV column order
 LABELS = {
@@ -108,28 +109,17 @@ def panels(metric):
 # Sweep / seed discovery
 # ---------------------------------------------------------------------------
 
-def find_seed_dirs(root):
-    """All simulation runs anywhere beneath `root`, at any sweep depth."""
-    return [str(path) for path in find_run_dirs(root)]
-
-
-def discover_parameters(sweep_dir):
+def discover_parameters(sweep_dir, level=1):
     """Return [(param_label, [seed_dir, ...]), ...] for a sweep directory.
 
-    A parameter is an immediate child directory (excluding processed-data/ and
-    plots/) that contains at least one seed directory beneath it.
+    A parameter is the first `level` directory levels below the sweep root (joined
+    with "/"); every run beneath it (processed-data/ and plots/ excluded) is pooled.
     """
-    params = []
-    for name in sorted(os.listdir(sweep_dir)):
-        if name in _RESERVED_DIRS:
-            continue
-        child = os.path.join(sweep_dir, name)
-        if not os.path.isdir(child):
-            continue
-        seeds = find_seed_dirs(child)
-        if seeds:
-            params.append((name, seeds))
-    return params
+    params = {}
+    for run in find_run_dirs(sweep_dir):
+        label = "/".join(run.relative_to(sweep_dir).parts[:level])
+        params.setdefault(label, []).append(str(run))
+    return list(params.items())
 
 
 def _natural_key(label):
@@ -364,13 +354,16 @@ def parse_args():
                         "(the CSV always holds all of them). Default: %(default)s")
     p.add_argument("--split-ecs", action="store_true",
                    help="One box per ECS ratio within each parameter instead of pooling them")
+    p.add_argument("--aggregate-level", type=int, default=1, metavar="N",
+                   help="Directory levels below the sweep root that make up one parameter "
+                        "(x-axis item); everything deeper is pooled. Default: %(default)s")
     return p.parse_args()
 
 
-def run_sweep(sweep_dir, metric, order=None, split_ecs=False):
+def run_sweep(sweep_dir, metric, order=None, split_ecs=False, level=1):
     sweep_dir = os.path.abspath(sweep_dir)
     sweep_name = os.path.basename(sweep_dir.rstrip("/"))
-    params = discover_parameters(sweep_dir)
+    params = discover_parameters(sweep_dir, level)
     if not params:
         print(f"  No parameters with seed results found in {sweep_dir}; skipping.")
         return
@@ -425,7 +418,7 @@ def main():
     args = parse_args()
     for sweep_dir in args.sweeps:
         print(f"==> {sweep_dir}")
-        run_sweep(sweep_dir, args.metric, args.order, args.split_ecs)
+        run_sweep(sweep_dir, args.metric, args.order, args.split_ecs, args.aggregate_level)
 
 
 if __name__ == "__main__":

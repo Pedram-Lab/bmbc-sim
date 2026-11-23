@@ -71,7 +71,8 @@ def find_run_dirs(
         return [root]
 
     runs: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    # followlinks: a sweep may link in runs of another sweep (e.g. a reference case).
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
         dirnames[:] = [d for d in dirnames if d not in exclude]
         if any(marker in filenames for marker in _RUN_MARKERS):
             runs.append(Path(dirpath))
