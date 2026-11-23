@@ -64,12 +64,38 @@ class Uptake(ConfigGroup):
     first_pulse: Quantity("ms") = "1 s"
     n_pulses: int = 20
     frequency: Quantity("Hz") = "20 Hz"
-    # Extrusion back into the bath (ProportionalFlux): linear in the cell Ca from zero up
-    # to extrusion_saturation, constant above. In the linear range, cell Ca decays as
-    # exp(-t / extrusion_time). Not from the tissue kinetics (which has no extrusion);
-    # fit to the decay of the measured traces.
-    extrusion_time: Quantity("ms") = "500 ms"
+    # Extrusion back into the bath (ProportionalFlux): linear in the free cell Ca from
+    # zero up to extrusion_saturation, constant above. Not from the tissue kinetics (which
+    # has no extrusion); fit to the ~500 ms decay of the measured traces.
+    # extrusion_time is the decay time of the *free* Ca without buffer. The buffer holds
+    # ~15000x more Ca than is free, so the cell empties ~15000x slower. On top of that,
+    # the splitting (transport, then buffer reaction) lets a step extrude only the free
+    # Ca at the membrane vertices, which adds ~3.3 * time_step to the effective time
+    # (this mesh). Calibrated together with time_step: total Ca decays with
+    # ~15e3 * (extrusion_time + 3.3 * time_step) = 500 ms at ~1.2 mM total Ca (5 us, 17 us).
+    # Retune when changing time_step, the cell mesh or the buffer.
+    extrusion_time: Quantity("us") = "17 us"
     extrusion_saturation: Quantity("mM") = "2.0 mM"
+
+
+class Buffer(ConfigGroup):
+    """Mobile Ca2+ buffer in the cell: Ca + buffer <-> buffer_complex, Kd = kr / kf.
+
+    Brings the free cell Ca2+ from the mM of the unbuffered cell down to ~100 nM
+    (buffer capacity concentration / kd = 15000). kf is at the diffusion limit so that
+    the buffer binds the influx within one time step (kf * concentration * time_step
+    = 75); at 1e8 the unbound rest is extruded right away and the peak drops by 7 %.
+    """
+
+    concentration: Quantity("mM") = "15 mM"
+    kd: Quantity("uM") = "1 uM"
+    kf: Quantity("1 / (M s)") = "1.0e9 / (M s)"
+    diffusivity: Quantity("um2 / ms") = "0.22 um2 / ms"
+
+    @property
+    def kr(self) -> u.Quantity:
+        """Reverse rate, derived from ``Kd = kr / kf``."""
+        return (self.kf * self.kd).to(1 / u.ms)
 
 
 class Config(SimulationConfig):
@@ -77,11 +103,13 @@ class Config(SimulationConfig):
 
     simulation_name: str = "neuron_bath"
     end_time: Quantity("s") = "4 s"
-    time_step: Quantity("s") = "1 ms"
-    record_interval_factor: int = 10      # 10 ms records
+    time_step: Quantity("s") = "5 us"     # see Uptake.extrusion_time
+    record_interval_factor: int = 2000    # 10 ms records
+    n_threads: int = 1                    # small mesh: more threads are slower
     geometry: Geometry = Geometry()
     diffusion: Diffusion = Diffusion()
     uptake: Uptake = Uptake()
+    buffer: Buffer = Buffer()
 
 
 def create_mesh(geom: Geometry) -> ngs.Mesh:
@@ -101,7 +129,7 @@ def create_mesh(geom: Geometry) -> ngs.Mesh:
 
 def run(cfg: Config) -> None:
     """Run the simulation from a validated config."""
-    geom, diff, upt = cfg.geometry, cfg.diffusion, cfg.uptake
+    geom, diff, upt, buf = cfg.geometry, cfg.diffusion, cfg.uptake, cfg.buffer
     result_dir = bmbcsim.timestamped_directory(cfg.result_root, cfg.run_name)
     dump_resolved(cfg, result_dir)
     print(f"Results and config -> {result_dir}")
@@ -120,6 +148,15 @@ def run(cfg: Config) -> None:
     cell.initialize_species(ca, 0.0 * u.mmol / u.L)
     ecs.add_diffusion(ca, diff.diffusivity_ecs)
     cell.add_diffusion(ca, diff.diffusivity_cyto)
+
+    # --- Mobile buffer in the cell ---
+    zero = 0.0 * u.mmol / u.L
+    buffer, buffer_complex = sim.add_species("buffer"), sim.add_species("buffer_complex")
+    cell.initialize_species(buffer, buf.concentration)
+    cell.initialize_species(buffer_complex, zero)
+    cell.add_diffusion(buffer, buf.diffusivity)
+    cell.add_diffusion(buffer_complex, buf.diffusivity)
+    cell.add_reaction(reactants=[ca, buffer], products=[buffer_complex], k_f=buf.kf, k_r=buf.kr)
 
     # --- Ca2+ uptake, uniform over the membrane: Q = N * I / (2 F)  (factor 2 for Ca2+) ---
     faraday = const.e.si * const.N_A

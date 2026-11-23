@@ -1,6 +1,6 @@
 """Plot the neuron-bath sweep: intracellular Ca2+ over time and its rise against bath Ca2+.
 
-Left: the cell's mean Ca2+ rise, one curve per bath concentration. Right: the peak
+Left: the cell's mean free Ca2+ rise, one curve per bath concentration. Right: the peak
 rise against the bath concentration, next to the "expected" line of an
 uptake proportional to the bath concentration (through the highest bath).
 
@@ -27,13 +27,13 @@ def main():
     args = parser.parse_args()
     sweep_dir = args.path or latest_sweep_dir("results")
 
-    runs = []  # (bath Ca in mM, times in s, cell Ca rise in mM, config)
+    runs = []  # (bath Ca in mM, times in s, free cell Ca rise in nM, config)
     for run in find_run_dirs(sweep_dir):
         cfg = yaml.safe_load((run / "config.yaml").read_text())
         bath = u.Quantity(cfg["diffusion"]["ca_ecs"]).to_value("mM")
         ca = ResultLoader(str(run)).load_concentration("cell", "Ca")
-        runs.append((bath, ca.coords["time"].values / 1e3, ca.values - ca.values[0], cfg))
-        print(f"  {run.name}: bath {bath:g} mM, peak cell Ca rise {runs[-1][2].max():.4g} mM")
+        runs.append((bath, ca.coords["time"].values / 1e3, (ca.values - ca.values[0]) * 1e6, cfg))
+        print(f"  {run.name}: bath {bath:g} mM, peak cell Ca rise {runs[-1][2].max():.4g} nM")
     if not runs:
         raise SystemExit(f"no runs under {sweep_dir}")
     runs.sort(key=lambda r: -r[0])
@@ -49,7 +49,7 @@ def main():
     stop = start + upt["n_pulses"] / u.Quantity(upt["frequency"]).to_value(u.Hz)
     ax_t.axvspan(start, stop, color="0.9", zorder=0, label=f"{upt['n_pulses']} AP")
     ax_t.set_xlabel("Time (s)")
-    ax_t.set_ylabel(r"$\Delta$[Ca$^{2+}$]$_i$, cell mean (mM)")
+    ax_t.set_ylabel(r"$\Delta$[Ca$^{2+}$]$_i$, cell mean (nM)")
     ax_t.legend(title=r"[Ca$^{2+}$]$_e$")
 
     baths = np.array([r[0] for r in runs])
@@ -57,7 +57,7 @@ def main():
     ax_d.plot([0, baths[0]], [0, rises[0]], "k--", label="expected")
     ax_d.plot(baths, rises, "ko-", label="simulated")
     ax_d.set_xlabel(r"[Ca$^{2+}$]$_e$ (mM)")
-    ax_d.set_ylabel(r"$\Delta$[Ca$^{2+}$]$_i$ peak (mM)")
+    ax_d.set_ylabel(r"$\Delta$[Ca$^{2+}$]$_i$ peak (nM)")
     ax_d.set_xlim(0, None)
     ax_d.set_ylim(0, None)
     ax_d.legend()
